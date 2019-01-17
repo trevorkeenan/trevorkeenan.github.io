@@ -7,12 +7,12 @@
 		
 <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
 		
-		<title>publications | Prof David Kipping</title>
+		<title>publications | Prof Trevor Keenan</title>
 		<link rel="stylesheet" type="text/css" media="screen" href="stylesheets/styles.css" />
 		<link rel="stylesheet" type="text/css" media="print" href="stylesheets/print.css" />
 		<link rel="stylesheet" type="text/css" media="handheld" href="stylesheets/mobile.css" />
 		<link rel="stylesheet" type="text/css" media="all" href="stylesheets/colourtag-page3.css" />
-		<script type="text/javascript" src="http://ajax.googleapis.com/ajax/libs/jquery/1.7/jquery.min.js"></script> <!-- Load jQuery 1.7 here, for theme options that may need it. -->
+		<script type="text/javascript" src="https://ajax.googleapis.com/ajax/libs/jquery/1.7/jquery.min.js"></script> <!-- Load jQuery 1.7 here, for theme options that may need it. -->
 		<script charset="utf-8">RwSet = { pathto: "stylesheets/javascript.js", baseurl: "https://trevorkeenan.github.io/" };</script>
 		<script type="text/javascript" src="stylesheets/nimblehost.js"></script>
 		<script type="text/javascript" src="stylesheets/javascript.js"></script> <!-- RapidWeaver javascript functions -->
@@ -27,6 +27,8 @@
 		<script type="text/javascript" src="stylesheets/jquery.cycle.min.js"></script>
 		
 		<link rel="stylesheet" type="text/css" media="all" href="stylesheets/iPhone.css" />
+		
+		
 		<!-- User defined styles -->
 		
 		<!-- User defined javascript -->
@@ -394,13 +396,20 @@ Pastorello G, Gunter D, Chu H, Christianson D, Trotta C, Canfora E, Faybishenko 
 	</div><!-- End container -->
 	</body>
 	<script>
-		$qube(function(){ $qube('#mobileMenuTab').html(mobileMenuTab); });
-		if ( $qube('#mobileMenuTabWrapper').is(':visible') ) { qube.themeFunctions.mobileMenu(); qube.themeFunctions.resetMainMenuColors(); }
-		qube.themeFunctions.on_resize(function(){ 
-			if( $qube(window).width() < 481 && !$qube('#mobileMenuTab').hasClass('activated') ) { qube.themeFunctions.mobileMenu(); }
-			qube.themeFunctions.resetMainMenuColors();
-		});
-	</script>
+
+$qube(function(){ $qube('#mobileMenuTab').html(mobileMenuTab); });
+
+if ( $qube('#mobileMenuTabWrapper').is(':visible') ) { qube.themeFunctions.mobileMenu(); qube.themeFunctions.resetMainMenuColors(); }
+
+qube.themeFunctions.on_resize(function(){ 
+
+if( $qube(window).width() < 481 && !$qube('#mobileMenuTab').hasClass('activated') ) { qube.themeFunctions.mobileMenu(); }
+
+qube.themeFunctions.resetMainMenuColors();
+
+});
+
+</script>
 	<!--[if lte IE 8]>
 	<style type="text/css"> .headerImage, #contentWrapper, #breadcrumbContainer ul, #extraContainer4, #extraContainer5, #extraContainer6, blockquote, .standout { position: relative; behavior: url(rw_common/themes/Qube/scripts/PIE.htc); } </style>
 	<![endif]-->
