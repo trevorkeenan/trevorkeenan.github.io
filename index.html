@@ -72,6 +72,50 @@
 
 <!-- User defined header -->
 
+<style>
+.dropdown {
+  float: left;
+  overflow: hidden;
+}
+
+.dropdown .dropbtn {
+  font-size: 16px;  
+  border: none;
+  outline: none;
+  color: white;
+  padding: 14px 16px;
+  background-color: inherit;
+  font-family: inherit;
+  margin: 0;
+}
+
+.dropdown-content {
+  display: none;
+  position: absolute;
+  background-color: #f9f9f9;
+  min-width: 160px;
+  box-shadow: 0px 8px 16px 0px rgba(0,0,0,0.2);
+  z-index: 1;
+}
+
+.dropdown-content a {
+  float: none;
+  color: black;
+  padding: 12px 16px;
+  text-decoration: none;
+  display: block;
+  text-align: left;
+}
+
+.dropdown-content a:hover {
+  background-color: #ddd;
+}
+
+.dropdown:hover .dropdown-content {
+  display: block;
+}
+</style>
+
 <!-- Start Google Analytics -->
 
 <!-- Global site tag (gtag.js) - Google Analytics -->
@@ -169,6 +213,17 @@
 				<li><a href="https://www.keenangroup.info/research.html">Ecophysiological Traits</a></li>
 				<li><a href="https://www.keenangroup.info/research.html">Dynamic vegetation</a></li>
 			</ul>
+		<li><a href="#">research2</a></li>
+		<div class="dropdown">
+    		<button class="dropbtn">Dropdown 
+      			<i class="fa fa-caret-down"></i>
+    		</button>
+    		<div class="dropdown-content">
+      			<a href="#">Link 1</a>
+      			<a href="#">Link 2</a>
+      			<a href="#">Link 3</a>
+    		</div>
+  		</div> 
 		<li><a href="members.html" rel="">members</a></li>
 		<li><a href="publications.html" rel="">publications</a></li>
 	<!-- <li><a href="teaching.html" rel="">teaching</a></li> -->
