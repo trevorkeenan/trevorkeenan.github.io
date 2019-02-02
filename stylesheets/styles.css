@@ -108,8 +108,7 @@ h1, h2, h3, h4, h5, h6 {margin: 0;padding: 0;line-height: 1.3em;padding-bottom: 
 #menu ul ul a:hover {text-shadow: none !important;}
 
 #menu ul ul li.ddarrow a {padding-right:3px;}
-#menu ul ul li.ddarrow span {position:absolute;top:0;right:0;float:right;height:1.7em;border-right: 3px solid black;}
-
+#menu ul ul li.ddarrow span {position:absolute;top:0;right:0;float:right;height:1.7em;}
 /* Second Level and Beyond */
 #menu ul ul ul {top: -7px;margin: 0;padding: 7px 0;}
 #menu ul li ul ul {left: 11em;}
