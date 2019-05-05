@@ -121,7 +121,7 @@
 					
 					</li>
 				</ul></div>
-				<div class="clearer"></div>
+								<div class="clearer"></div>
 			</div>
 			<div class="clearer"></div>
 			<div class="headerImage lowerHeader">
@@ -132,45 +132,128 @@
 			<div class="clearer"></div>
 			<div id="extraContainer4"></div>
 			<div class="clearer"></div>
-			
 			<div id="contentWrapper"><!-- Start main content wrapper -->
-				<div id="content"><!-- Start content -->
-					
-		
-					<div class="container">
-						<br/>		
+			<div id="content"><!-- Start content -->
 				
-						<div class="row">
-							<h4><a id="members">Group Members</h4></a>
-						<br />
-						</div>
-					
-						<br />
-		
-					</div>
-		
 				
-					<div class="row">
-						<div class="col-md-8 col-md-offset-1">
-						<br/>
-						<br/>
-						</div>
-					</div>
-					<div class="row">
+				
+				
+<div class="container">
+		<br/>	
+	
+	
+		<div class="row">
+			<h4><a id="GroupMembers">Group Members</h4></a>
+			<br />
+		</div>
+			<br/>
+	
+		<div class="row">
+			<div class="col-md-11">
+				<p>testing
+				</p>
+			 </div>
+		</div>
+		
+</div>
 
 
-					</div>
-       			</div>
-       
-    		</div>
-<!-- ></article> -->
-		</div> <!-- main wrapper -->
-	</div> <!-- end container -->
-</body>
 
+
+
+
+
+
+				
+				
+					
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+					
+					<div class="clearer"></div>
+				</div><!-- End content -->
+				<div id="contentSidebar"></div><!-- Reserved space for placing sidebar inside main content area -->
+				<div class="clearer"></div>
+			</div><!-- End main content wrapper -->
+			
+			<div class="clearer"></div>
+			<div id="extraContainer5"></div>
+			<div class="clearer"></div>
+			<div id="extraContainer6"></div>
+			<div class="clearer"></div>
+		</div>
+		<div class="clearer"></div>
+		<div id="breadcrumbWrapper">
+			<div id="breadcrumbContainer"><!-- Start the breadcrumb wrapper -->
+				
+			</div><!-- End breadcrumb -->
+			<div class="clearer"></div>
+		</div>
+		<div class="clearer"></div>
+		<div id="EC7TopShadow"></div>
+		<div class="clearer"></div>
+		<div id="EC7Wrapper">
+			<div id="extraContainer7"></div>
+		</div>
+		<div class="clearer"></div>
+		<div id="EC7BottomShadow"></div>
+		<div class="clearer"></div>
+		<div id="footerSpacer"></div>
+		<div class="clearer"></div>
+		<div id="footerWrapper">
+			<div id="footerTopShadow"></div>
+			<div id="footer"><!-- Start Footer -->
+			      <a rel="license" 
+			         property="https://creativecommons.org/ns#license" 
+         			href="https://creativecommons.org/publicdomain/zero/1.0/"><img src="./images/cc-zero.svg" alt="CC0"/></a> 
+
+			</div><!-- End Footer -->
+			<div id="footerBottomShadow"></div>
+		</div>
+	</div><!-- End container -->
+	</body>
+	<script>
+
+$qube(function(){ $qube('#mobileMenuTab').html(mobileMenuTab); });
+
+if ( $qube('#mobileMenuTabWrapper').is(':visible') ) { qube.themeFunctions.mobileMenu(); qube.themeFunctions.resetMainMenuColors(); }
+
+qube.themeFunctions.on_resize(function(){ 
+
+if( $qube(window).width() < 481 && !$qube('#mobileMenuTab').hasClass('activated') ) { qube.themeFunctions.mobileMenu(); }
+
+qube.themeFunctions.resetMainMenuColors();
+
+});
+
+</script>
+	<!--[if lte IE 8]>
+	<style type="text/css"> .headerImage, #contentWrapper, #breadcrumbContainer ul, #extraContainer4, #extraContainer5, #extraContainer6, blockquote, .standout { position: relative; behavior: url(rw_common/themes/Qube/scripts/PIE.htc); } </style>
+	<![endif]-->
 </html>
-
-
 
 
 
