@@ -27,7 +27,7 @@ h1, h2, h3, h4, h5, h6 {margin: 0;padding: 0;line-height: 1.3em;padding-bottom: 
 
 #logoTitle {}
 #logo, #titleSlogan {float: right;}
-#titleSlogan {margin: 0;padding: 5px 0;text-transform: none;}
+#titleSlogan {margin: 0;padding: 5px 0;}
 #title h1 {color: white;font-size: 1.5em;font-weight: normal;line-height: normal;padding-bottom: 0;letter-spacing: 2px;}
 #slogan h2 {color: #777;font-size: 0.8em;font-weight: normal;line-height: normal;padding-top: 3px;padding-bottom: 0;text-transform: uppercase;}
 
