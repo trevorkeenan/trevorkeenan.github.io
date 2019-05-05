@@ -1,4 +1,4 @@
-body {background-color: #847777;}
+body {background-color: #515151;}
 
 #title h1 {color: #FFFFFF;}
 #slogan h2 {color: #777777;}
@@ -43,7 +43,7 @@ body {background-color: #847777;}
 #bcNav span {color: #FFFFFF;background-color: #555555;border-top: 1px solid #111111;border-bottom: 1px solid #AAAAAA;}
 
 #footer {color: #666666;background-color: #888888;text-shadow: 0 1px 0 #D4D4D4;}
-#footer a {color: #847777;text-shadow: 0 1px 0 #D4D4D4;}
+#footer a {color: #515151;text-shadow: 0 1px 0 #D4D4D4;}
 #footer a:hover {color: #000000;text-shadow: 0 1px 0 #D4D4D4;}
 
 #EC1Wrapper {background-color: #D4D4D4;}
