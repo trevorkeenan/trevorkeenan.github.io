@@ -30,6 +30,23 @@
 #mobileMenuTabWrapper {display: block;margin: 0;padding: 0;}
 #mobileMenuTab {padding: 3px 5px;float: left;position: relative;z-index: 300;-webkit-border-radius: 2px;-moz-border-radius: 2px;border-radius: 2px;-webkit-box-shadow: 0 0 3px black;-moz-box-shadow: 0 0 3px black;box-shadow: 0 0 3px black;font-size: 0.85em;background-image: url(../images/breadcrumbBackground.png);background-position: center center;background-repeat: repeat-x;}
 
+
+.responsive-img {
+    width: 100%;
+    height: auto;
+    object-fit: cover;
+    object-position: center;
+}
+
+@media (max-width: 768px) {
+    .responsive-img {
+        width: 100%;
+        height: auto;
+        object-fit: cover;
+        object-position: center;
+    }
+}
+
 /* Main Menu Items */
 #menu ul {position: relative;height: auto;z-index: 100;padding-top: 3px;padding-right: 3px;-webkit-box-shadow: 0 0 3px black;-moz-box-shadow: 0 0 3px black;box-shadow: 0 0 3px black;}
 #menu ul a {display: block;margin: 0;padding: 0 10px;}
