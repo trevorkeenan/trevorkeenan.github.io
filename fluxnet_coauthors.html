@@ -97,12 +97,12 @@
     // Option A (recommended): Google Apps Script JSON endpoint that serves the site roster
     // GET  { url: SITE_ENDPOINT + '?route=sites' } -> returns { sites: [{id,name,maxAuthors}, ...] }
     // POST { url: SUBMISSION_ENDPOINT, body: JSON of rows } -> appends to Master sheet
-    const SITE_ENDPOINT = "https://script.google.com/macros/s/AKfycbyOnFdVUnwxb4HZ8lQeggXDcxqDSCgaiVT3ivtGpDmrjp-5bKEsEqiWrD6lQDs5-n0A/exec"; // e.g., "https://script.google.com/macros/s/AKfycb.../exec"
+    const SITE_ENDPOINT = "" // "https://script.google.com/macros/s/AKfycbyOnFdVUnwxb4HZ8lQeggXDcxqDSCgaiVT3ivtGpDmrjp-5bKEsEqiWrD6lQDs5-n0A/exec"; // e.g., "https://script.google.com/macros/s/AKfycb.../exec"
     const SUBMISSION_ENDPOINT = "https://script.google.com/macros/s/AKfycbyOnFdVUnwxb4HZ8lQeggXDcxqDSCgaiVT3ivtGpDmrjp-5bKEsEqiWrD6lQDs5-n0A/exec"; // same as above (the web app URL)
 
     // Option B: A published CSV URL for sites (must have headers id,name,maxAuthors)
     // e.g., File > Share > Publish to web on a Google Sheet tab, choose CSV
-    const SITE_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRiNUynasbp4YCkNXqF6Pwk1i88SkpQl62w-jPQdnvMD-qzyEuvBq4su66ndbgpOnyeMJhubwamset2/pub?output=csv"; 
+    const SITE_CSV_URL = "https://docs.google.com/spreadsheets/d/1ex_aZ13ssf3U4N99jZz2JUCMPc4q6WILj8CLZYZtBtc"; 
     // e.g., "https://docs.google.com/spreadsheets/d/.../pub?gid=0&single=true&output=csv"
 
     // Optional: coordinator email to include in CSV/JSON exports
