@@ -5,255 +5,141 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>FLUXNET Author Intake</title>
   <style>
-    :root { --bg:#0b1020; --card:#121a33; --muted:#8ba3c7; --text:#eaf2ff; --accent:#69d1ff; --danger:#ff6b6b; --ok:#52d1a5; --warning:#ffcc66; --border:#263255; }
-    html, body { height:100%; }
-    body { margin:0; font-family:system-ui,-apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; background:radial-gradient(1200px 800px at 20% -10%, #1b2a55 0%, #0b1020 45%, #060913 100%) fixed; color:var(--text); }
-    .wrap { max-width:1000px; margin:0 auto; padding:24px; }
-    header { display:grid; gap:6px; margin-bottom:18px; }
-    h1 { margin:0; font-size:clamp(20px,4vw,32px); letter-spacing:.2px; }
-    p.lead { color:var(--muted); margin:0; }
-    .card { background:linear-gradient(180deg,#101833 0%, rgba(16,24,51,.7) 100%); border:1px solid var(--border); border-radius:16px; padding:16px; box-shadow:0 10px 20px rgba(0,0,0,.25); }
-    .row { display:grid; grid-template-columns:1fr; gap:12px; }
-    @media (min-width:720px){ .row.two { grid-template-columns:1fr 1fr; } }
-    label { display:block; font-weight:600; margin-bottom:6px; }
-    .muted { color:var(--muted); font-size:.95rem; }
-    select, input, button, textarea { background:#0e1530; color:var(--text); border:1px solid var(--border); border-radius:12px; padding:10px 12px; font:inherit; width:100%; box-sizing:border-box; outline:none; transition:border-color .15s ease, box-shadow .15s ease; }
-    select:focus, input:focus, textarea:focus { border-color:var(--accent); box-shadow:0 0 0 3px rgba(105,209,255,.25); }
-    .controls { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
-    .controls .spacer { flex:1; }
-    .btn { cursor:pointer; border-radius:12px; padding:10px 14px; border:1px solid var(--border); background:#0f1a3b; }
-    .btn.primary { background:linear-gradient(180deg,#1a84ff,#1768f3); border:none; color:#fff; font-weight:700; }
-    .btn.ghost { background:transparent; }
-    .btn:disabled { opacity:.6; cursor:not-allowed; }
-    .author-grid { display:grid; gap:12px; grid-template-columns:1fr; }
-    @media (min-width:760px){ .author-grid { grid-template-columns:1fr 1fr; } }
-    .author { background:#0c1533; border:1px solid var(--border); border-radius:14px; padding:12px; position:relative; }
-    .author h3 { margin:0 0 8px 0; font-size:1.05rem; }
-    .pill { display:inline-flex; align-items:center; gap:6px; padding:3px 8px; border-radius:999px; font-size:12px; border:1px solid var(--border); color:var(--muted); }
-    .pill.ok { color:#0f3; border-color:#0f3; }
-    .pill.bad { color:var(--danger); border-color:var(--danger); }
-    .field { margin-bottom:10px; }
-    .msg { border-left:3px solid var(--border); padding:8px 12px; background:#0d1631; border-radius:6px; color:var(--muted); white-space:pre-wrap; }
-    .msg.warn { border-color:var(--warning); color:#fadb8b; background:#2b2200; }
-    .msg.err { border-color:var(--danger); color:#ffd7d7; background:#3b0f0f; }
-    .hidden { display:none !important; }
-    footer { margin-top:24px; color:var(--muted); font-size:.9rem; }
-    a { color:var(--accent); }
+    body { font-family: system-ui, sans-serif; margin: 2rem; }
+    select, input, button { padding: 0.4rem; margin-top: 0.3rem; }
+    /* Status styles for friendly messages */
+    #status { margin-top: 1rem; padding: .75rem; border-radius: .5rem; }
+    #status.ok { background: #f0fff6; color: #075e39; border: 1px solid #9ae6b4; }
+    #status.err { background: #fff5f5; color: #9b2c2c; border: 1px solid #feb2b2; white-space: pre-wrap; }
   </style>
 </head>
 <body>
-  <div class="wrap">
-    <header>
-      <h1>FLUXNET Author Intake</h1>
-      <p class="lead">Enter author details for your site. Fields: Full name, Affiliation, Email, <strong>ORCID iD</strong>.</p>
-    </header>
+  <h1>FLUXNET Author Intake</h1>
 
-    <section class="card" aria-labelledby="siteSel">
-      <div class="row two">
-        <div>
-          <label id="siteSel" for="siteSelect">Select your site</label>
-          <select id="siteSelect" required></select>
-          <p class="muted" id="siteInfo"></p>
-        </div>
-        <div>
-          <label for="authorCount">Authors you will enter</label>
-          <div class="controls">
-            <button class="btn" id="dec" type="button" aria-label="decrease authors">−</button>
-            <input id="authorCount" type="number" min="1" step="1" value="1" />
-            <button class="btn" id="inc" type="button" aria-label="increase authors">+</button>
-            <span class="spacer"></span>
-            <span class="pill" id="quota"></span>
-          </div>
-        </div>
-      </div>
-      <div class="msg warn hidden" id="lockMsg">
-        This link preselected your site and locked the dropdown. If this is not your site, contact the coordinator.
-      </div>
-    </section>
-
-    <section class="card" style="margin-top:12px">
-      <div class="controls" style="margin-bottom:10px">
-        <button class="btn" id="validateBtn" type="button">Validate entries</button>
-        <button class="btn" id="exportCsvBtn" type="button">Download CSV</button>
-        <button class="btn" id="copyJsonBtn" type="button">Copy JSON</button>
-        <span class="spacer"></span>
-        <button class="btn primary" id="submitBtn" type="button">Submit to Master Sheet</button>
-        <button class="btn ghost" id="saveBtn" type="button">Save progress</button>
-        <button class="btn ghost" id="clearBtn" type="button">Clear saved</button>
-      </div>
-      <div id="validationSummary" class="msg hidden" role="status" aria-live="polite"></div>
-      <div id="authors" class="author-grid"></div>
-    </section>
-
-    <footer>
-      <p><strong>Notes</strong>: Email uses HTML5 validation. ORCID iD validation uses ISO 7064 (MOD 11-2). Inputs are stored locally until you export or submit.</p>
-    </footer>
-  </div>
+  <label for="siteSelect">Select your site</label>
+  <select id="siteSelect" required></select>
+  <p id="siteInfo"></p>
+  <div id="status" hidden></div>
 
   <script>
-    /***********************************
-     * CONFIGURE REMOTE INTEGRATIONS   *
-     ***********************************/
-    // Option A (recommended): Google Apps Script JSON endpoint that serves the site roster
-    // GET  { url: SITE_ENDPOINT + '?route=sites' } -> returns { sites: [{id,name,maxAuthors}, ...] }
-    // POST { url: SUBMISSION_ENDPOINT, body: JSON of rows } -> appends to Master sheet
-    const SITE_ENDPOINT = "https://script.google.com/macros/s/AKfycbwHIgaLXk5IJVXz7NCCp6uYzWfjlkXhzPTOTBtq5lAip2BNUJZibF3PYL82GppA3-3o/exec"; // "https://script.google.com/macros/s/AKfycbyOnFdVUnwxb4HZ8lQeggXDcxqDSCgaiVT3ivtGpDmrjp-5bKEsEqiWrD6lQDs5-n0A/exec"; // e.g., "https://script.google.com/macros/s/AKfycb.../exec"
-    const SUBMISSION_ENDPOINT = "https://script.google.com/macros/s/AKfycbwHIgaLXk5IJVXz7NCCp6uYzWfjlkXhzPTOTBtq5lAip2BNUJZibF3PYL82GppA3-3o/exec"; //"https://script.google.com/macros/s/AKfycbyOnFdVUnwxb4HZ8lQeggXDcxqDSCgaiVT3ivtGpDmrjp-5bKEsEqiWrD6lQDs5-n0A/exec"; // same as above (the web app URL)
+    // For GitHub Pages/local testing: include a local CSV file in your repo as sites.csv
+    // Ensure headers: id,name,maxAuthors
+    const SITE_CSV_URL = "./sites.csv";
 
-    // Option B: A published CSV URL for sites (must have headers id,name,maxAuthors)
-    // e.g., File > Share > Publish to web on a Google Sheet tab, choose CSV
-    const SITE_CSV_URL = ""; // "https://docs.google.com/spreadsheets/d/1ex_aZ13ssf3U4N99jZz2JUCMPc4q6WILj8CLZYZtBtc/export?format=csv&gid=1563385702"; 
-    // e.g., "https://docs.google.com/spreadsheets/d/.../pub?gid=0&single=true&output=csv"
-
-    // Optional: coordinator email to include in CSV/JSON exports
-    const COORDINATOR_EMAIL = "";
-
-    /***********************************
-     * FALLBACK LOCAL SITE LIST        *
-     ***********************************/
-    let SITE_CONFIG = [
-      { id: "SITE-EXAMPLE-1", name: "Example Site A", maxAuthors: 4 },
-      { id: "SITE-EXAMPLE-2", name: "Example Site B", maxAuthors: 6 },
-    ];
-
-    /***********************************
-     * UTILS                           *
-     ***********************************/
-    const $ = (sel, parent=document) => parent.querySelector(sel);
-    const $$ = (sel, parent=document) => Array.from(parent.querySelectorAll(sel));
-
-    function params(){ return Object.fromEntries(new URLSearchParams(location.search).entries()); }
-
-    function sanitizeOrcidInput(value){
-      if(!value) return "";
-      const v = value.trim().replace(/^https?:\/\/orcid\.org\//i, "").replace(/[^0-9xX]/g, "").toUpperCase();
-      if(/^[0-9]{15}[0-9X]$/.test(v)) return v.match(/.{1,4}/g).join("-");
-      return value.trim();
+    // Helpers for header normalization and UI status
+    const norm = (s) => (s||"").toString().trim().toLowerCase().replace(/[\s_-]+/g, "");
+    function showStatus(msg, ok=true){
+      const el = document.getElementById('status');
+      if(!el) return;
+      el.className = ok ? 'ok' : 'err';
+      el.textContent = msg;
+      el.hidden = false;
     }
-    function isValidOrcid(orcidInput){
-      if(!orcidInput) return false;
-      const normalized = orcidInput.trim().replace(/^https?:\/\/orcid\.org\//i, "").replace(/-/g, "").toUpperCase();
-      if(!/^[0-9]{15}[0-9X]$/.test(normalized)) return false;
-      let total = 0; for(let i=0;i<15;i++){ total = (total + parseInt(normalized.charAt(i),10))*2; }
-      const remainder = total % 11; const result = (12 - remainder) % 11; const check = result===10? 'X': String(result);
-      return check === normalized.charAt(15);
-    }
-    function validateEmail(input){ return input && input.checkValidity(); }
-    function setStatus(el, ok, msg=""){ el.dataset.valid = ok?"true":"false"; const pill = $(".pill", el) || document.createElement("span"); pill.className = "pill" + (ok? " ok":" bad"); pill.textContent = ok? "Looks good" : (msg||"Needs attention"); if(!pill.parentNode){ el.prepend(pill); } }
-    function saveToLocal(siteId, payload){ try{ localStorage.setItem(`fn_authors_${siteId}`, JSON.stringify(payload)); }catch(e){} }
-    function loadFromLocal(siteId){ try{ const raw = localStorage.getItem(`fn_authors_${siteId}`); return raw? JSON.parse(raw): null; }catch(e){ return null; } }
-    function clearLocal(siteId){ try{ localStorage.removeItem(`fn_authors_${siteId}`); }catch(e){} }
-    function toCSV(headers, rows){ const esc=v=>{ if(v==null) return ""; const s=String(v).replace(/?
-|/g," "); return /[",
-]/.test(s)? '"'+s.replace(/"/g,'""')+'"': s; }; return [headers.map(esc).join(","), ...rows.map(r=>r.map(esc).join(","))].join("
-"); }
-    function download(filename, text){ const blob=new Blob([text],{type:"text/plain;charset=utf-8"}); const url=URL.createObjectURL(blob); const a=document.createElement("a"); a.href=url; a.download=filename; a.style.display="none"; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url); }
 
-    // Lightweight CSV parser (handles commas in quotes)
+    // Clean CSV parser (handles quotes, commas, newlines)
     function parseCSV(text){
-      const rows=[]; let cur=[]; let field=''; let inQ=false; for(let i=0;i<text.length;i++){
+      const rows=[]; let cur=[]; let field=''; let inQ=false;
+      for(let i=0;i<text.length;i++){
         const c=text[i]; const n=text[i+1];
-        if(inQ){ if(c==='"'){ if(n==='"'){ field+='"'; i++; } else { inQ=false; } } else { field+=c; } }
-        else { if(c==='"'){ inQ=true; } else if(c===','){ cur.push(field); field=''; } else if(c==='
-'){ cur.push(field); rows.push(cur); cur=[]; field=''; } else if(c===''){ /* skip */ } else { field+=c; } }
+        if(inQ){
+          if(c==='"'){
+            if(n==='"'){ field+='"'; i++; } else { inQ=false; }
+          } else { field+=c; }
+        } else {
+          if(c==='"'){ inQ=true; }
+          else if(c===','){ cur.push(field); field=''; }
+          else if(c==='\n'){ cur.push(field); rows.push(cur); cur=[]; field=''; }
+          else if(c==='\r'){ /* skip */ }
+          else { field+=c; }
+        }
       }
-      if(field.length || cur.length) { cur.push(field); rows.push(cur); }
+      if(field.length || cur.length){ cur.push(field); rows.push(cur); }
       return rows;
     }
 
-    /***********************************
-     * APP STATE                       *
-     ***********************************/
-    const state = { siteId:null, maxAuthors:1, count:1 };
-
-    function populateSites(){
-      const sel = $("#siteSelect"); sel.innerHTML="";
-      const def = document.createElement("option"); def.value=""; def.textContent="— Select site —"; def.disabled=true; def.selected=true; sel.appendChild(def);
-      SITE_CONFIG.forEach(s=>{ const opt=document.createElement("option"); opt.value=s.id; opt.textContent=`${s.id} — ${s.name}`; sel.appendChild(opt); });
-    }
-    function findSite(id){ return SITE_CONFIG.find(s=>s.id===id) || null; }
-    function updateQuotaPill(){ const quota=$("#quota"); quota.textContent=`${state.count} of max ${state.maxAuthors}`; quota.className = "pill" + (state.count>state.maxAuthors? " bad":" ok"); }
-    function renderAuthors(){ const grid=$("#authors"); grid.innerHTML=""; for(let i=0;i<state.count;i++){ const card=document.createElement("div"); card.className="author"; card.innerHTML=`
-          <h3>Author ${i+1}</h3>
-          <div class="field">
-            <label for="name_${i}">Full name</label>
-            <input required id="name_${i}" name="name_${i}" placeholder="e.g., Jane Q. Researcher" />
-          </div>
-          <div class="field">
-            <label for="aff_${i}">Affiliation</label>
-            <input required id="aff_${i}" name="aff_${i}" placeholder="Institution / Organization" />
-          </div>
-          <div class="field">
-            <label for="email_${i}">Email</label>
-            <input required id="email_${i}" name="email_${i}" type="email" placeholder="name@example.org" />
-          </div>
-          <div class="field">
-            <label for="orcid_${i}">ORCID iD</label>
-            <input required id="orcid_${i}" name="orcid_${i}" inputmode="numeric" placeholder="0000-0000-0000-0000 or https://orcid.org/…" />
-            <p class="muted">Paste with or without hyphens or full URL—we'll format & validate it.</p>
-          </div>`; grid.appendChild(card);} updateQuotaPill(); }
-
-    function onSiteChange(){ const sel=$("#siteSelect"); const id=sel.value; const site=findSite(id); if(!site) return; state.siteId=site.id; state.maxAuthors=Math.max(1, site.maxAuthors|0); state.count=state.maxAuthors; $("#authorCount").value=state.count; $("#siteInfo").textContent=`${site.name}. Maximum authors allowed: ${site.maxAuthors}.`;
-      const saved=loadFromLocal(site.id); renderAuthors(); if(saved && Array.isArray(saved.authors)){ state.count=Math.max(1, Math.min(saved.authors.length, state.maxAuthors)); $("#authorCount").value=state.count; renderAuthors(); saved.authors.slice(0,state.count).forEach((a,idx)=>{ $(`#name_${idx}`).value=a.name||""; $(`#aff_${idx}`).value=a.affiliation||""; $(`#email_${idx}`).value=a.email||""; $(`#orcid_${idx}`).value=a.orcid||""; }); } updateQuotaPill(); }
-
-    function adjustCount(delta){ if(!state.siteId) return; const next=Math.max(1, state.count+delta); state.count=Math.min(next, Math.max(state.maxAuthors, next)); $("#authorCount").value=state.count; renderAuthors(); }
-
-    function collectAuthors(){ const authors=[]; for(let i=0;i<state.count;i++){ const entry={ name:$(`#name_${i}`)?.value?.trim()||"", affiliation:$(`#aff_${i}`)?.value?.trim()||"", email:$(`#email_${i}`)?.value?.trim()||"", orcid:sanitizeOrcidInput($(`#orcid_${i}`)?.value||"") }; authors.push(entry); } return authors; }
-
-    function validateAll(){ const authors=collectAuthors(); let ok=true; const problems=[]; authors.forEach((a,idx)=>{ const card=$$(".author")[idx]; let rowOk=true; if(!a.name){ rowOk=false; problems.push(`Author ${idx+1}: missing name`);} if(!a.affiliation){ rowOk=false; problems.push(`Author ${idx+1}: missing affiliation`);} const emailInput=$(`#email_${idx}`); if(!a.email || !validateEmail(emailInput)){ rowOk=false; problems.push(`Author ${idx+1}: invalid email`);} const orcidOk=isValidOrcid(a.orcid); if(!orcidOk){ rowOk=false; problems.push(`Author ${idx+1}: invalid ORCID iD`);} setStatus(card, rowOk, rowOk?"":"Check fields"); ok=ok && rowOk; if(a.orcid && orcidOk){ $(`#orcid_${idx}`).value = sanitizeOrcidInput(a.orcid); } });
-      const emails=new Map(); const orcids=new Map(); authors.forEach((a,i)=>{ if(a.email){ const k=a.email.toLowerCase(); if(emails.has(k)){ ok=false; problems.push(`Duplicate email: ${a.email} (rows ${emails.get(k)+1} & ${i+1})`);} else emails.set(k,i);} if(a.orcid){ const k=a.orcid.toUpperCase(); if(orcids.has(k)){ ok=false; problems.push(`Duplicate ORCID iD: ${a.orcid} (rows ${orcids.get(k)+1} & ${i+1})`);} else orcids.set(k,i);} });
-      if(state.count>state.maxAuthors){ ok=false; problems.push(`You have ${state.count} authors but the limit is ${state.maxAuthors}.`);} const box=$("#validationSummary"); box.classList.remove("hidden","err"); if(ok){ box.textContent="All entries look valid."; } else { box.textContent = "Please resolve the following:
-
-- "+problems.join("
-- "); box.classList.add("err"); } return { ok, authors}; }
-
-    function exportCSV(){ const {ok,authors}=validateAll(); if(!ok){ alert("Validation failed. Please fix issues before exporting."); return;} const site=findSite(state.siteId); const headers=["site_id","site_name","author_index","full_name","affiliation","email","orcid_id","timestamp_iso","coordinator_email"]; const now=new Date().toISOString(); const rows=authors.map((a,idx)=>[site.id, site.name, idx+1, a.name, a.affiliation, a.email, sanitizeOrcidInput(a.orcid), now, COORDINATOR_EMAIL]); const csv=toCSV(headers, rows); const file=`fluxnet_authors_${site.id}_${now.replace(/[:.]/g,"-")}.csv`; download(file, csv); }
-
-    function copyJSON(){ const {ok,authors}=validateAll(); if(!ok){ alert("Validation failed. Please fix issues before copying."); return;} const site=findSite(state.siteId); const payload={ site_id:site.id, site_name:site.name, count:authors.length, authors, exported_at:new Date().toISOString() }; const txt=JSON.stringify(payload,null,2); navigator.clipboard.writeText(txt).then(()=>{ const box=$("#validationSummary"); box.classList.remove("hidden","err"); box.textContent="JSON copied to clipboard."; }).catch(()=> alert("Copy failed. You can select and copy manually.")); }
-
-    async function submitToMaster(){
-      if(!SUBMISSION_ENDPOINT){ alert("Submission endpoint is not configured."); return; }
-      const { ok, authors } = validateAll(); if(!ok){ alert("Please fix validation errors before submitting."); return; }
-      const site = findSite(state.siteId); const now=new Date().toISOString();
-      const rows = authors.map((a,idx)=>({ site_id:site.id, site_name:site.name, author_index:idx+1, full_name:a.name, affiliation:a.affiliation, email:a.email, orcid_id:sanitizeOrcidInput(a.orcid), timestamp_iso:now, coordinator_email:COORDINATOR_EMAIL }));
-      const body = { route: 'submit', rows };
-      const box=$("#validationSummary"); box.classList.remove("hidden","err"); box.textContent = "Submitting…";
+    async function loadSitesFromCSV(){
       try{
-        const res = await fetch(SUBMISSION_ENDPOINT, { method:'POST', mode:'cors', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify(body) });
-        const data = await res.json();
-        if(!res.ok || data.status !== 'ok'){ throw new Error(data.message || 'Submission failed'); }
-        box.textContent = `Submitted ${rows.length} author(s) for ${site.id}. Thank you!`;
-        saveToLocal(site.id, { authors:[], saved_at:new Date().toISOString() });
-      } catch(err){ box.classList.add('err'); box.textContent = `Error submitting: ${err.message}`; }
+        const url = SITE_CSV_URL + (SITE_CSV_URL.includes('?') ? '&' : '?') + '_=' + Date.now(); // cache-buster
+        const res = await fetch(url, { cache: 'no-store' });
+        if(!res.ok){ throw new Error(`HTTP ${res.status} ${res.statusText}`); }
+        let txt = await res.text();
+        // Strip UTF-8 BOM if present
+        if (txt.charCodeAt(0) === 0xFEFF) txt = txt.slice(1);
+        const rows = parseCSV(txt);
+        if(!rows.length){ throw new Error('CSV appears empty.'); }
+        const rawHeader = rows[0];
+        const header = rawHeader.map(norm);
+        const findIdx = (aliases) => { for(const a of aliases){ const i = header.indexOf(a); if(i>=0) return i; } return -1; };
+        const idxId   = findIdx(['id','siteid','site_id','site','code']);
+        const idxName = findIdx(['name','sitename','site_name','title']);
+        let   idxMax  = findIdx(['maxauthors','maxauthor','max_authors','max','limit','quota']);
+        if(idxId < 0 || idxName < 0){
+          const seen = rawHeader.map(h=>`"${h}"`).join(', ');
+          throw new Error(`CSV header row must include site id and name columns. Saw: ${seen}
+Accepted id headers: id, siteid, site_id, site, code
+Accepted name headers: name, sitename, site_name, title`);
+        }
+        if(idxMax < 0){ console.warn('No maxAuthors-like column found; defaulting to 1'); }
+        const sites = rows.slice(1)
+          .filter(r => r && (r[idxId]||'').toString().trim())
+          .map(r => ({ id: String(r[idxId]).trim(), name: String(r[idxName]).trim(), maxAuthors: idxMax>=0 ? (Number(r[idxMax])||1) : 1 }));
+        return sites;
+      }catch(e){
+        console.error('Failed to load sites CSV:', e);
+        showStatus(`Could not load sites.csv: ${e.message}
+
+Checks:
+• Is sites.csv in the SAME folder as this HTML?
+• Does the first row include headers for site id and name?
+• Try re-saving as UTF-8 (no BOM).`, false);
+        return [];
+      }
+    }
+        return rows.slice(1).filter(r=>r.length>=3).map(r=>({
+          id: String(r[idxId]).trim(),
+          name: String(r[idxName]).trim(),
+          maxAuthors: Number(r[idxMax])||1
+        }));
+      }catch(e){
+        console.error("Failed to fetch CSV", e);
+        return [];
+      }
     }
 
-    function saveProgress(){ if(!state.siteId) return alert("Select a site first."); const authors=collectAuthors(); saveToLocal(state.siteId, { authors, saved_at:new Date().toISOString() }); const box=$("#validationSummary"); box.classList.remove("hidden","err"); box.textContent="Progress saved in this browser."; }
-    function clearProgress(){ if(!state.siteId) return; clearLocal(state.siteId); renderAuthors(); const box=$("#validationSummary"); box.classList.remove("hidden","err"); box.textContent="Saved data cleared for this site."; }
+    async function init(){
+      const sel = document.getElementById("siteSelect");
+      sel.innerHTML="";
+      const def = document.createElement("option");
+      def.value=""; def.textContent="— Select site —"; def.disabled=true; def.selected=true;
+      sel.appendChild(def);
 
-    function hydrateFromParams(){ const p=params(); if(p.site){ const site=findSite(p.site); if(site){ $("#siteSelect").value=site.id; onSiteChange(); if(p.lock==="1"||p.lock==="true"){ $("#siteSelect").disabled=true; $("#lockMsg").classList.remove('hidden'); } } } }
+      const sites = await loadSitesFromCSV();
+      if(!sites.length){
+        showStatus('No sites loaded. See console for details.', false);
+        return;
+      }
 
-    async function loadSitesFromEndpoint(){ try{ const url = SITE_ENDPOINT + (SITE_ENDPOINT.includes('?')? '&':'?') + 'route=sites'; const res = await fetch(url, { mode:'cors' }); const data = await res.json(); if(Array.isArray(data.sites) && data.sites.length){ SITE_CONFIG = data.sites.map(s=>({ id:String(s.id), name:String(s.name), maxAuthors: Number(s.maxAuthors)||1 })); } } catch(e){ console.warn('Failed to fetch sites endpoint', e); }
-    }
-    async function loadSitesFromCSV(){ if(!SITE_CSV_URL) return; try{ const res = await fetch(SITE_CSV_URL, { mode:'cors' }); const txt = await res.text(); const rows = parseCSV(txt); if(!rows.length) return; const header = rows[0].map(h=>h.trim().toLowerCase()); const idxId = header.indexOf('id'); const idxName= header.indexOf('name'); const idxMax = header.indexOf('maxauthors'); if(idxId<0||idxName<0||idxMax<0) return; const sites = rows.slice(1).filter(r=>r.length>=3).map(r=>({ id: String(r[idxId]).trim(), name: String(r[idxName]).trim(), maxAuthors: Number(r[idxMax])||1 })); if(sites.length){ SITE_CONFIG = sites; } } catch(e){ console.warn('Failed to fetch CSV', e); }
-    }
+      sites.forEach(s=>{
+        const opt=document.createElement("option");
+        opt.value=s.id;
+        opt.textContent=`${s.id} — ${s.name} (max ${s.maxAuthors})`;
+        sel.appendChild(opt);
+      });
 
-    document.addEventListener('DOMContentLoaded', async ()=>{
-      // Load remote sources (endpoint first, then CSV as fallback) before populating
-      if(SITE_ENDPOINT){ await loadSitesFromEndpoint(); }
-      else if(SITE_CSV_URL){ await loadSitesFromCSV(); }
-      populateSites();
-      $("#siteSelect").addEventListener("change", onSiteChange);
-      $("#dec").addEventListener("click", ()=>adjustCount(-1));
-      $("#inc").addEventListener("click", ()=>adjustCount(1));
-      $("#authorCount").addEventListener("change", (e)=>{ const v=Math.max(1, parseInt(e.target.value||"1",10)); state.count=Math.min(v, Math.max(state.maxAuthors, v)); renderAuthors(); });
-      $("#validateBtn").addEventListener("click", validateAll);
-      $("#exportCsvBtn").addEventListener("click", exportCSV);
-      $("#copyJsonBtn").addEventListener("click", copyJSON);
-      $("#submitBtn").addEventListener("click", submitToMaster);
-      $("#saveBtn").addEventListener("click", saveProgress);
-      $("#clearBtn").addEventListener("click", clearProgress);
-      hydrateFromParams();
+      showStatus(`Loaded ${sites.length} site(s) from sites.csv`, true);
+
+      sel.addEventListener("change",()=>{
+        const site=sites.find(x=>x.id===sel.value);
+        document.getElementById("siteInfo").textContent = site ? `Selected: ${site.name}, max authors ${site.maxAuthors}` : "";
+      });
     });
+      sel.addEventListener("change",()=>{
+        const site=sites.find(x=>x.id===sel.value);
+        document.getElementById("siteInfo").textContent = site ? `Selected: ${site.name}, max authors ${site.maxAuthors}` : "";
+      });
+    }
+
+    init();
   </script>
 </body>
 </html>
