@@ -1,145 +1,235 @@
 <!DOCTYPE html>
+<!--
+Author: Trevor F. Keenan
+Date: Aug 25th 2025
+Contact: Trevorkeenan@berkeley.edu 
+-->
+
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>FLUXNET Author Intake</title>
-  <style>
-    body { font-family: system-ui, sans-serif; margin: 2rem; }
-    select, input, button { padding: 0.4rem; margin-top: 0.3rem; }
-    /* Status styles for friendly messages */
-    #status { margin-top: 1rem; padding: .75rem; border-radius: .5rem; }
-    #status.ok { background: #f0fff6; color: #075e39; border: 1px solid #9ae6b4; }
-    #status.err { background: #fff5f5; color: #9b2c2c; border: 1px solid #feb2b2; white-space: pre-wrap; }
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FLUXNET Paper - Author Submission</title>
+    <style>
+        /* Basic Styling for the Form */
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            line-height: 1.6;
+            background-color: #f4f7f6;
+            color: #333;
+            margin: 0;
+            padding: 20px;
+        }
+        .container {
+            max-width: 800px;
+            margin: 20px auto;
+            padding: 25px;
+            background: #fff;
+            border-radius: 8px;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #005a9c;
+            text-align: center;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        input[type="text"], input[type="email"], select {
+            width: 100%;
+            padding: 10px;
+            margin-bottom: 15px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        .author-block {
+            padding: 20px;
+            border: 1px solid #e0e0e0;
+            border-radius: 5px;
+            margin-bottom: 20px;
+            background-color: #fafafa;
+        }
+        button {
+            display: block;
+            width: 100%;
+            padding: 12px;
+            background-color: #28a745;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+        button:hover {
+            background-color: #218838;
+        }
+        .message {
+            text-align: center;
+            padding: 15px;
+            margin-top: 20px;
+            border-radius: 5px;
+            display: none; /* Hidden by default */
+        }
+        .success { background-color: #d4edda; color: #155724; }
+        .error { background-color: #f8d7da; color: #721c24; }
+    </style>
 </head>
 <body>
-  <h1>FLUXNET Author Intake</h1>
 
-  <label for="siteSelect">Select your site</label>
-  <select id="siteSelect" required></select>
-  <p id="siteInfo"></p>
-  <div id="status" hidden></div>
+    <div class="container">
+        <h1>FLUXNET Paper Author Submission Form</h1>
+        <p>Please select your FLUXNET site from the list below. The form will then generate the correct number of fields for you to enter author details.</p>
+        
+        <form id="authorForm">
+            <label for="site-select">Select Your FLUXNET Site:</label>
+            <select id="site-select" required>
+                <option value="">-- Please choose a site --</option>
+                <option value="US-MMS">US-MMS (Morgan Monroe State Forest)</option>
+                <option value="DE-Tha">DE-Tha (Tharandt)</option>
+                <option value="AU-Tum">AU-Tum (Tumbarumba)</option>
+                <option value="IT-Col">IT-Col (Collelongo)</option>
+            </select>
+            
+            <div id="author-fields-container">
+                </div>
+            
+            <button type="submit">Submit Author Details</button>
+        </form>
 
-  <script>
-    // For GitHub Pages/local testing: include a local CSV file in your repo as sites.csv
-    // Ensure headers: id,name,maxAuthors
-    const SITE_CSV_URL = "./sites.csv";
+        <div id="form-message" class="message"></div>
+    </div>
 
-    // Helpers for header normalization and UI status
-    const norm = (s) => (s||"").toString().trim().toLowerCase().replace(/[\s_-]+/g, "");
-    function showStatus(msg, ok=true){
-      const el = document.getElementById('status');
-      if(!el) return;
-      el.className = ok ? 'ok' : 'err';
-      el.textContent = msg;
-      el.hidden = false;
-    }
+    <script>
+        // --- CONFIGURATION ---
+        // This is where you connect the form to your Google Sheet backend.
+        const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbze2KfiZxfDihgfjW7dCbVrfd2De4HDuW6vQwnb4-GbhJP0QBjNXdGr-aq9H4vvOJaEoQ/exec'; 
 
-    // Clean CSV parser (handles quotes, commas, newlines)
-    function parseCSV(text){
-      const rows=[]; let cur=[]; let field=''; let inQ=false;
-      for(let i=0;i<text.length;i++){
-        const c=text[i]; const n=text[i+1];
-        if(inQ){
-          if(c==='"'){
-            if(n==='"'){ field+='"'; i++; } else { inQ=false; }
-          } else { field+=c; }
-        } else {
-          if(c==='"'){ inQ=true; }
-          else if(c===','){ cur.push(field); field=''; }
-          else if(c==='\n'){ cur.push(field); rows.push(cur); cur=[]; field=''; }
-          else if(c==='\r'){ /* skip */ }
-          else { field+=c; }
+        // This object maps each site to the number of authors they can submit.
+        // **IMPORTANT**: The keys (e.g., "US-MMS") must match the 'value' in the <option> tags above.
+        const siteAuthorMapping = {
+            "US-MMS": 2,
+            "DE-Tha": 3,
+            "AU-Tum": 1,
+            "IT-Col": 2
+        };
+
+        // --- APPLICATION LOGIC ---
+        const siteSelect = document.getElementById('site-select');
+        const authorContainer = document.getElementById('author-fields-container');
+        const form = document.getElementById('authorForm');
+        const formMessage = document.getElementById('form-message');
+
+        // Listen for changes on the dropdown menu
+        siteSelect.addEventListener('change', () => {
+            const selectedSite = siteSelect.value;
+            const authorCount = siteAuthorMapping[selectedSite] || 0;
+            generateAuthorForms(authorCount);
+        });
+
+        // Function to generate the HTML for author input fields
+        function generateAuthorForms(count) {
+            authorContainer.innerHTML = ''; // Clear previous fields
+            if (count > 0) {
+                for (let i = 1; i <= count; i++) {
+                    const block = document.createElement('div');
+                    block.className = 'author-block';
+                    block.innerHTML = `
+                        <h4>Author ${i}</h4>
+                        <label for="name-${i}">Full Name:</label>
+                        <input type="text" id="name-${i}" class="author-name" required>
+                        
+                        <label for="affiliation-${i}">Full Affiliation (Institution, City, Country):</label>
+                        <input type="text" id="affiliation-${i}" class="author-affiliation" required>
+                        
+                        <label for="email-${i}">Email Address:</label>
+                        <input type="email" id="email-${i}" class="author-email" required>
+                        
+                        <label for="orcid-${i}">ORCID ID (e.g., 0000-0002-1825-0097):</label>
+                        <input type="text" id="orcid-${i}" class="author-orcid" pattern="\\d{4}-\\d{4}-\\d{4}-\\d{3}[\\dX]" title="Format must be XXXX-XXXX-XXXX-XXXX" required>
+                    `;
+                    authorContainer.appendChild(block);
+                }
+            }
         }
-      }
-      if(field.length || cur.length){ cur.push(field); rows.push(cur); }
-      return rows;
-    }
+        
+        // Listen for the form submission
+        form.addEventListener('submit', function(event) {
+            event.preventDefault(); // Stop the form from submitting the traditional way
+            
+            // 1. Collect data from the form
+            const site = siteSelect.value;
+            const authorBlocks = document.querySelectorAll('.author-block');
+            const authors = [];
+            let isValid = true;
+            
+            authorBlocks.forEach((block, index) => {
+                const name = block.querySelector('.author-name').value.trim();
+                const affiliation = block.querySelector('.author-affiliation').value.trim();
+                const email = block.querySelector('.author-email').value.trim();
+                const orcid = block.querySelector('.author-orcid').value.trim();
 
-    async function loadSitesFromCSV(){
-      try{
-        const url = SITE_CSV_URL + (SITE_CSV_URL.includes('?') ? '&' : '?') + '_=' + Date.now(); // cache-buster
-        const res = await fetch(url, { cache: 'no-store' });
-        if(!res.ok){ throw new Error(`HTTP ${res.status} ${res.statusText}`); }
-        let txt = await res.text();
-        // Strip UTF-8 BOM if present
-        if (txt.charCodeAt(0) === 0xFEFF) txt = txt.slice(1);
-        const rows = parseCSV(txt);
-        if(!rows.length){ throw new Error('CSV appears empty.'); }
-        const rawHeader = rows[0];
-        const header = rawHeader.map(norm);
-        const findIdx = (aliases) => { for(const a of aliases){ const i = header.indexOf(a); if(i>=0) return i; } return -1; };
-        const idxId   = findIdx(['id','siteid','site_id','site','code']);
-        const idxName = findIdx(['name','sitename','site_name','title']);
-        let   idxMax  = findIdx(['maxauthors','maxauthor','max_authors','max','limit','quota']);
-        if(idxId < 0 || idxName < 0){
-          const seen = rawHeader.map(h=>`"${h}"`).join(', ');
-          throw new Error(`CSV header row must include site id and name columns. Saw: ${seen}
-Accepted id headers: id, siteid, site_id, site, code
-Accepted name headers: name, sitename, site_name, title`);
+                // 2. Validate data
+                if (!name || !affiliation || !validateEmail(email) || !validateOrcid(orcid)) {
+                    isValid = false;
+                }
+                
+                authors.push({ name, affiliation, email, orcid });
+            });
+            
+            if (!isValid) {
+                showMessage('Please fill out all fields correctly. Check email and ORCID formats.', 'error');
+                return;
+            }
+
+            // 3. Send data to Google Apps Script
+            const data = { site, authors };
+            showMessage('Submitting, please wait...', 'info');
+
+            fetch(WEB_APP_URL, {
+                method: 'POST',
+                mode: 'cors',
+                cache: 'no-cache',
+                headers: {
+                    'Content-Type': 'text/plain;charset=utf-8',
+                },
+                body: JSON.stringify(data),
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.result === 'success') {
+                    showMessage('Success! Thank you for submitting the author details.', 'success');
+                    form.reset(); // Clear the form
+                    authorContainer.innerHTML = '';
+                } else {
+                    throw new Error(data.message || 'Unknown error');
+                }
+            })
+            .catch(error => {
+                showMessage(`An error occurred: ${error.message}`, 'error');
+            });
+        });
+
+        // --- HELPER FUNCTIONS ---
+        function validateEmail(email) {
+            const re = /^(([^<>()[\]\\.,;:\s@"]+(\.[^<>()[\]\\.,;:\s@"]+)*)|(".+"))@((\[[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\])|(([a-zA-Z\-0-9]+\.)+[a-zA-Z]{2,}))$/;
+            return re.test(String(email).toLowerCase());
         }
-        if(idxMax < 0){ console.warn('No maxAuthors-like column found; defaulting to 1'); }
-        const sites = rows.slice(1)
-          .filter(r => r && (r[idxId]||'').toString().trim())
-          .map(r => ({ id: String(r[idxId]).trim(), name: String(r[idxName]).trim(), maxAuthors: idxMax>=0 ? (Number(r[idxMax])||1) : 1 }));
-        return sites;
-      }catch(e){
-        console.error('Failed to load sites CSV:', e);
-        showStatus(`Could not load sites.csv: ${e.message}
 
-Checks:
-• Is sites.csv in the SAME folder as this HTML?
-• Does the first row include headers for site id and name?
-• Try re-saving as UTF-8 (no BOM).`, false);
-        return [];
-      }
-    }
-        return rows.slice(1).filter(r=>r.length>=3).map(r=>({
-          id: String(r[idxId]).trim(),
-          name: String(r[idxName]).trim(),
-          maxAuthors: Number(r[idxMax])||1
-        }));
-      }catch(e){
-        console.error("Failed to fetch CSV", e);
-        return [];
-      }
-    }
+        function validateOrcid(orcid) {
+            const re = /^\d{4}-\d{4}-\d{4}-\d{3}[\dX]$/;
+            return re.test(orcid);
+        }
 
-    async function init(){
-      const sel = document.getElementById("siteSelect");
-      sel.innerHTML="";
-      const def = document.createElement("option");
-      def.value=""; def.textContent="— Select site —"; def.disabled=true; def.selected=true;
-      sel.appendChild(def);
+        function showMessage(text, type) {
+            formMessage.textContent = text;
+            formMessage.className = `message ${type}`;
+            formMessage.style.display = 'block';
+        }
+    </script>
 
-      const sites = await loadSitesFromCSV();
-      if(!sites.length){
-        showStatus('No sites loaded. See console for details.', false);
-        return;
-      }
-
-      sites.forEach(s=>{
-        const opt=document.createElement("option");
-        opt.value=s.id;
-        opt.textContent=`${s.id} — ${s.name} (max ${s.maxAuthors})`;
-        sel.appendChild(opt);
-      });
-
-      showStatus(`Loaded ${sites.length} site(s) from sites.csv`, true);
-
-      sel.addEventListener("change",()=>{
-        const site=sites.find(x=>x.id===sel.value);
-        document.getElementById("siteInfo").textContent = site ? `Selected: ${site.name}, max authors ${site.maxAuthors}` : "";
-      });
-    });
-      sel.addEventListener("change",()=>{
-        const site=sites.find(x=>x.id===sel.value);
-        document.getElementById("siteInfo").textContent = site ? `Selected: ${site.name}, max authors ${site.maxAuthors}` : "";
-      });
-    }
-
-    init();
-  </script>
 </body>
 </html>

@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>FLUXNET Author Intake</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 2rem; }
+    select, input, button { padding: 0.4rem; margin-top: 0.3rem; }
+    /* Status styles for friendly messages */
+    #status { margin-top: 1rem; padding: .75rem; border-radius: .5rem; }
+    #status.ok { background: #f0fff6; color: #075e39; border: 1px solid #9ae6b4; }
+    #status.err { background: #fff5f5; color: #9b2c2c; border: 1px solid #feb2b2; white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <h1>FLUXNET Author Intake</h1>
+
+  <label for="siteSelect">Select your site</label>
+  <select id="siteSelect" required></select>
+  <p id="siteInfo"></p>
+  <div id="status" hidden></div>
+
+  <script>
+    // For GitHub Pages/local testing: include a local CSV file in your repo as sites.csv
+    // Ensure headers: id,name,maxAuthors
+    const SITE_CSV_URL = "./sites.csv";
+
+    // Helpers for header normalization and UI status
+    const norm = (s) => (s||"").toString().trim().toLowerCase().replace(/[\s_-]+/g, "");
+    function showStatus(msg, ok=true){
+      const el = document.getElementById('status');
+      if(!el) return;
+      el.className = ok ? 'ok' : 'err';
+      el.textContent = msg;
+      el.hidden = false;
+    }
+
+    // Clean CSV parser (handles quotes, commas, newlines)
+    function parseCSV(text){
+      const rows=[]; let cur=[]; let field=''; let inQ=false;
+      for(let i=0;i<text.length;i++){
+        const c=text[i]; const n=text[i+1];
+        if(inQ){
+          if(c==='"'){
+            if(n==='"'){ field+='"'; i++; } else { inQ=false; }
+          } else { field+=c; }
+        } else {
+          if(c==='"'){ inQ=true; }
+          else if(c===','){ cur.push(field); field=''; }
+          else if(c==='\n'){ cur.push(field); rows.push(cur); cur=[]; field=''; }
+          else if(c==='\r'){ /* skip */ }
+          else { field+=c; }
+        }
+      }
+      if(field.length || cur.length){ cur.push(field); rows.push(cur); }
+      return rows;
+    }
+
+    async function loadSitesFromCSV(){
+      try{
+        const url = SITE_CSV_URL + (SITE_CSV_URL.includes('?') ? '&' : '?') + '_=' + Date.now(); // cache-buster
+        const res = await fetch(url, { cache: 'no-store' });
+        if(!res.ok){ throw new Error(`HTTP ${res.status} ${res.statusText}`); }
+        let txt = await res.text();
+        // Strip UTF-8 BOM if present
+        if (txt.charCodeAt(0) === 0xFEFF) txt = txt.slice(1);
+        const rows = parseCSV(txt);
+        if(!rows.length){ throw new Error('CSV appears empty.'); }
+        const rawHeader = rows[0];
+        const header = rawHeader.map(norm);
+        const findIdx = (aliases) => { for(const a of aliases){ const i = header.indexOf(a); if(i>=0) return i; } return -1; };
+        const idxId   = findIdx(['id','siteid','site_id','site','code']);
+        const idxName = findIdx(['name','sitename','site_name','title']);
+        let   idxMax  = findIdx(['maxauthors','maxauthor','max_authors','max','limit','quota']);
+        if(idxId < 0 || idxName < 0){
+          const seen = rawHeader.map(h=>`"${h}"`).join(', ');
+          throw new Error(`CSV header row must include site id and name columns. Saw: ${seen}
+Accepted id headers: id, siteid, site_id, site, code
+Accepted name headers: name, sitename, site_name, title`);
+        }
+        if(idxMax < 0){ console.warn('No maxAuthors-like column found; defaulting to 1'); }
+        const sites = rows.slice(1)
+          .filter(r => r && (r[idxId]||'').toString().trim())
+          .map(r => ({ id: String(r[idxId]).trim(), name: String(r[idxName]).trim(), maxAuthors: idxMax>=0 ? (Number(r[idxMax])||1) : 1 }));
+        return sites;
+      }catch(e){
+        console.error('Failed to load sites CSV:', e);
+        showStatus(`Could not load sites.csv: ${e.message}
+
+Checks:
+• Is sites.csv in the SAME folder as this HTML?
+• Does the first row include headers for site id and name?
+• Try re-saving as UTF-8 (no BOM).`, false);
+        return [];
+      }
+    }
+        return rows.slice(1).filter(r=>r.length>=3).map(r=>({
+          id: String(r[idxId]).trim(),
+          name: String(r[idxName]).trim(),
+          maxAuthors: Number(r[idxMax])||1
+        }));
+      }catch(e){
+        console.error("Failed to fetch CSV", e);
+        return [];
+      }
+    }
+
+    async function init(){
+      const sel = document.getElementById("siteSelect");
+      sel.innerHTML="";
+      const def = document.createElement("option");
+      def.value=""; def.textContent="— Select site —"; def.disabled=true; def.selected=true;
+      sel.appendChild(def);
+
+      const sites = await loadSitesFromCSV();
+      if(!sites.length){
+        showStatus('No sites loaded. See console for details.', false);
+        return;
+      }
+
+      sites.forEach(s=>{
+        const opt=document.createElement("option");
+        opt.value=s.id;
+        opt.textContent=`${s.id} — ${s.name} (max ${s.maxAuthors})`;
+        sel.appendChild(opt);
+      });
+
+      showStatus(`Loaded ${sites.length} site(s) from sites.csv`, true);
+
+      sel.addEventListener("change",()=>{
+        const site=sites.find(x=>x.id===sel.value);
+        document.getElementById("siteInfo").textContent = site ? `Selected: ${site.name}, max authors ${site.maxAuthors}` : "";
+      });
+    });
+      sel.addEventListener("change",()=>{
+        const site=sites.find(x=>x.id===sel.value);
+        document.getElementById("siteInfo").textContent = site ? `Selected: ${site.name}, max authors ${site.maxAuthors}` : "";
+      });
+    }
+
+    init();
+  </script>
+</body>
+</html>
