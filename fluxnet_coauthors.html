@@ -85,15 +85,14 @@ Contact: Trevorkeenan@berkeley.edu
         <p>Please select your FLUXNET site from the list below. The form will then generate the correct number of fields for you to enter author details.</p>
         
         <form id="authorForm">
-            <label for="site-select">Select Your FLUXNET Site:</label>
-            <select id="site-select" required>
-                <option value="">-- Please choose a site --</option>
-                <option value="US-MMS">US-MMS (Morgan Monroe State Forest)</option>
-                <option value="DE-Tha">DE-Tha (Tharandt)</option>
-                <option value="AU-Tum">AU-Tum (Tumbarumba)</option>
-                <option value="IT-Col">IT-Col (Collelongo)</option>
-            </select>
-            
+            <label for="site-input">Select or Type Your FLUXNET Site:</label>
+			<input list="fluxnet-sites" id="site-input" name="site-input" required />
+
+			<datalist id="fluxnet-sites">
+ 			   	<option value="US-MMS">US-MMS (Morgan Monroe State Forest)</option>
+    			<option value="DE-Tha">DE-Tha (Tharandt)</option>
+   				<option value="AU-Tum">AU-Tum (Tumbarumba)</option>
+    		</datalist>
             <div id="author-fields-container">
                 </div>
             
