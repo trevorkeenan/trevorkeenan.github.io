@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
 Author: Trevor F. Keenan
-Date: Aug 25th 2025 
+Date: Aug 25th 2025
 Contact: Trevorkeenan@berkeley.edu 
 -->
 
@@ -11,71 +11,22 @@ Contact: Trevorkeenan@berkeley.edu
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>FLUXNET Paper - Author Submission</title>
     <style>
-        /* Basic Styling for the Form */
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            line-height: 1.6;
-            background-color: #f4f7f6;
-            color: #333;
-            margin: 0;
-            padding: 20px;
-        }
-        .container {
-            max-width: 800px;
-            margin: 20px auto;
-            padding: 25px;
-            background: #fff;
-            border-radius: 8px;
-            box-shadow: 0 4px 10px rgba(0,0,0,0.1);
-        }
-        h1 {
-            color: #005a9c;
-            text-align: center;
-        }
-        label {
-            display: block;
-            margin-bottom: 5px;
-            font-weight: bold;
-        }
-        input[type="text"], input[type="email"], select {
-            width: 100%;
-            padding: 10px;
-            margin-bottom: 15px;
-            border: 1px solid #ccc;
-            border-radius: 4px;
-            box-sizing: border-box;
-        }
-        .author-block {
-            padding: 20px;
-            border: 1px solid #e0e0e0;
-            border-radius: 5px;
-            margin-bottom: 20px;
-            background-color: #fafafa;
-        }
-        button {
-            display: block;
-            width: 100%;
-            padding: 12px;
-            background-color: #28a745;
-            color: white;
-            border: none;
-            border-radius: 4px;
-            font-size: 16px;
-            cursor: pointer;
-            transition: background-color 0.3s;
-        }
-        button:hover {
-            background-color: #218838;
-        }
-        .message {
-            text-align: center;
-            padding: 15px;
-            margin-top: 20px;
-            border-radius: 5px;
-            display: none; /* Hidden by default */
-        }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; line-height: 1.6; background-color: #f4f7f6; color: #333; margin: 0; padding: 20px; }
+        .container { max-width: 800px; margin: 20px auto; padding: 25px; background: #fff; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
+        h1 { color: #005a9c; text-align: center; }
+        label { display: block; margin-bottom: 5px; font-weight: bold; }
+        input[type="text"], input[type="email"], select, input[list] { width: 100%; padding: 10px; margin-bottom: 15px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
+        .author-block { padding: 20px; border: 1px solid #e0e0e0; border-radius: 5px; margin-bottom: 20px; background-color: #fafafa; }
+        .name-fields { display: flex; gap: 10px; }
+        .name-fields > div { flex-grow: 1; }
+        .name-fields > div.middle-initial { flex-grow: 0; width: 100px; }
+        button { display: block; width: 100%; padding: 12px; background-color: #28a745; color: white; border: none; border-radius: 4px; font-size: 16px; cursor: pointer; transition: background-color 0.3s; }
+        button:hover { background-color: #218838; }
+        .message { text-align: center; padding: 15px; margin-top: 20px; border-radius: 5px; display: none; }
         .success { background-color: #d4edda; color: #155724; }
         .error { background-color: #f8d7da; color: #721c24; }
+        #preview-container { padding: 15px; background-color: #e9ecef; border-radius: 5px; border: 1px solid #ced4da; display: none; }
+        .preview-line { font-family: "Courier New", Courier, monospace; margin: 5px 0; }
     </style>
 </head>
 <body>
@@ -86,16 +37,16 @@ Contact: Trevorkeenan@berkeley.edu
         
         <form id="authorForm">
             <label for="site-input">Select or Type Your FLUXNET Site:</label>
-			<input list="fluxnet-sites" id="site-input" name="site-input" required />
-
-			<datalist id="fluxnet-sites">
- 			   	<option value="US-MMS">US-MMS (Morgan Monroe State Forest)</option>
-    			<option value="DE-Tha">DE-Tha (Tharandt)</option>
-   				<option value="AU-Tum">AU-Tum (Tumbarumba)</option>
-    		</datalist>
-            <div id="author-fields-container">
-                </div>
+            <input list="fluxnet-sites" id="site-input" name="site-input" class="site-class" required />
+            <datalist id="fluxnet-sites">
+                <option value="US-MMS">US-MMS (Morgan Monroe State Forest)</option>
+                <option value="DE-Tha">DE-Tha (Tharandt)</option>
+                <option value="AU-Tum">AU-Tum (Tumbarumba)</option>
+                <option value="IT-Col">IT-Col (Collelongo)</option>
+            </datalist>
             
+            <div id="author-fields-container"></div>
+            <div id="preview-container" style="margin-bottom: 20px;"></div>
             <button type="submit">Submit Author Details</button>
         </form>
 
@@ -103,126 +54,170 @@ Contact: Trevorkeenan@berkeley.edu
     </div>
 
     <script>
-        // --- CONFIGURATION ---
-        // This is where you connect the form to your Google Sheet backend.
-        const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbze2KfiZxfDihgfjW7dCbVrfd2De4HDuW6vQwnb4-GbhJP0QBjNXdGr-aq9H4vvOJaEoQ/exec'; 
-
-        // This object maps each site to the number of authors they can submit.
-        // **IMPORTANT**: The keys (e.g., "US-MMS") must match the 'value' in the <option> tags above.
-        const siteAuthorMapping = {
-            "US-MMS": 1,
-            "DE-Tha": 2,
-            "AU-Tum": 3,
-            "IT-Col": 4
-        };
-
-        // --- APPLICATION LOGIC ---
-        const siteSelect = document.getElementById('site-select');
+        const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbxjfPypQpAZb5mZhlew9TfZGCmMH6-c8tqfL5O1EJQ_MDf5Mm0c9oVNHHPzl9vGbgozyQ/exec'; 
+        const siteAuthorMapping = { "US-MMS": 2, "DE-Tha": 3, "AU-Tum": 1, "IT-Col": 2 };
+        const siteSelect = document.getElementById('site-input'); 
         const authorContainer = document.getElementById('author-fields-container');
+        const previewContainer = document.getElementById('preview-container');
         const form = document.getElementById('authorForm');
         const formMessage = document.getElementById('form-message');
 
-        // Listen for changes on the dropdown menu
-        siteSelect.addEventListener('change', () => {
+        siteSelect.addEventListener('input', () => {
             const selectedSite = siteSelect.value;
             const authorCount = siteAuthorMapping[selectedSite] || 0;
             generateAuthorForms(authorCount);
+            updatePreview();
         });
+        
+        authorContainer.addEventListener('input', () => { updatePreview(); });
 
-        // Function to generate the HTML for author input fields
         function generateAuthorForms(count) {
-            authorContainer.innerHTML = ''; // Clear previous fields
+            authorContainer.innerHTML = '';
             if (count > 0) {
                 for (let i = 1; i <= count; i++) {
                     const block = document.createElement('div');
                     block.className = 'author-block';
                     block.innerHTML = `
                         <h4>Author ${i}</h4>
-                        <label for="name-${i}">Full Name:</label>
-                        <input type="text" id="name-${i}" class="author-name" required>
-                        
-                        <label for="affiliation-${i}">Full Affiliation (Department, Institution, City, Country):</label>
-                        <input type="text" id="affiliation-${i}" class="author-affiliation" required>
-                        
+                        <div class="name-fields">
+                            <div><label for="fname-${i}">Given/First Name:</label><input type="text" id="fname-${i}" class="author-fname" required></div>
+                            <div class="middle-initial"><label for="minitial-${i}">Middle Initial</label><input type="text" id="minitial-${i}" class="author-minitial" maxlength="2"></div>
+                            <div><label for="lname-${i}">Family/Last Name:</label><input type="text" id="lname-${i}" class="author-lname" required></div>
+                        </div>
+                        <label for="affiliation-count-${i}">Number of Affiliations:</label>
+                        <select id="affiliation-count-${i}" class="affiliation-count-select">
+                            <option value="1">1</option><option value="2">2</option><option value="3">3</option>
+                        </select>
+                        <div id="affiliations-container-${i}" class="affiliations-container"></div>
                         <label for="email-${i}">Email Address:</label>
                         <input type="email" id="email-${i}" class="author-email" required>
-                        
-                        <label for="orcid-${i}">ORCID ID (e.g., 0000-0002-1825-0097):</label>
-                        <input type="text" id="orcid-${i}" class="author-orcid" pattern="\\d{4}-\\d{4}-\\d{4}-\\d{3}[\\dX]" title="Format must be XXXX-XXXX-XXXX-XXXX" required>
+                        <label for="orcid-${i}">ORCID ID (e.g., 0000-0002-1825-0097)</label>
+                        <input type="text" id="orcid-${i}" class="author-orcid" pattern="\\d{4}-\\d{4}-\\d{4}-\\d{3}[\\dX]" title="Format must be XXXX-XXXX-XXXX-XXXX">
+                        <small style="display: block; margin-top: -10px; margin-bottom: 10px; color: #555;">
+                            <i>See <a href="https://orcid.org/" target="_blank">ORCID.org</a> for more details. (Optional)</i>
+                        </small>
                     `;
                     authorContainer.appendChild(block);
+                    const affiliationCountSelect = block.querySelector(`#affiliation-count-${i}`);
+                    const affiliationsContainer = block.querySelector(`#affiliations-container-${i}`);
+                    generateAffiliationInputs(affiliationsContainer, 1);
+                    affiliationCountSelect.addEventListener('change', (event) => {
+                        const count = parseInt(event.target.value, 10);
+                        generateAffiliationInputs(affiliationsContainer, count);
+                        updatePreview();
+                    });
                 }
             }
         }
+
+        function generateAffiliationInputs(container, count) {
+            container.innerHTML = '';
+            for (let j = 1; j <= count; j++) {
+                const affiliationDiv = document.createElement('div');
+                affiliationDiv.innerHTML = `<label for="${container.id}-affiliation-${j}">Affiliation ${j} (Department, Institution, City, State, Zip/Postal Code, Country):</label><input type="text" id="${container.id}-affiliation-${j}" class="author-affiliation" required>`;
+                container.appendChild(affiliationDiv);
+            }
+        }
+
+        function updatePreview() {
+            const authorBlocks = document.querySelectorAll('.author-block');
+            previewContainer.innerHTML = ''; 
+            if (authorBlocks.length > 0) {
+                 previewContainer.style.display = 'block'; 
+                 const header = document.createElement('h4');
+                 header.textContent = 'Publication Format Preview';
+                 previewContainer.appendChild(header);
+                 const subHeader = document.createElement('p');
+                 subHeader.textContent = 'Please ensure all information is displayed correctly before submitting.';
+                 subHeader.style.fontStyle = 'italic';
+                 subHeader.style.fontSize = '0.9em';
+                 subHeader.style.marginTop = '-5px';
+                 previewContainer.appendChild(subHeader);
+            } else {
+                 previewContainer.style.display = 'none';
+                 return; 
+            }
+            authorBlocks.forEach((block, index) => {
+                const firstName = block.querySelector('.author-fname').value || '';
+                const middleInitial = block.querySelector('.author-minitial').value || '';
+                const lastName = block.querySelector('.author-lname').value || '';
+                const affiliationInputs = block.querySelectorAll('.author-affiliation');
+                const affiliations = [];
+                affiliationInputs.forEach(input => affiliations.push(input.value || ''));
+                const affiliationsString = affiliations.join('; ');
+                let nameString = lastName;
+                if (lastName && firstName) nameString += `, ${firstName}`;
+                else if (firstName) nameString = firstName;
+                if (middleInitial) nameString += ` ${middleInitial}`;
+                const previewString = `${nameString}, ${affiliationsString}`;
+                const p = document.createElement('p');
+                p.className = 'preview-line';
+                p.textContent = `${index + 1}. ${previewString}`;
+                previewContainer.appendChild(p);
+            });
+        }
         
-        // Listen for the form submission
         form.addEventListener('submit', function(event) {
-            event.preventDefault(); // Stop the form from submitting the traditional way
-            
-            // 1. Collect data from the form
+            event.preventDefault(); 
             const site = siteSelect.value;
             const authorBlocks = document.querySelectorAll('.author-block');
             const authors = [];
             let isValid = true;
             
             authorBlocks.forEach((block, index) => {
-                const name = block.querySelector('.author-name').value.trim();
-                const affiliation = block.querySelector('.author-affiliation').value.trim();
+                const firstName = block.querySelector('.author-fname').value.trim();
+                const middleInitial = block.querySelector('.author-minitial').value.trim();
+                const lastName = block.querySelector('.author-lname').value.trim();
                 const email = block.querySelector('.author-email').value.trim();
                 const orcid = block.querySelector('.author-orcid').value.trim();
-
-                // 2. Validate data
-                if (!name || !affiliation || !validateEmail(email) || !validateOrcid(orcid)) {
+                const affiliationInputs = block.querySelectorAll('.author-affiliation');
+                const affiliations = [];
+                affiliationInputs.forEach(input => affiliations.push(input.value.trim()));
+                const hasEmptyAffiliation = affiliations.some(aff => aff === '');
+                
+                // ✅ MODIFIED: The ORCID validation now only runs if the field is not empty.
+                if (!firstName || !lastName || hasEmptyAffiliation || !validateEmail(email) || (orcid && !validateOrcid(orcid))) {
                     isValid = false;
                 }
                 
-                authors.push({ name, affiliation, email, orcid });
+                authors.push({ firstName, middleInitial, lastName, affiliations, email, orcid });
             });
             
             if (!isValid) {
-                showMessage('Please fill out all fields correctly. Check email and ORCID formats.', 'error');
+                showMessage('Please fill out all required fields correctly. If you enter an ORCID, ensure it has the correct format.', 'error');
                 return;
             }
 
-            // 3. Send data to Google Apps Script
             const data = { site, authors };
             showMessage('Submitting, please wait...', 'info');
 
             fetch(WEB_APP_URL, {
-                method: 'POST',
-                mode: 'cors',
-                cache: 'no-cache',
-                headers: {
-                    'Content-Type': 'text/plain;charset=utf-8',
-                },
+                method: 'POST', mode: 'cors', cache: 'no-cache',
+                headers: { 'Content-Type': 'text/plain;charset=utf-8' },
                 body: JSON.stringify(data),
             })
             .then(response => response.json())
             .then(data => {
                 if (data.result === 'success') {
                     showMessage('Success! Thank you for submitting the author details.', 'success');
-                    form.reset(); // Clear the form
+                    form.reset(); 
                     authorContainer.innerHTML = '';
+                    updatePreview();
                 } else {
                     throw new Error(data.message || 'Unknown error');
                 }
             })
-            .catch(error => {
-                showMessage(`An error occurred: ${error.message}`, 'error');
-            });
+            .catch(error => showMessage(`An error occurred: ${error.message}`, 'error'));
         });
 
-        // --- HELPER FUNCTIONS ---
         function validateEmail(email) {
             const re = /^(([^<>()[\]\\.,;:\s@"]+(\.[^<>()[\]\\.,;:\s@"]+)*)|(".+"))@((\[[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\])|(([a-zA-Z\-0-9]+\.)+[a-zA-Z]{2,}))$/;
             return re.test(String(email).toLowerCase());
         }
-
         function validateOrcid(orcid) {
             const re = /^\d{4}-\d{4}-\d{4}-\d{3}[\dX]$/;
             return re.test(orcid);
         }
-
         function showMessage(text, type) {
             formMessage.textContent = text;
             formMessage.className = `message ${type}`;
