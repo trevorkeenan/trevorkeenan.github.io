@@ -1,0 +1,51 @@
+{
+  "month": "2011-06",
+  "source_file": "/Users/trevorkeenan/Data/CEDAR_GPP/LT_CFE-Hybrid_NT/CEDAR-GPP_v01_LT_CFE-Hybrid_NT_201106.nc",
+  "stats": {
+    "month": "2011-06",
+    "source_file": "/Users/trevorkeenan/Data/CEDAR_GPP/LT_CFE-Hybrid_NT/CEDAR-GPP_v01_LT_CFE-Hybrid_NT_201106.nc",
+    "raw_min": 0.0,
+    "raw_max": 1786.0,
+    "scaled_min": 0.0,
+    "scaled_max": 17.85999870300293,
+    "fill_value_count": 21024091,
+    "raw_nan_count": 0,
+    "scaled_nan_count": 21024091,
+    "nodata_check_passed": true
+  },
+  "coord_signature": {
+    "shape": [
+      3600,
+      7200
+    ],
+    "lat_first": 89.975,
+    "lat_last": -89.975,
+    "lon_first": -179.975,
+    "lon_last": 179.975,
+    "lat_step": 0.049999999999998934,
+    "lon_step": 0.04999999999999716
+  },
+  "render_config": {
+    "variable": "GPP_mean",
+    "scale_factor": 0.01,
+    "fill_value": -9999.0,
+    "colormap": "viridis",
+    "vmin": 0.0,
+    "vmax": 19.35999870300293,
+    "min_zoom": 0,
+    "max_zoom": 4,
+    "tile_format": "webp",
+    "tile_extension": "webp",
+    "webp_lossless": true,
+    "webp_quality": 95
+  },
+  "tile_summary": {
+    "month": "2011-06",
+    "tile_count": 341,
+    "tile_bytes": 3290204,
+    "extension": "webp",
+    "zoom_min": 0,
+    "zoom_max": 4
+  },
+  "generated_utc": "2026-02-20T19:41:41.248970+00:00"
+}
