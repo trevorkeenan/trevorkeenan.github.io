@@ -183,28 +183,27 @@
 							</div>
 						</div>
 
+<br/>
+<br/>
 						<section id="fluxpulse-section" class="fluxpulse-section" aria-labelledby="fluxpulse-heading">
 							<div class="fluxpulse-title-block">
-								<h2 class="fluxpulse-kicker">New inference from improved data processing - FluxPulse</h2>
-								<p id="fluxpulse-description">FluxPulse delivers new inference from improved data processing and lets users examine how harmonized flux workflows change interpreted ecosystem signals. Explore spatial and temporal patterns directly in the app, then compare outcomes across processing choices for deeper interpretation.</p>
-								<p class="fluxpulse-launch"><a href="https://ngoc-nguyen-ucberkeley.shinyapps.io/fluxpulse_visualization/" target="_blank" rel="noopener noreferrer">Launch in a new tab</a></p>
+								<h2 id="fluxpulse-heading">FluxPulse: New inference from improved data processing</h2>
+								<p id="fluxpulse-description">FluxPulse lets users upgrade the standard eddy-covariance processing with a particular focus on hard-to-capture responses to rain pulses, and examine how improved flux workflows change interpreted ecosystem signals. Explore spatial and temporal patterns directly in the app, then compare outcomes across processing choices for deeper interpretation.</p>
 							</div>
+							<div class="fluxpulse-actions" aria-label="FluxPulse links">
+								<a class="fluxpulse-btn fluxpulse-btn-primary" href="https://ngoc-nguyen-ucberkeley.shinyapps.io/fluxpulse_visualization/" target="_blank" rel="noopener">Open FluxPulse</a>
+								<button type="button" id="fluxpulse-popout" class="fluxpulse-btn fluxpulse-btn-secondary" data-url="https://ngoc-nguyen-ucberkeley.shinyapps.io/fluxpulse_visualization/">Pop out</button>
+							</div>
+							<p id="fluxpulse-popout-status" class="fluxpulse-popout-status" role="status" aria-live="polite"></p>
 							<div class="fluxpulse-card">
-								<div class="fluxpulse-embed-wrap">
-									<iframe
-										id="fluxpulse-iframe"
-										class="fluxpulse-iframe"
-										src="https://ngoc-nguyen-ucberkeley.shinyapps.io/fluxpulse_visualization/"
-										title="FluxPulse Shiny application for interactive flux visualization"
-										aria-describedby="fluxpulse-description"
-										loading="lazy"
-										referrerpolicy="strict-origin-when-cross-origin"
-									></iframe>
-								</div>
-								<div id="fluxpulse-fallback" class="fluxpulse-fallback" hidden role="status" aria-live="polite" tabindex="-1">
-									<p>FluxPulse could not be displayed inline in this browser. This may happen when embedding is blocked by site security headers.</p>
-									<p><a class="fluxpulse-fallback-btn" href="https://ngoc-nguyen-ucberkeley.shinyapps.io/fluxpulse_visualization/" target="_blank" rel="noopener noreferrer">Open FluxPulse in a new tab</a></p>
-								</div>
+								<a class="fluxpulse-preview-link" href="https://ngoc-nguyen-ucberkeley.shinyapps.io/fluxpulse_visualization/" target="_blank" rel="noopener" aria-label="Open FluxPulse in a new tab">
+									<img class="fluxpulse-preview-image" src="./images/FluxPulse.png" alt="Preview image of the FluxPulse application interface" loading="lazy" />
+								</a>
+							</div>
+							<div class="fluxpulse-citation">
+								<h3>Data Download &amp; Citation</h3>
+								<p><strong>Data Download:</strong> <a href="https://github.com/ngocnguyen99/FluxPulse" target="_blank" rel="noopener">FluxPulse GitHub repository</a></p>
+								<p><strong>Publication:</strong> Nguyen, N. et al. (2025). Widespread underestimation of rain-induced soil carbon emissions from global drylands. <em>Nature Geoscience</em>, 18, 869–876. <a href="https://www.nature.com/articles/s41561-025-01754-9" target="_blank" rel="noopener">https://www.nature.com/articles/s41561-025-01754-9</a></p>
 							</div>
 						</section>
 					<div class="clearer"></div>
@@ -258,48 +257,34 @@ qube.themeFunctions.resetMainMenuColors();
 });
 
 
-
 window.addEventListener('load', function(){
-var iframe = document.getElementById('fluxpulse-iframe');
-var fallback = document.getElementById('fluxpulse-fallback');
-if (!iframe || !fallback) { return; }
+var popoutButton = document.getElementById('fluxpulse-popout');
+var status = document.getElementById('fluxpulse-popout-status');
+if (!popoutButton) { return; }
 
-var hasResolved = false;
-var loadTimer = window.setTimeout(function(){
-if (!hasResolved) { showFallback(); }
-}, 8000);
+popoutButton.addEventListener('click', function(){
+var url = popoutButton.getAttribute('data-url');
+if (!url) { return; }
 
-function hideFallback() {
-fallback.hidden = true;
-iframe.removeAttribute('hidden');
-}
-
-function showFallback() {
-if (hasResolved) { return; }
-hasResolved = true;
-window.clearTimeout(loadTimer);
-fallback.hidden = false;
-iframe.setAttribute('hidden', 'hidden');
-fallback.focus();
-}
-
-function verifyFrameLoaded() {
-try {
-var frameLocation = iframe.contentWindow && iframe.contentWindow.location;
-if (frameLocation && frameLocation.href === 'about:blank') {
-showFallback();
+var popup = window.open(url, 'fluxpulse_window', 'width=1200,height=800,noopener,noreferrer');
+if (popup && !popup.closed) {
+if (status) { status.textContent = ''; }
+try { popup.focus(); } catch (err) {}
 return;
 }
-} catch (err) {
-// Cross-origin access throws on successful embed; keep iframe visible.
-}
-hasResolved = true;
-window.clearTimeout(loadTimer);
-hideFallback();
+
+if (status) {
+status.textContent = 'Popup was blocked. Opening FluxPulse in a new tab instead.';
 }
 
-iframe.addEventListener('load', verifyFrameLoaded);
-iframe.addEventListener('error', showFallback);
+var newTab = window.open(url, '_blank', 'noopener,noreferrer');
+if (newTab) {
+try { newTab.focus(); } catch (err) {}
+return;
+}
+
+window.location.href = url;
+});
 });
 
 </script>
