@@ -182,6 +182,31 @@
 								</div>
 							</div>
 						</div>
+
+						<section id="fluxpulse-section" class="fluxpulse-section" aria-labelledby="fluxpulse-heading">
+							<div class="fluxpulse-title-block">
+								<h2 class="fluxpulse-kicker">New inference from improved data processing - FluxPulse</h2>
+								<p id="fluxpulse-description">FluxPulse delivers new inference from improved data processing and lets users examine how harmonized flux workflows change interpreted ecosystem signals. Explore spatial and temporal patterns directly in the app, then compare outcomes across processing choices for deeper interpretation.</p>
+								<p class="fluxpulse-launch"><a href="https://ngoc-nguyen-ucberkeley.shinyapps.io/fluxpulse_visualization/" target="_blank" rel="noopener noreferrer">Launch in a new tab</a></p>
+							</div>
+							<div class="fluxpulse-card">
+								<div class="fluxpulse-embed-wrap">
+									<iframe
+										id="fluxpulse-iframe"
+										class="fluxpulse-iframe"
+										src="https://ngoc-nguyen-ucberkeley.shinyapps.io/fluxpulse_visualization/"
+										title="FluxPulse Shiny application for interactive flux visualization"
+										aria-describedby="fluxpulse-description"
+										loading="lazy"
+										referrerpolicy="strict-origin-when-cross-origin"
+									></iframe>
+								</div>
+								<div id="fluxpulse-fallback" class="fluxpulse-fallback" hidden role="status" aria-live="polite" tabindex="-1">
+									<p>FluxPulse could not be displayed inline in this browser. This may happen when embedding is blocked by site security headers.</p>
+									<p><a class="fluxpulse-fallback-btn" href="https://ngoc-nguyen-ucberkeley.shinyapps.io/fluxpulse_visualization/" target="_blank" rel="noopener noreferrer">Open FluxPulse in a new tab</a></p>
+								</div>
+							</div>
+						</section>
 					<div class="clearer"></div>
 				</div><!-- End content -->
 				<div id="contentSidebar"></div><!-- Reserved space for placing sidebar inside main content area -->
@@ -230,6 +255,51 @@ if ( $qube('#mobileMenuTabWrapper').is(':visible') ) { qube.themeFunctions.mobil
 qube.themeFunctions.on_resize(function(){ 
 if( $qube(window).width() < 481 && !$qube('#mobileMenuTab').hasClass('activated') ) { qube.themeFunctions.mobileMenu(); }
 qube.themeFunctions.resetMainMenuColors();
+});
+
+
+
+window.addEventListener('load', function(){
+var iframe = document.getElementById('fluxpulse-iframe');
+var fallback = document.getElementById('fluxpulse-fallback');
+if (!iframe || !fallback) { return; }
+
+var hasResolved = false;
+var loadTimer = window.setTimeout(function(){
+if (!hasResolved) { showFallback(); }
+}, 8000);
+
+function hideFallback() {
+fallback.hidden = true;
+iframe.removeAttribute('hidden');
+}
+
+function showFallback() {
+if (hasResolved) { return; }
+hasResolved = true;
+window.clearTimeout(loadTimer);
+fallback.hidden = false;
+iframe.setAttribute('hidden', 'hidden');
+fallback.focus();
+}
+
+function verifyFrameLoaded() {
+try {
+var frameLocation = iframe.contentWindow && iframe.contentWindow.location;
+if (frameLocation && frameLocation.href === 'about:blank') {
+showFallback();
+return;
+}
+} catch (err) {
+// Cross-origin access throws on successful embed; keep iframe visible.
+}
+hasResolved = true;
+window.clearTimeout(loadTimer);
+hideFallback();
+}
+
+iframe.addEventListener('load', verifyFrameLoaded);
+iframe.addEventListener('error', showFallback);
 });
 
 </script>
