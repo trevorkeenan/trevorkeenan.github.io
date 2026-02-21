@@ -4,10 +4,11 @@
 		<meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1" />
 		<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
 		<!-- User defined head content such as meta tags and encoding options -->
-		
+	 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css">
 <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
 		
-		<link rel="stylesheet" type="text/css" media="screen" href="https://stackpath.bootstrapcdn.com/bootstrap/4.2.1/css/bootstrap.min.css" />
+		<!-- <link rel="stylesheet" type="text/css" media="screen" href="https://stackpath.bootstrapcdn.com/bootstrap/4.2.1/css/bootstrap.min.css" /> -->
+		
 		
 		<link rel="stylesheet" type="text/css" media="screen" href="stylesheets/styles_tk.css" />
 		<link rel="stylesheet" type="text/css" media="print" href="stylesheets/print.css" />
@@ -30,6 +31,11 @@
 		<link rel="stylesheet" type="text/css" media="all" href="stylesheets/iPhone.css" />
 		
 		<link rel="stylesheet" type="text/css" media="screen" href="stylesheets/sidebar/hide.css" />
+		<link rel="stylesheet" href="stylesheets/academicons/css/academicons.min.css"/>
+		<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+		<link rel="stylesheet" type="text/css" media="screen" href="stylesheets/data.css" />
+		<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" defer></script>
+		<script type="text/javascript" src="files/data.js" defer></script>
 		
 		<!-- User defined styles -->
 		
@@ -53,7 +59,7 @@
   gtag('config', 'UA-132802221-1');
 </script>
 
-<title>Research, Keenan Group</title>
+<title>Data, Keenan Group</title>
 <link rel="icon" type="image/png" href="../images/me.png">
 <link rel="apple-touch-icon" type="image/png" href="../images/me.png">
 
@@ -110,8 +116,9 @@
 							</li>
 							</ul>
 						</li>				
-					<li><a href="members.html" rel="">members</a></li>
-					<li><a href="data.html" rel="">data</a></li>
+					<li><a href="currentProjects.html" rel="">current projects</a></li>
+    				<li><a href="members.html" rel="">members</a></li>
+    				<li><a href="data.html" rel="" id="current">data</a></li>
 					<li><a href="publications.html" rel="">publications</a>
 						<ul>
         				<li><a href="publications.html#recent">- New results! </a></li>
@@ -120,12 +127,9 @@
 						</ul>
 					
 					</li>
-					<li><a href="currentProjects.html" rel="">current projects</a></li>
-					<li><a href="dataAndTools.html" rel="" id="current">data and tools</a>
 					<li><a href="journalClub.html" rel="">journal club</a></li>
 					<li><a href="join_us.html" rel="">join us</a></li>
-	
-					</ul></div>
+				</ul></div>
 				<div class="clearer"></div>
 			</div>
 			<div class="clearer"></div>
@@ -138,147 +142,46 @@
 			<div id="extraContainer4"></div>
 			<div class="clearer"></div>
 			<div id="contentWrapper"><!-- Start main content wrapper -->
-			<div id="content"><!-- Start content -->
-				
-				
-				
-				
-<div class="container">
-		<br/>	
-	
-	<section class="row">
- 	 <div class="col-md-12">
-    	<p>This page highlights publicly available datasets and software tools developed by our group to support ecosystem science and carbon cycle research. All products are free to use and open to collaboration.</p>
- 	 </div>
-	</section>
-	
-		<section class="row">
-			<h4 id="data">Data</h4>
-					<br />
-		</section>
-			<br/>
-	
-		<section class="row">
-			<div class="col-md-11">
-				<p> Text about the value of data and sections on data available
-				</p>
-			 </div>
-		</section>
-		<section class="row">
-		 	<div class="col-sm-6">
-		 		<h6><u>Publications</u></h6>
-		 		<br/>
-				 <div class="ml-1">
-				Szwarcman D, Roy S et al. [37 co-authors incl. <strong>Keenan TF</strong>] (2025)
-				Prithvi-EO-2.0: A versatile multi-temporal foundation model for earth observation applications.
-				<em>IEEE Transactions on Geoscience and Remote Sensing</em> (in press) <a href="https://arxiv.org/abs/2412.02732">here</a>.
-				<br/>
-				<strong>Kang Y</strong>, <strong>Gaber M</strong>, <strong>Bassiouni M</strong>, <strong>Xinchen Lu</strong>, <strong>Keenan TF</strong> (2025)
-				CEDAR-GPP: spatiotemporally upscaled estimates of gross primary productivity incorporating CO<sub>2</sub> fertilization.
-				<em>Earth System Science Data</em>, 17, 3009–3046 <a href="https://essd.copernicus.org/articles/17/3009/2025/">here</a>.
-				<br/>
-				<strong>Gaber M</strong>, <strong>Kang Y</strong>, Schurgers G, <strong>Keenan TF</strong> (2024)
-				Using automated machine learning for the upscaling of gross primary productivity.
-				<em>Biogeosciences</em>, 21, 2447–2472 <a href="https://bg.copernicus.org/articles/21/2447/2024/">here</a>.
-				<br/>
-				</div>
-			</div>
-			<div class="col-sm-6">
-				<div class="image-middle"><img class="imageStyle" alt="proxima" src="images/fields/veg_dynamics.jpg" width="400" height="256" /></div>
-			</div>
-		</section>		
-		
-	
-		<br/>	
-		
-		
-		<section class="row">
-			<h4 id="tools">Tools</h4>
-			<br />
-		</section>
-			<br/>
-	
-		<section class="row">
-			<div class="col-md-11">
-				<p>
-				
-				Text on the value of tools and software development
-				
-				</p>
-			</div>
-		</section>
-		
-		<section class="row">
-		 	<div class="col-sm-6">
-		 		<h6><u>Publications</u></h6>
-		 		<br/>
-				 <div class="ml-1">
-				<strong>Nguyen N</strong> et al, [13 co-authors incl. <strong>Green J, Bassiouni M, Keenan TF</strong>] (2025)
-				Widespread underestimation of rain-induced carbon losses across global drylands.
-				<em>Nature Geoscience</em> (in press)
-				<br/>
-				Szwarcman D, Roy S et al. [37 co-authors incl. <strong>Keenan TF</strong>] (2025)
-				Prithvi-EO-2.0: A versatile multi-temporal foundation model for earth observation applications.
-				<em>IEEE Transactions on Geoscience and Remote Sensing</em> (in press) <a href="https://arxiv.org/abs/2412.02732">here</a>.
-				<br/>
-				<strong>Keenan TF</strong> Migliavacca M, Papale D, Baldocchi D, Reichstein M, Torn M, Wutzler T. (2019)
-				Widespread inhibition of daytime ecosystem respiration. <em>Nature Ecology and Evolution</em>, 3, 407–415
-				<br/>
-				</div>
-			</div>
-			<div class="col-sm-6">
-				<div class="image-middle"><img class="imageStyle" alt="proxima" src="images/fields/flux_cycle3.png" width="400" height="256" /></div>
-			</div>
-		</section>		
-		
-		<br/>	
-	
-	
-		
-		
-		<br/>	
-		
-		
-		
-		
-</div>
+				<div id="content"><!-- Start content -->
+						<div id="data-viewer" data-manifest-path="https://www.keenangroup.info/keenangroup-data-assets/cedar-gpp/lt_cfe-hybrid_nt/v2/manifest.json">
+							<div class="data-title-block">
+								<h2>Global Photosynthetic Carbon Uptake</h2>
+								<p>Monthly ecosystem carbon assimilation via photosynthesis, estimated through combining distributed eddy-covariance observations, machine learning and satellite remote sensing retrievals.</p>
+							</div>
 
+						<div class="data-controls" aria-label="Time controls">
+							<button type="button" id="step-back" class="data-btn" aria-label="Step back one month">Back</button>
+							<button type="button" id="play-pause" class="data-btn" aria-label="Play or pause animation">Play</button>
+							<button type="button" id="step-forward" class="data-btn" aria-label="Step forward one month">Forward</button>
+								<label for="month-slider" class="data-label">Month</label>
+								<input type="range" id="month-slider" min="0" max="0" step="1" value="0" />
+								<span id="month-label" class="data-month-label">--</span>
+								<label for="playback-fps" class="data-label">FPS</label>
+								<input type="number" id="playback-fps" min="0.25" max="5" step="0.25" value="2" />
+							</div>
 
-
-
-
-
-
-
-				
-				
-					
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-					
+							<div class="data-layout">
+								<div id="gpp-map" aria-label="Global map of monthly GPP"></div>
+								<div class="data-side-column">
+									<div class="data-legend">
+										<h3>Legend</h3>
+										<div id="legend-ramp" class="legend-ramp"></div>
+										<div class="legend-scale">
+											<span id="legend-min">--</span>
+											<span id="legend-max">--</span>
+										</div>
+										<p class="legend-units">gC m<sup>-2</sup> day<sup>-1</sup></p>
+									<p id="data-status" class="data-status"></p>
+									</div>
+									<div class="data-citation">
+										<h3>Data &amp; Citation</h3>
+										<p class="data-coverage"><strong>Data coverage:</strong> Monthly, at 0.05 degrees spatial resolution.</p>
+										<p><strong>Data Download:</strong><br/><a href="https://zenodo.org/records/11238533" target="_blank" rel="noopener">Zenodo record 11238533</a></p>
+										<p><strong>Publication:</strong><br/>Kang, M. et al. (2025). CEDAR-GPP: a global, observation-driven dataset of gross primary productivity from 1982 to 2020. <em>Earth System Science Data</em>, 17, 3009-3031. <a href="https://doi.org/10.5194/essd-17-3009-2025" target="_blank" rel="noopener">https://doi.org/10.5194/essd-17-3009-2025</a></p>
+									</div>
+								</div>
+							</div>
+						</div>
 					<div class="clearer"></div>
 				</div><!-- End content -->
 				<div id="contentSidebar"></div><!-- Reserved space for placing sidebar inside main content area -->
@@ -322,17 +225,11 @@
 	</div><!-- End container -->
 	</body>
 	<script>
-
 $qube(function(){ $qube('#mobileMenuTab').html(mobileMenuTab); });
-
 if ( $qube('#mobileMenuTabWrapper').is(':visible') ) { qube.themeFunctions.mobileMenu(); qube.themeFunctions.resetMainMenuColors(); }
-
 qube.themeFunctions.on_resize(function(){ 
-
 if( $qube(window).width() < 481 && !$qube('#mobileMenuTab').hasClass('activated') ) { qube.themeFunctions.mobileMenu(); }
-
 qube.themeFunctions.resetMainMenuColors();
-
 });
 
 </script>
