@@ -32,7 +32,7 @@ jobs:
 
       - name: Generate stable FLUXNET snapshot CSV
         env:
-          TARGET_SNAPSHOT: assets/shuttle_snapshot.csv
+          TARGET_SNAPSHOT_CSV: assets/shuttle_snapshot.csv
         run: |
           python - <<'PY'
           import csv
@@ -44,7 +44,7 @@ jobs:
           import fluxnet_shuttle.plugins  # noqa: F401
           from fluxnet_shuttle.shuttle import listall
 
-          target_path = Path(os.environ["TARGET_SNAPSHOT"])
+          target_path = Path(os.environ["TARGET_SNAPSHOT_CSV"])
           tmp_dir = Path(os.environ.get("RUNNER_TEMP", ".")) / "fluxnet-shuttle"
           tmp_dir.mkdir(parents=True, exist_ok=True)
           target_path.parent.mkdir(parents=True, exist_ok=True)
@@ -83,20 +83,30 @@ jobs:
           print(f"Rows by hub: {dict(counts)}")
           PY
 
-      - name: Commit and push snapshot if changed
+      - name: Convert snapshot CSV to compact JSON
         env:
-          TARGET_SNAPSHOT: assets/shuttle_snapshot.csv
+          TARGET_SNAPSHOT_CSV: assets/shuttle_snapshot.csv
+          TARGET_SNAPSHOT_JSON: assets/shuttle_snapshot.json
+        run: |
+          python .github/scripts/shuttle_snapshot_csv_to_json.py \
+            --input "${TARGET_SNAPSHOT_CSV}" \
+            --output "${TARGET_SNAPSHOT_JSON}"
+
+      - name: Commit and push snapshot files if changed
+        env:
+          TARGET_SNAPSHOT_CSV: assets/shuttle_snapshot.csv
+          TARGET_SNAPSHOT_JSON: assets/shuttle_snapshot.json
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          # Stage only the generated snapshot to avoid committing anything else.
-          git add -- "${TARGET_SNAPSHOT}"
+          # Stage only generated snapshot artifacts to avoid committing anything else.
+          git add -- "${TARGET_SNAPSHOT_CSV}" "${TARGET_SNAPSHOT_JSON}"
 
           if git diff --cached --quiet; then
-            echo "No snapshot changes to commit."
+            echo "No snapshot file changes to commit."
             exit 0
           fi
 
-          git commit -m "chore(data): refresh FLUXNET Shuttle snapshot"
+          git commit -m "chore(data): refresh FLUXNET Shuttle snapshots"
           git push
