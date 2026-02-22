@@ -1,0 +1,102 @@
+name: Update FLUXNET Shuttle Snapshot
+
+"on":
+  workflow_dispatch:
+  schedule:
+    - cron: "17 5 * * *"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update-shuttle-snapshot
+  cancel-in-progress: false
+
+jobs:
+  update-shuttle-snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12.8"
+
+      - name: Install FLUXNET Shuttle from GitHub
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "git+https://github.com/fluxnet/shuttle.git"
+
+      - name: Generate stable FLUXNET snapshot CSV
+        env:
+          TARGET_SNAPSHOT: assets/shuttle_snapshot.csv
+        run: |
+          python - <<'PY'
+          import csv
+          import os
+          from collections import Counter
+          from pathlib import Path
+
+          # Explicit import ensures plugins auto-register before listall() runs.
+          import fluxnet_shuttle.plugins  # noqa: F401
+          from fluxnet_shuttle.shuttle import listall
+
+          target_path = Path(os.environ["TARGET_SNAPSHOT"])
+          tmp_dir = Path(os.environ.get("RUNNER_TEMP", ".")) / "fluxnet-shuttle"
+          tmp_dir.mkdir(parents=True, exist_ok=True)
+          target_path.parent.mkdir(parents=True, exist_ok=True)
+
+          snapshot_path = Path(listall(output_dir=str(tmp_dir)))
+
+          with snapshot_path.open("r", encoding="utf-8", newline="") as fh:
+            reader = csv.DictReader(fh)
+            fieldnames = reader.fieldnames or []
+            rows = list(reader)
+
+          if not rows:
+            raise RuntimeError("Refusing to overwrite snapshot: listall() returned zero rows.")
+
+          required_fields = {"data_hub", "site_id", "download_link"}
+          missing = sorted(required_fields - set(fieldnames))
+          if missing:
+            raise RuntimeError(f"Refusing to write snapshot: missing required columns: {missing}")
+
+          rows.sort(
+            key=lambda r: (
+              r.get("data_hub", ""),
+              r.get("site_id", ""),
+              r.get("fluxnet_product_name", ""),
+              r.get("product_id", ""),
+            )
+          )
+
+          with target_path.open("w", encoding="utf-8", newline="") as fh:
+            writer = csv.DictWriter(fh, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(rows)
+
+          counts = Counter(r.get("data_hub", "") for r in rows)
+          print(f"Wrote {len(rows)} rows to {target_path}")
+          print(f"Rows by hub: {dict(counts)}")
+          PY
+
+      - name: Commit and push snapshot if changed
+        env:
+          TARGET_SNAPSHOT: assets/shuttle_snapshot.csv
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # Stage only the generated snapshot to avoid committing anything else.
+          git add -- "${TARGET_SNAPSHOT}"
+
+          if git diff --cached --quiet; then
+            echo "No snapshot changes to commit."
+            exit 0
+          fi
+
+          git commit -m "chore(data): refresh FLUXNET Shuttle snapshot"
+          git push
