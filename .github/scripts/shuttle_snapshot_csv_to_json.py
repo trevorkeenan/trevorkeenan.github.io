@@ -66,11 +66,15 @@ def normalize_row(raw_row: Dict[str, str], header_map: Dict[str, str]) -> Dict[s
 
 def build_record(row: Dict[str, str]) -> Dict[str, object]:
     site_id = first_present(row, "site_id")
+    vegetation_type = first_present(row, "vegetation_type", "igbp", "veg_type")
+    source_network = first_present(row, "source_network", "product_source_network")
     record: Dict[str, object] = {
         "site_id": site_id,
         "country": derive_country(site_id, first_present(row, "country", "country_code")),
         "data_hub": first_present(row, "data_hub", "hub"),
         "network": first_present(row, "network"),
+        "source_network": source_network,
+        "vegetation_type": vegetation_type,
         "first_year": maybe_int(first_present(row, "first_year", "year_start")),
         "last_year": maybe_int(first_present(row, "last_year", "year_end")),
         "download_link": first_present(row, "download_link", "url"),
@@ -114,7 +118,10 @@ def main() -> None:
     columns: List[str] = ["site_id"]
     if any("site_name" in record for record in records):
         columns.append("site_name")
-    columns.extend(["country", "data_hub", "network", "first_year", "last_year", "download_link"])
+    columns.extend(["country", "data_hub", "network"])
+    if any(record.get("source_network") for record in records):
+        columns.append("source_network")
+    columns.extend(["vegetation_type", "first_year", "last_year", "download_link"])
 
     payload_rows: List[List[object]] = []
     for record in records:

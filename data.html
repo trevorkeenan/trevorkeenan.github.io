@@ -34,8 +34,10 @@
 		<link rel="stylesheet" href="stylesheets/academicons/css/academicons.min.css"/>
 		<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 		<link rel="stylesheet" type="text/css" media="screen" href="stylesheets/data.css" />
+		<link rel="stylesheet" type="text/css" media="screen" href="assets/shuttle-explorer.css" />
 		<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" defer></script>
 		<script type="text/javascript" src="files/data.js" defer></script>
+		<script type="text/javascript" src="assets/shuttle-explorer.js" defer></script>
 		
 		<!-- User defined styles -->
 		
@@ -143,6 +145,16 @@
 			<div class="clearer"></div>
 			<div id="contentWrapper"><!-- Start main content wrapper -->
 				<div id="content"><!-- Start content -->
+						<section id="fluxnet-shuttle-section" class="fluxpulse-section" aria-labelledby="fluxnet-shuttle-heading">
+							<div class="fluxpulse-title-block">
+								<h2 id="fluxnet-shuttle-heading">FLUXNET Data Explorer</h2>
+								<p>Explore and download a regularly refreshed snapshot of the FLUXNET database<span id="shuttle-snapshot-last-updated"></span>, with observations from the various regional networks. Search by site ID or site name, then open hub-hosted download links directly from the table. Data are provided by site teams from around the world, processed by AmeriFlux (US), ICOS (Europe) or TERN (Australia/New Zealand), and served via the FLUXNET Shuttle (<a href="https://data.fluxnet.org/" target="_blank" rel="noopener">https://data.fluxnet.org/</a>).</p>
+							</div>
+							<div id="shuttle-explorer" class="shuttle-explorer--hide-header" data-shuttle-explorer data-json-src="assets/shuttle_snapshot.json" data-csv-src="assets/shuttle_snapshot.csv" data-page-size="10"></div>
+						</section>
+
+<br/>
+<br/>
 						<div id="data-viewer" data-manifest-path="https://www.keenangroup.info/keenangroup-data-assets/cedar-gpp/lt_cfe-hybrid_nt/v2/manifest.json">
 							<div class="data-title-block">
 								<h2>CEDAR: Estimating photosynthetic carbon uptake, everywhere, all the time</h2>
