@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
 import re
 from pathlib import Path
@@ -127,7 +128,17 @@ def main() -> None:
     for record in records:
         payload_rows.append([record.get(column) for column in columns])
 
-    payload = {"columns": columns, "rows": payload_rows}
+    data_payload = {"columns": columns, "rows": payload_rows}
+    canonical_data_json = json.dumps(data_payload, ensure_ascii=True, separators=(",", ":"))
+    version_hash = hashlib.sha256(canonical_data_json.encode("utf-8")).hexdigest()
+    payload = {
+        "meta": {
+            "schema_version": 1,
+            "version": f"sha256:{version_hash}",
+        },
+        "columns": columns,
+        "rows": payload_rows,
+    }
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     json_text = json.dumps(payload, ensure_ascii=True, separators=(",", ":"))
@@ -136,6 +147,7 @@ def main() -> None:
     print(f"Wrote compact JSON: {output_path}")
     print(f"Columns: {columns}")
     print(f"Rows: {len(payload_rows)}")
+    print(f"Version: sha256:{version_hash}")
     print(f"Bytes: {len(json_text.encode('utf-8'))}")
 
 

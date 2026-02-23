@@ -7,6 +7,8 @@
   var MAX_PAGE_BUTTONS = 7;
   var SEARCH_DEBOUNCE_MS = 180;
   var STYLE_ID = "shuttle-explorer-inline-styles";
+  var SNAPSHOT_CACHE_SCHEMA_VERSION = 1;
+  var SNAPSHOT_CACHE_STORAGE_PREFIX = "shuttle-explorer:snapshot-cache:v1";
 
   var SORT_COLUMNS = [
     { key: "site_id", label: "Site ID", type: "string" },
@@ -73,6 +75,106 @@
     var dt = new Date(raw);
     var formatted = formatIsoDate(dt);
     return formatted ? " (last updated: " + formatted + ")" : "";
+  }
+
+  function safeJsonParse(text) {
+    if (!text) {
+      return null;
+    }
+    try {
+      return JSON.parse(text);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function getLocalStorageSafe() {
+    try {
+      return window.localStorage || null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function snapshotCacheBaseKey(jsonUrl, csvUrl) {
+    return [
+      SNAPSHOT_CACHE_STORAGE_PREFIX,
+      encodeURIComponent(String(jsonUrl || "")),
+      encodeURIComponent(String(csvUrl || ""))
+    ].join("|");
+  }
+
+  function snapshotCacheIndexKey(baseKey) {
+    return baseKey + "|index";
+  }
+
+  function snapshotCacheRecordKey(baseKey, freshnessKey) {
+    return baseKey + "|record|" + encodeURIComponent(String(freshnessKey || "unknown"));
+  }
+
+  function readSnapshotCache(jsonUrl, csvUrl) {
+    var storage = getLocalStorageSafe();
+    if (!storage) {
+      return null;
+    }
+    var baseKey = snapshotCacheBaseKey(jsonUrl, csvUrl);
+    var indexKey = snapshotCacheIndexKey(baseKey);
+
+    try {
+      var index = safeJsonParse(storage.getItem(indexKey));
+      if (!index || index.schema !== SNAPSHOT_CACHE_SCHEMA_VERSION || !index.recordKey) {
+        return null;
+      }
+      var record = safeJsonParse(storage.getItem(String(index.recordKey)));
+      if (!record || record.schema !== SNAPSHOT_CACHE_SCHEMA_VERSION || !Array.isArray(record.rows)) {
+        return null;
+      }
+      return record;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function writeSnapshotCache(jsonUrl, csvUrl, entry) {
+    var storage = getLocalStorageSafe();
+    if (!storage || !entry || !Array.isArray(entry.rows)) {
+      return;
+    }
+    var baseKey = snapshotCacheBaseKey(jsonUrl, csvUrl);
+    var indexKey = snapshotCacheIndexKey(baseKey);
+    var freshnessKey = String(entry.freshnessKey || "unknown");
+    var recordKey = snapshotCacheRecordKey(baseKey, freshnessKey);
+
+    var record = {
+      schema: SNAPSHOT_CACHE_SCHEMA_VERSION,
+      freshnessKey: freshnessKey,
+      source: entry.source || "",
+      sourceUrl: entry.sourceUrl || "",
+      warning: entry.warning || "",
+      lastUpdatedLabel: entry.lastUpdatedLabel || "",
+      rows: entry.rows,
+      droppedRows: entry.droppedRows || 0,
+      cachedAt: new Date().toISOString()
+    };
+
+    try {
+      var oldIndex = safeJsonParse(storage.getItem(indexKey));
+      storage.setItem(recordKey, JSON.stringify(record));
+      storage.setItem(indexKey, JSON.stringify({
+        schema: SNAPSHOT_CACHE_SCHEMA_VERSION,
+        recordKey: recordKey,
+        freshnessKey: freshnessKey
+      }));
+      if (oldIndex && oldIndex.recordKey && oldIndex.recordKey !== recordKey) {
+        storage.removeItem(String(oldIndex.recordKey));
+      }
+    } catch (e) {
+      try {
+        storage.removeItem(indexKey);
+      } catch (e2) {
+        // Ignore localStorage cleanup failures.
+      }
+    }
   }
 
   function splitNetworks(value) {
@@ -300,8 +402,29 @@
     return { rows: rows, dropped: dropped };
   }
 
+  function extractSnapshotMeta(payload) {
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+      return {};
+    }
+    var meta = payload.meta;
+    if (!meta || typeof meta !== "object" || Array.isArray(meta)) {
+      return {};
+    }
+    return meta;
+  }
+
+  function buildSnapshotFreshnessKey(result) {
+    if (result && result.meta && result.meta.version) {
+      return "meta:" + String(result.meta.version);
+    }
+    if (result && result.lastModified) {
+      return "last-modified:" + String(result.lastModified);
+    }
+    return "source:" + String(result && result.source ? result.source : "") + ":" + String(result && result.sourceUrl ? result.sourceUrl : "");
+  }
+
   function fetchText(url) {
-    return fetch(url, { cache: "no-store" }).then(function (res) {
+    return fetch(url).then(function (res) {
       if (!res.ok) {
         throw new Error("HTTP " + res.status + " for " + url);
       }
@@ -315,7 +438,7 @@
   }
 
   function fetchJson(url) {
-    return fetch(url, { cache: "no-store" }).then(function (res) {
+    return fetch(url).then(function (res) {
       if (!res.ok) {
         throw new Error("HTTP " + res.status + " for " + url);
       }
@@ -331,11 +454,13 @@
   function loadSnapshot(jsonUrl, csvUrl) {
     return fetchJson(jsonUrl)
       .then(function (jsonResult) {
+        var meta = extractSnapshotMeta(jsonResult.payload);
         return {
           rawRows: payloadJsonToObjects(jsonResult.payload),
           source: "json",
           sourceUrl: jsonUrl,
-          lastModified: jsonResult.lastModified || ""
+          lastModified: jsonResult.lastModified || "",
+          meta: meta
         };
       })
       .catch(function (jsonError) {
@@ -345,6 +470,7 @@
             source: "csv",
             sourceUrl: csvUrl,
             lastModified: csvResult.lastModified || "",
+            meta: {},
             warning: "JSON snapshot unavailable; loaded CSV fallback.",
             jsonError: jsonError
           };
@@ -1690,27 +1816,77 @@
     }
   };
 
+  Explorer.prototype.applyLoadedSnapshotState = function (snapshot) {
+    this.state.rows = Array.isArray(snapshot && snapshot.rows) ? snapshot.rows : [];
+    this.pruneSelection();
+    this.state.droppedRows = snapshot && snapshot.droppedRows ? snapshot.droppedRows : 0;
+    this.state.source = snapshot && snapshot.source ? snapshot.source : "";
+    this.state.sourceUrl = snapshot && snapshot.sourceUrl ? snapshot.sourceUrl : "";
+    this.state.warning = snapshot && snapshot.warning ? snapshot.warning : "";
+    this.state.lastUpdatedLabel = snapshot && snapshot.lastUpdatedLabel ? snapshot.lastUpdatedLabel : "";
+    this.state.errorMessage = "";
+
+    this.populateFilters();
+    this.updateDerivedState();
+    this.state.mode = "ready";
+    this.render();
+  };
+
   Explorer.prototype.load = function () {
     var self = this;
+    var cached = readSnapshotCache(this.jsonUrl, this.csvUrl);
+    var hadCache = !!(cached && Array.isArray(cached.rows) && cached.rows.length);
+
     this.setMode("loading", "Loading snapshot…", "is-loading");
+    if (hadCache) {
+      this.applyLoadedSnapshotState({
+        rows: cached.rows,
+        droppedRows: cached.droppedRows || 0,
+        source: cached.source || "cache",
+        sourceUrl: cached.sourceUrl || this.jsonUrl,
+        warning: cached.warning || "",
+        lastUpdatedLabel: cached.lastUpdatedLabel || ""
+      });
+    }
+
     loadSnapshot(this.jsonUrl, this.csvUrl)
       .then(function (result) {
-        var normalized = normalizeRows(result.rawRows || []);
-        self.state.rows = normalized.rows;
-        self.pruneSelection();
-        self.state.droppedRows = normalized.dropped;
-        self.state.source = result.source || "";
-        self.state.sourceUrl = result.sourceUrl || "";
-        self.state.warning = result.warning || "";
-        self.state.lastUpdatedLabel = formatLastUpdatedLabel(result.lastModified || "");
-        self.state.errorMessage = "";
+        var freshnessKey = buildSnapshotFreshnessKey(result);
+        if (hadCache && cached.freshnessKey && cached.freshnessKey === freshnessKey) {
+          if (result.lastModified) {
+            self.state.lastUpdatedLabel = formatLastUpdatedLabel(result.lastModified);
+            self.render();
+          }
+          return;
+        }
 
-        self.populateFilters();
-        self.updateDerivedState();
-        self.state.mode = "ready";
-        self.render();
+        var normalized = normalizeRows(result.rawRows || []);
+        var snapshotState = {
+          rows: normalized.rows,
+          droppedRows: normalized.dropped,
+          source: result.source || "",
+          sourceUrl: result.sourceUrl || "",
+          warning: result.warning || "",
+          lastUpdatedLabel: formatLastUpdatedLabel(result.lastModified || "")
+        };
+        self.applyLoadedSnapshotState(snapshotState);
+        writeSnapshotCache(self.jsonUrl, self.csvUrl, {
+          freshnessKey: freshnessKey,
+          rows: normalized.rows,
+          droppedRows: normalized.dropped,
+          source: result.source || "",
+          sourceUrl: result.sourceUrl || "",
+          warning: result.warning || "",
+          lastUpdatedLabel: formatLastUpdatedLabel(result.lastModified || "")
+        });
       })
       .catch(function (error) {
+        if (hadCache && self.state.mode === "ready" && self.state.rows.length) {
+          var msg = "Update check failed; showing cached snapshot.";
+          self.state.warning = self.state.warning ? (self.state.warning + " " + msg) : msg;
+          self.render();
+          return;
+        }
         self.state.mode = "error";
         self.state.errorMessage = error && error.message ? error.message : String(error);
         self.state.rows = [];
