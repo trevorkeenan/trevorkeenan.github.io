@@ -423,10 +423,10 @@
   function buildAttributionText() {
     var accessDate = new Date().toISOString().slice(0, 10);
     return [
-      "FLUXNET data were discovered using a FLUXNET Shuttle metadata snapshot accessed via the Keenan Group FLUXNET explorer.",
-      "FLUXNET data are shared under the CC-BY 4.0 data use license.",
-      "Please cite the dataset/product-specific citation(s) provided with each downloaded archive and acknowledge the originating data hub/network (e.g., AmeriFlux, ICOS, TERN).",
-      "Access date: " + accessDate + "."
+      "The FLUXNET data presented here were discovered using a FLUXNET Shuttle metadata snapshot accessed via the Q.E.D. Lab FLUXNET Data Explorer.",
+      "FLUXNET data are shared openly under the CC-BY 4.0 data use license, which requires attribution.",
+      "Please cite the dataset/product-specific citation(s) provided with each downloaded archive, along with any other attribution requirements contained therein.",
+      <br/>"Available data is updated as of: " + accessDate + "."
     ].join(" ");
   }
 
@@ -579,7 +579,7 @@
       "</div>",
       "<aside class=\"shuttle-explorer__attribution\" data-role=\"attribution\">",
       "  <h3>Data use &amp; attribution</h3>",
-      "  <p class=\"shuttle-explorer__tiny\">FLUXNET data are shared under <a href=\"https://creativecommons.org/licenses/by/4.0/\" target=\"_blank\" rel=\"noopener noreferrer\">CC-BY 4.0</a>. Please follow dataset-specific attribution and citation guidance included with each downloaded archive.</p>",
+      "  <p class=\"shuttle-explorer__tiny\">FLUXNET data are shared under <a href=\"https://creativecommons.org/licenses/by/4.0/\" target=\"_blank\" rel=\"noopener noreferrer\">CC-BY 4.0</a>. Data users <em>must</em> follow dataset-specific attribution and citation guidance included with each downloaded archive.</p>",
       "  <textarea readonly data-role=\"attribution-text\"></textarea>",
       "</aside>"
     ].join("");
