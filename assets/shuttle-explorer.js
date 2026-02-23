@@ -426,7 +426,7 @@
       "The FLUXNET data presented here were discovered using a FLUXNET Shuttle metadata snapshot accessed via the Q.E.D. Lab FLUXNET Data Explorer.",
       "FLUXNET data are shared openly under the CC-BY 4.0 data use license, which requires attribution.",
       "Please cite the dataset/product-specific citation(s) provided with each downloaded archive, along with any other attribution requirements contained therein.",
-      <br/>"Available data is updated as of: " + accessDate + "."
+      "Available data is updated as of: " + accessDate + "."
     ].join(" ");
   }
 
