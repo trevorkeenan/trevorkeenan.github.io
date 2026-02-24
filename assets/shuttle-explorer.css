@@ -566,7 +566,6 @@
 .shuttle-explorer__header p,
 .shuttle-explorer__status,
 .shuttle-explorer__summary,
-.shuttle-explorer__table,
 .shuttle-explorer__empty,
 .shuttle-explorer__attribution p,
 .shuttle-explorer__attribution textarea {
@@ -599,4 +598,18 @@
 .shuttle-explorer__cli-pre {
   font-size: 0.9em;
   line-height: 1.4;
+}
+
+/* Keep the table more compact to avoid overflow in columns/cells */
+.shuttle-explorer__table,
+.shuttle-explorer__table th,
+.shuttle-explorer__table td {
+  font-size: 0.9em;
+  line-height: 1.35;
+}
+
+.shuttle-explorer__table .shuttle-explorer__btn,
+.shuttle-explorer__table .shuttle-explorer__btn--small {
+  font-size: 0.86em;
+  line-height: 1.2;
 }
