@@ -77,6 +77,12 @@
     return formatted ? " (last updated: " + formatted + ")" : "";
   }
 
+  function gaEvent(name, params) {
+    if (typeof window.gtag === "function") {
+      window.gtag("event", name, params || {});
+    }
+  }
+
   function safeJsonParse(text) {
     if (!text) {
       return null;
@@ -800,6 +806,10 @@
       self.state.page = 1;
       self.updateDerivedState();
       self.render();
+      gaEvent("fx_search", {
+        q_len: self.state.search.length,
+        results: self.state.filteredRows.length
+      });
     };
 
     if (b.search) {
@@ -817,6 +827,7 @@
         self.state.page = 1;
         self.updateDerivedState();
         self.render();
+        self.trackFilterChange("network", self.state.selectedNetwork);
       });
     }
 
@@ -826,6 +837,7 @@
         self.state.page = 1;
         self.updateDerivedState();
         self.render();
+        self.trackFilterChange("country", self.state.selectedCountry);
       });
     }
 
@@ -835,6 +847,7 @@
         self.state.page = 1;
         self.updateDerivedState();
         self.render();
+        self.trackFilterChange("vegetation_type", self.state.selectedVegetation);
       });
     }
 
@@ -852,6 +865,7 @@
         self.state.page = 1;
         self.updateDerivedState();
         self.render();
+        self.trackFilterChange("hub", hub + ":" + (target.checked ? "on" : "off"));
       });
     }
 
@@ -864,6 +878,9 @@
     if (b.selectFiltered) {
       b.selectFiltered.addEventListener("click", function () {
         self.selectRows(self.state.filteredRows, true);
+        gaEvent("fx_select_all_filtered", {
+          count: self.state.filteredRows.length
+        });
       });
     }
 
@@ -1006,6 +1023,25 @@
     if (this.bindings.attributionText) {
       this.bindings.attributionText.value = text;
     }
+  };
+
+  Explorer.prototype.trackFilterChange = function (filterName, value) {
+    gaEvent("fx_filter_change", {
+      filter: String(filterName || ""),
+      value: String(value || ""),
+      results: this.state.filteredRows.length
+    });
+  };
+
+  Explorer.prototype.trackExplorerLoadedOnce = function () {
+    if (this._gaExplorerLoadedTracked) {
+      return;
+    }
+    this._gaExplorerLoadedTracked = true;
+    gaEvent("fx_explorer_loaded", {
+      rows: this.state.rows.length,
+      snapshot_last_updated: this.state.lastUpdatedLabel || ""
+    });
   };
 
   Explorer.prototype.renderLastUpdatedLabel = function () {
@@ -1342,6 +1378,7 @@
     }
     this.downloadTextFile("fluxnet_selected_manifest.csv", this.buildSelectionManifestCsv(rows), "text/csv;charset=utf-8");
     this.setBulkStatus("Downloaded manifest CSV for " + rows.length + " selected sites.");
+    gaEvent("fx_manifest_download", { count: rows.length });
   };
 
   Explorer.prototype.handleDownloadLinks = function () {
@@ -1351,6 +1388,7 @@
     }
     this.downloadTextFile("fluxnet_selected_links.txt", this.buildLinksText(rows), "text/plain;charset=utf-8");
     this.setBulkStatus("Downloaded links TXT for " + rows.length + " selected sites.");
+    gaEvent("fx_links_download", { count: rows.length });
   };
 
   Explorer.prototype.handleDownloadScript = function () {
@@ -1360,6 +1398,7 @@
     }
     this.downloadTextFile("fluxnet_bulk_download.sh", this.buildCurlScript(rows), "text/x-shellscript;charset=utf-8");
     this.setBulkStatus("Downloaded shell script for " + rows.length + " selected sites.");
+    gaEvent("fx_script_download", { count: rows.length });
   };
 
   Explorer.prototype.handleDownloadSitesFile = function () {
@@ -1377,6 +1416,7 @@
       return;
     }
     this.copyText(this.buildLinksText(rows), "Copied selected download links.");
+    gaEvent("fx_copy_links", { count: rows.length });
   };
 
   Explorer.prototype.toggleCliPanel = function () {
@@ -1396,6 +1436,7 @@
       return;
     }
     this.copyText(this.buildShuttleCommandText(rows), "Copied Shuttle CLI helper command.");
+    gaEvent("fx_copy_command", { count: rows.length });
   };
 
   Explorer.prototype.renderBulkPanel = function () {
@@ -1830,6 +1871,7 @@
     this.updateDerivedState();
     this.state.mode = "ready";
     this.render();
+    this.trackExplorerLoadedOnce();
   };
 
   Explorer.prototype.load = function () {
