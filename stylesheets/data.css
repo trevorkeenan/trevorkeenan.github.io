@@ -363,3 +363,42 @@
 		text-align: center;
 	}
 }
+
+/* Typography normalization for data.html to better match the site body text scale */
+#data-viewer .data-title-block p,
+.fluxpulse-title-block p {
+	font-size: 1em;
+	line-height: 1.45;
+}
+
+#data-viewer .data-btn,
+.fluxpulse-btn,
+#month-label,
+#playback-fps {
+	font-size: 0.95em;
+	line-height: 1.3;
+}
+
+#data-viewer .data-label {
+	font-size: 0.95em;
+}
+
+#data-viewer .data-legend h3,
+#data-viewer .data-citation h3,
+.fluxpulse-citation h3 {
+	font-size: 1em;
+}
+
+#data-viewer .data-citation p,
+.fluxpulse-citation p {
+	font-size: 0.95em;
+	line-height: 1.5;
+}
+
+#data-viewer .legend-scale,
+#data-viewer .legend-units,
+#data-viewer .data-status,
+.fluxpulse-popout-status {
+	font-size: 0.9em;
+	line-height: 1.35;
+}

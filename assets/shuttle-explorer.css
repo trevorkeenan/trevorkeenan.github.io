@@ -554,3 +554,49 @@
     text-align: center;
   }
 }
+
+/* Typography normalization to align the explorer with the site's default content scale */
+.shuttle-explorer {
+  font-size: 1em;
+  line-height: 1.45;
+  --shuttle-table-row-height: 48px;
+  --shuttle-table-header-height: 46px;
+}
+
+.shuttle-explorer__header p,
+.shuttle-explorer__status,
+.shuttle-explorer__summary,
+.shuttle-explorer__table,
+.shuttle-explorer__empty,
+.shuttle-explorer__attribution p,
+.shuttle-explorer__attribution textarea {
+  font-size: 1em;
+  line-height: 1.45;
+}
+
+.shuttle-explorer__field label,
+.shuttle-explorer__hub-prefix,
+.shuttle-explorer__hub-chip,
+.shuttle-explorer__bulk-warning,
+.shuttle-explorer__bulk-guide summary,
+.shuttle-explorer__bulk-guide li,
+.shuttle-explorer__tiny {
+  font-size: 0.95em;
+  line-height: 1.35;
+}
+
+.shuttle-explorer__field input,
+.shuttle-explorer__field select,
+.shuttle-explorer__btn {
+  font-size: 0.95em;
+  line-height: 1.3;
+}
+
+.shuttle-explorer__btn--small {
+  font-size: 0.95em;
+}
+
+.shuttle-explorer__cli-pre {
+  font-size: 0.9em;
+  line-height: 1.4;
+}
