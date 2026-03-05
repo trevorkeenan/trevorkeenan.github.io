@@ -10,3 +10,45 @@ This repo includes a GitHub Actions workflow at `.github/workflows/update-shuttl
 - Safety behavior: the workflow only stages/commits the generated snapshot files, and it refuses to overwrite the CSV snapshot if `listall()` returns zero rows
 
 This supports a no-backend GitHub Pages setup where the site reads stable snapshot paths directly.
+
+## AmeriFlux source integration
+
+The explorer now merges two sources:
+
+- FLUXNET Shuttle snapshot rows (`assets/shuttle_snapshot.json` / `assets/shuttle_snapshot.csv`)
+- AmeriFlux FLUXNET API availability (`https://amfcdn.lbl.gov/api/v2/data_availability/AmeriFlux/FLUXNET/CCBY4.0`)
+
+Merge behavior:
+
+- If a site exists in both sources, Shuttle is canonical and the row is labeled `AmeriFlux-shuttle`.
+- If a site exists only in the AmeriFlux API (with non-empty `publish_years`), it is shown as `AmeriFlux`.
+
+AmeriFlux availability is cached in browser localStorage (`shuttle-explorer:ameriflux-availability:v1`) to avoid calling the availability endpoint on every page load.
+
+### AmeriFlux download identity and static deployments
+
+- AmeriFlux **availability** is public and is always queried in-browser.
+- AmeriFlux **download requests** require user identity fields (`user_id`, `user_email`), so this site does **not** embed personal credentials in shipped JavaScript.
+- Hardcoded identity values must never be committed.
+
+For static/public deployments (for example GitHub Pages):
+
+- AmeriFlux-only rows show `Copy AmeriFlux curl command`.
+- The copied command contains placeholders (`YOUR_AMERIFLUX_USERNAME`, `YOUR_EMAIL`) and a site-specific payload.
+- The command preserves the filename fix by stripping query strings for naming:
+  - `clean_url="${url%%\\?*}"`
+  - `filename="$(basename "$clean_url")"`
+  - `curl -L "$url" -o "$filename"`
+
+For trusted/private runtime deployments:
+
+- AmeriFlux API downloads can be enabled via runtime config (`window.FLUXNET_EXPLORER_CONFIG`) with:
+  - `amerifluxTrustedRuntime: true`
+  - `amerifluxUserId` (from `AMERIFLUX_USER_ID`)
+  - `amerifluxUserEmail` (from `AMERIFLUX_USER_EMAIL`)
+- When both sources contain a site, Shuttle download flow remains canonical.
+
+## Dev checks
+
+- Unit tests (Node built-in test runner): `node --test tests/shuttle-explorer.test.js`
+- AmeriFlux smoke check (counts; optional AR-Bal download URL if credentials are set): `python3 scripts/ameriflux_api_smoke.py`

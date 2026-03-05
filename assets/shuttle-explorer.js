@@ -9,12 +9,27 @@
   var STYLE_ID = "shuttle-explorer-inline-styles";
   var SNAPSHOT_CACHE_SCHEMA_VERSION = 1;
   var SNAPSHOT_CACHE_STORAGE_PREFIX = "shuttle-explorer:snapshot-cache:v1";
+  var AMERIFLUX_AVAILABILITY_URL = "https://amfcdn.lbl.gov/api/v2/data_availability/AmeriFlux/FLUXNET/CCBY4.0";
+  var AMERIFLUX_DOWNLOAD_URL = "https://amfcdn.lbl.gov/api/v1/data_download";
+  var AMERIFLUX_DEFAULT_VARIANT = "FULLSET";
+  var AMERIFLUX_DEFAULT_POLICY = "CCBY4.0";
+  var AMERIFLUX_TEMPLATE_USER_ID = "YOUR_AMERIFLUX_USERNAME";
+  var AMERIFLUX_TEMPLATE_USER_EMAIL = "YOUR_EMAIL";
+  var AMERIFLUX_TRUSTED_RUNTIME_FLAG = "amerifluxTrustedRuntime";
+  var AMERIFLUX_SOURCE_ONLY = "AmeriFlux";
+  var AMERIFLUX_SHUTTLE = "AmeriFlux-shuttle";
+  var SHUTTLE_SOURCE = "Shuttle";
+  var AMERIFLUX_AVAILABILITY_CACHE_KEY = "shuttle-explorer:ameriflux-availability:v1";
+  var AMERIFLUX_AVAILABILITY_CACHE_MAX_AGE_MS = 6 * 60 * 60 * 1000;
+  var MAX_HTTP_RETRIES = 3;
+  var RETRY_BASE_DELAY_MS = 500;
 
   var SORT_COLUMNS = [
     { key: "site_id", label: "Site ID", type: "string" },
     { key: "site_name", label: "Site Name", type: "string" },
     { key: "country", label: "Country", type: "string" },
     { key: "data_hub", label: "Hub", type: "string" },
+    { key: "source_label", label: "Source", type: "string" },
     { key: "network", label: "Network", type: "string" },
     { key: "vegetation_type", label: "Veg Type", type: "string" },
     { key: "years", label: "Years", type: "years" }
@@ -160,6 +175,10 @@
       lastUpdatedLabel: entry.lastUpdatedLabel || "",
       rows: entry.rows,
       droppedRows: entry.droppedRows || 0,
+      amerifluxTotalSites: entry.amerifluxTotalSites || 0,
+      amerifluxSitesWithYears: entry.amerifluxSitesWithYears || 0,
+      amerifluxOverlapSites: entry.amerifluxOverlapSites || 0,
+      amerifluxOnlySites: entry.amerifluxOnlySites || 0,
       cachedAt: new Date().toISOString()
     };
 
@@ -232,6 +251,338 @@
       return "-" + String(lastYear);
     }
     return "\u2014";
+  }
+
+  function stripUrlQueryForFilename(url) {
+    return String(url || "").split("?")[0];
+  }
+
+  function filenameFromUrl(url) {
+    var cleanUrl = stripUrlQueryForFilename(url).trim();
+    if (!cleanUrl) {
+      return "";
+    }
+    var idx = cleanUrl.lastIndexOf("/");
+    if (idx < 0) {
+      return cleanUrl;
+    }
+    return cleanUrl.slice(idx + 1);
+  }
+
+  function shellSingleQuote(value) {
+    return String(value == null ? "" : value).replace(/'/g, "'\"'\"'");
+  }
+
+  function buildAmeriFluxCurlCommand(siteId, variant, policy, endpointUrl) {
+    var site = String(siteId || "").trim();
+    var payload = {
+      user_id: AMERIFLUX_TEMPLATE_USER_ID,
+      user_email: AMERIFLUX_TEMPLATE_USER_EMAIL,
+      data_product: "FLUXNET",
+      data_variant: String(variant || AMERIFLUX_DEFAULT_VARIANT),
+      data_policy: String(policy || AMERIFLUX_DEFAULT_POLICY),
+      site_ids: site ? [site] : ["SITE_ID_HERE"],
+      intended_use: "research",
+      description: "Download FLUXNET for " + (site || "SITE_ID_HERE"),
+      agree_policy: true,
+      is_test: false
+    };
+    var payloadJson = JSON.stringify(payload, null, 2);
+    return [
+      "curl -sS -X POST \"" + String(endpointUrl || AMERIFLUX_DOWNLOAD_URL) + "\" \\",
+      "  -H \"Content-Type: application/json\" \\",
+      "  -H \"accept: application/json\" \\",
+      "  --data-binary '" + shellSingleQuote(payloadJson) + "' \\",
+      "| tee download_response.json \\",
+      "| jq -r '.data_urls[].url' | while read -r url; do",
+      "  clean_url=\"${url%%\\?*}\"",
+      "  filename=\"$(basename \"$clean_url\")\"",
+      "  curl -L \"$url\" -o \"$filename\"",
+      "done"
+    ].join("\n");
+  }
+
+  function delayMs(ms) {
+    return new Promise(function (resolve) {
+      setTimeout(resolve, Math.max(0, ms || 0));
+    });
+  }
+
+  function fetchWithRetry(url, options, retryCount, baseDelayMs) {
+    var retries = Math.max(0, parseInt(retryCount, 10) || 0);
+    var delayBase = Math.max(50, parseInt(baseDelayMs, 10) || RETRY_BASE_DELAY_MS);
+
+    function attempt(attemptNo) {
+      return fetch(url, options || {})
+        .then(function (res) {
+          if (res.ok) {
+            return res;
+          }
+          return res.text().then(function (bodyText) {
+            var err = new Error("HTTP " + res.status + " for " + url + (bodyText ? (": " + String(bodyText).slice(0, 260)) : ""));
+            err.status = res.status;
+            err.responseBody = bodyText || "";
+            err.noRetry = res.status >= 400 && res.status < 500;
+            throw err;
+          });
+        })
+        .catch(function (error) {
+          if (error && error.noRetry) {
+            throw error;
+          }
+          if (attemptNo >= retries) {
+            throw error;
+          }
+          var jitter = Math.floor(Math.random() * 120);
+          var waitMs = (Math.pow(2, attemptNo) * delayBase) + jitter;
+          return delayMs(waitMs).then(function () {
+            return attempt(attemptNo + 1);
+          });
+        });
+    }
+
+    return attempt(0);
+  }
+
+  function fetchJsonWithRetry(url, options, retryCount, baseDelayMs) {
+    return fetchWithRetry(url, options, retryCount, baseDelayMs).then(function (res) {
+      return res.json().then(function (payload) {
+        return {
+          payload: payload,
+          lastModified: res.headers && res.headers.get ? (res.headers.get("last-modified") || "") : ""
+        };
+      }).catch(function (error) {
+        var parseErr = new Error("Failed to parse JSON response from " + url + ": " + (error && error.message ? error.message : String(error)));
+        parseErr.noRetry = true;
+        throw parseErr;
+      });
+    });
+  }
+
+  function stableHashString(value) {
+    var s = String(value || "");
+    var h = 2166136261;
+    var i;
+    for (i = 0; i < s.length; i += 1) {
+      h ^= s.charCodeAt(i);
+      h += (h << 1) + (h << 4) + (h << 7) + (h << 8) + (h << 24);
+    }
+    return "h" + ((h >>> 0).toString(16));
+  }
+
+  function readAmeriFluxAvailabilityCache() {
+    var storage = getLocalStorageSafe();
+    if (!storage) {
+      return null;
+    }
+    try {
+      var payload = safeJsonParse(storage.getItem(AMERIFLUX_AVAILABILITY_CACHE_KEY));
+      if (!payload || payload.schema !== 1 || !Array.isArray(payload.sites)) {
+        return null;
+      }
+      var cachedAt = parseInt(payload.cachedAt || "0", 10) || 0;
+      var ageMs = Date.now() - cachedAt;
+      payload.isFresh = ageMs >= 0 && ageMs <= AMERIFLUX_AVAILABILITY_CACHE_MAX_AGE_MS;
+      return payload;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function writeAmeriFluxAvailabilityCache(parsed) {
+    var storage = getLocalStorageSafe();
+    if (!storage || !parsed || !Array.isArray(parsed.sites)) {
+      return;
+    }
+    var payload = {
+      schema: 1,
+      cachedAt: String(Date.now()),
+      totalSites: parsed.totalSites || 0,
+      sitesWithYears: parsed.sitesWithYears || 0,
+      sites: parsed.sites,
+      freshnessKey: parsed.freshnessKey || ""
+    };
+    try {
+      storage.setItem(AMERIFLUX_AVAILABILITY_CACHE_KEY, JSON.stringify(payload));
+    } catch (e) {
+      // Ignore localStorage quota issues.
+    }
+  }
+
+  function normalizePublishYears(values) {
+    var out = [];
+    var seen = {};
+    if (!Array.isArray(values)) {
+      return out;
+    }
+    values.forEach(function (value) {
+      var year = parseIntOrNull(value);
+      if (year == null) {
+        return;
+      }
+      if (seen[year]) {
+        return;
+      }
+      seen[year] = true;
+      out.push(year);
+    });
+    out.sort(function (a, b) {
+      return a - b;
+    });
+    return out;
+  }
+
+  function parseAmeriFluxAvailabilityPayload(payload) {
+    var values = payload && Array.isArray(payload.values) ? payload.values : [];
+    var sites = [];
+
+    values.forEach(function (entry) {
+      var siteId = String(entry && entry.site_id || "").trim();
+      if (!siteId) {
+        return;
+      }
+      var publishYears = normalizePublishYears(entry && entry.publish_years);
+      if (!publishYears.length) {
+        return;
+      }
+      sites.push({
+        site_id: siteId,
+        publish_years: publishYears,
+        first_year: publishYears[0],
+        last_year: publishYears[publishYears.length - 1],
+        years: yearRangeLabel(publishYears[0], publishYears[publishYears.length - 1]),
+        country: deriveCountry(siteId, "")
+      });
+    });
+
+    sites.sort(function (a, b) {
+      var aa = String(a.site_id || "").toLowerCase();
+      var bb = String(b.site_id || "").toLowerCase();
+      if (aa < bb) {
+        return -1;
+      }
+      if (aa > bb) {
+        return 1;
+      }
+      return 0;
+    });
+
+    var canonical = JSON.stringify(sites.map(function (item) {
+      return [item.site_id, item.first_year, item.last_year, item.publish_years.join(",")];
+    }));
+
+    return {
+      totalSites: values.length,
+      sitesWithYears: sites.length,
+      sites: sites,
+      freshnessKey: "ameriflux:" + stableHashString(canonical)
+    };
+  }
+
+  function buildAmeriFluxOnlyRow(site, index) {
+    var siteId = String(site && site.site_id || "").trim();
+    var firstYear = parseIntOrNull(site && site.first_year);
+    var lastYear = parseIntOrNull(site && site.last_year);
+    var years = yearRangeLabel(firstYear, lastYear);
+    var keySuffix = years === "\u2014" ? "unknown" : years;
+    var row = {
+      _index: index,
+      _selection_key: "ameriflux_api|" + siteId + "|" + keySuffix,
+      site_id: siteId,
+      site_name: "",
+      country: deriveCountry(siteId, site && site.country ? site.country : ""),
+      data_hub: AMERIFLUX_SOURCE_ONLY,
+      network: AMERIFLUX_SOURCE_ONLY,
+      source_network: AMERIFLUX_SOURCE_ONLY,
+      network_display: AMERIFLUX_SOURCE_ONLY,
+      network_tokens: [AMERIFLUX_SOURCE_ONLY],
+      vegetation_type: "",
+      first_year: firstYear,
+      last_year: lastYear,
+      years: years,
+      download_link: "",
+      download_mode: "ameriflux_api",
+      source_label: AMERIFLUX_SOURCE_ONLY,
+      source_reason: "Only available from AmeriFlux API.",
+      publish_years: Array.isArray(site && site.publish_years) ? site.publish_years.slice() : []
+    };
+    row.is_icos = false;
+    row.search_text = (row.site_id + " " + row.network_display + " " + row.source_label).toLowerCase();
+    return row;
+  }
+
+  function mergeShuttleAndAmeriFluxRows(shuttleRows, ameriFluxSites) {
+    var mergedRows = (Array.isArray(shuttleRows) ? shuttleRows : []).map(function (row) {
+      return Object.assign({}, row);
+    });
+    var ameriSites = Array.isArray(ameriFluxSites) ? ameriFluxSites : [];
+    var shuttleBySite = {};
+    var overlapSites = 0;
+    var ameriOnlySites = 0;
+
+    mergedRows.forEach(function (row) {
+      var siteId = String(row && row.site_id || "").trim();
+      if (!siteId) {
+        return;
+      }
+      if (!shuttleBySite[siteId]) {
+        shuttleBySite[siteId] = [];
+      }
+      if (!row.download_mode) {
+        row.download_mode = "direct";
+      }
+      if (!row.source_label) {
+        row.source_label = "";
+      }
+      if (!row.source_reason) {
+        row.source_reason = "";
+      }
+      shuttleBySite[siteId].push(row);
+    });
+
+    ameriSites.forEach(function (site) {
+      var siteId = String(site && site.site_id || "").trim();
+      if (!siteId) {
+        return;
+      }
+      var shuttleMatches = shuttleBySite[siteId];
+      if (shuttleMatches && shuttleMatches.length) {
+        overlapSites += 1;
+        shuttleMatches.forEach(function (row) {
+          row.source_label = AMERIFLUX_SHUTTLE;
+          row.source_reason = "Available in both Shuttle and AmeriFlux; Shuttle is preferred when both exist.";
+        });
+        return;
+      }
+      ameriOnlySites += 1;
+      mergedRows.push(buildAmeriFluxOnlyRow(site, mergedRows.length));
+    });
+
+    mergedRows.forEach(function (row, idx) {
+      var siteId = String(row.site_id || "").trim();
+      var networkDisplay = String(row.network_display || row.network || row.source_network || "").trim();
+      var sourceLabel = String(row.source_label || "").trim();
+      row._index = idx;
+      if (!row._selection_key) {
+        row._selection_key = String(row.data_hub || "unknown") + "|" + siteId + "|" + String(row.download_link || "dynamic");
+      }
+      row.search_text = (
+        siteId + " " +
+        String(row.site_name || "") + " " +
+        networkDisplay + " " +
+        String(row.source_network || "") + " " +
+        String(row.vegetation_type || "") + " " +
+        sourceLabel
+      ).toLowerCase();
+    });
+
+    return {
+      rows: mergedRows,
+      amerifluxTotalSites: ameriSites.length,
+      amerifluxSitesWithYears: ameriSites.length,
+      amerifluxOverlapSites: overlapSites,
+      amerifluxOnlySites: ameriOnlySites
+    };
   }
 
   function parseCsv(text) {
@@ -386,11 +737,14 @@
       first_year: firstYear,
       last_year: lastYear,
       years: yearRangeLabel(firstYear, lastYear),
-      download_link: downloadLink
+      download_link: downloadLink,
+      download_mode: "direct",
+      source_label: "",
+      source_reason: ""
     };
 
     row.is_icos = isIcosRow(row);
-    row.search_text = (siteId + " " + siteName + " " + networkDisplay + " " + sourceNetwork + " " + vegetationType).toLowerCase();
+    row.search_text = (siteId + " " + siteName + " " + networkDisplay + " " + sourceNetwork + " " + vegetationType + " " + SHUTTLE_SOURCE).toLowerCase();
     return row;
   }
 
@@ -494,6 +848,201 @@
       });
   }
 
+  function ShuttleSource(jsonUrl, csvUrl) {
+    this.jsonUrl = jsonUrl;
+    this.csvUrl = csvUrl;
+  }
+
+  ShuttleSource.prototype.list_sites = function () {
+    return loadSnapshot(this.jsonUrl, this.csvUrl).then(function (result) {
+      var normalized = normalizeRows(result.rawRows || []);
+      return {
+        rows: normalized.rows,
+        droppedRows: normalized.dropped,
+        source: result.source || "",
+        sourceUrl: result.sourceUrl || "",
+        warning: result.warning || "",
+        lastModified: result.lastModified || "",
+        meta: result.meta || {}
+      };
+    });
+  };
+
+  function resolveAmeriFluxIdentityFromRoot(root) {
+    var globalCfg = (typeof window !== "undefined" && window && window.FLUXNET_EXPLORER_CONFIG && typeof window.FLUXNET_EXPLORER_CONFIG === "object")
+      ? window.FLUXNET_EXPLORER_CONFIG
+      : {};
+    var cfgUserId = String(globalCfg.amerifluxUserId || "").trim();
+    var cfgEmail = String(globalCfg.amerifluxUserEmail || "").trim();
+    var trustedRuntime = !!(globalCfg[AMERIFLUX_TRUSTED_RUNTIME_FLAG] || globalCfg.allowBrowserAmeriFluxDownload);
+    return {
+      userId: cfgUserId,
+      userEmail: cfgEmail,
+      trustedRuntime: trustedRuntime
+    };
+  }
+
+  function AmeriFluxSource(options) {
+    var opts = options || {};
+    this.availabilityUrl = String(opts.availabilityUrl || AMERIFLUX_AVAILABILITY_URL);
+    this.downloadUrl = String(opts.downloadUrl || AMERIFLUX_DOWNLOAD_URL);
+    this.userId = String(opts.userId || "").trim();
+    this.userEmail = String(opts.userEmail || "").trim();
+    this.trustedRuntime = !!opts.trustedRuntime;
+    this.retryCount = parseInt(opts.retryCount, 10);
+    if (!isFinite(this.retryCount)) {
+      this.retryCount = MAX_HTTP_RETRIES;
+    }
+    this.retryBaseDelayMs = parseInt(opts.retryBaseDelayMs, 10);
+    if (!isFinite(this.retryBaseDelayMs)) {
+      this.retryBaseDelayMs = RETRY_BASE_DELAY_MS;
+    }
+  }
+
+  AmeriFluxSource.prototype.getDownloadIdentity = function () {
+    var userId = String(this.userId || "").trim();
+    var userEmail = String(this.userEmail || "").trim();
+    var hasCredentials = !!(userId && userEmail);
+    var trustedRuntime = !!this.trustedRuntime;
+    var enabled = !!(trustedRuntime && hasCredentials);
+    var reason = "";
+    if (!trustedRuntime) {
+      reason = "manual_download_required";
+    } else if (!hasCredentials) {
+      reason = "missing_credentials";
+    }
+    return {
+      user_id: userId,
+      user_email: userEmail,
+      enabled: enabled,
+      trusted_runtime: trustedRuntime,
+      has_credentials: hasCredentials,
+      reason: reason
+    };
+  };
+
+  AmeriFluxSource.prototype.canDownload = function () {
+    return !!this.getDownloadIdentity().enabled;
+  };
+
+  AmeriFluxSource.prototype.list_sites = function () {
+    var cached = readAmeriFluxAvailabilityCache();
+    if (cached && cached.isFresh) {
+      return Promise.resolve({
+        totalSites: cached.totalSites || 0,
+        sitesWithYears: cached.sitesWithYears || 0,
+        sites: Array.isArray(cached.sites) ? cached.sites : [],
+        warning: "",
+        freshnessKey: cached.freshnessKey || "ameriflux-cache:" + String(cached.cachedAt || "")
+      });
+    }
+
+    return fetchJsonWithRetry(this.availabilityUrl, {}, this.retryCount, this.retryBaseDelayMs)
+      .then(function (result) {
+        var parsed = parseAmeriFluxAvailabilityPayload(result.payload || {});
+        writeAmeriFluxAvailabilityCache(parsed);
+        return {
+          totalSites: parsed.totalSites,
+          sitesWithYears: parsed.sitesWithYears,
+          sites: parsed.sites,
+          warning: "",
+          freshnessKey: parsed.freshnessKey
+        };
+      })
+      .catch(function (error) {
+        if (cached && Array.isArray(cached.sites) && cached.sites.length) {
+          return {
+            totalSites: cached.totalSites || 0,
+            sitesWithYears: cached.sitesWithYears || 0,
+            sites: cached.sites,
+            warning: "AmeriFlux availability refresh failed; using cached AmeriFlux availability.",
+            freshnessKey: cached.freshnessKey || "ameriflux-cache:" + String(cached.cachedAt || "")
+          };
+        }
+        throw error;
+      });
+  };
+
+  AmeriFluxSource.prototype.buildDownloadPayload = function (siteIds, variant, policy, identityOverride) {
+    var identity = identityOverride || this.getDownloadIdentity();
+    var sites = Array.isArray(siteIds) ? siteIds.filter(Boolean) : [];
+    return {
+      user_id: String(identity && identity.user_id || "").trim(),
+      user_email: String(identity && identity.user_email || "").trim(),
+      data_product: "FLUXNET",
+      data_variant: String(variant || AMERIFLUX_DEFAULT_VARIANT),
+      data_policy: String(policy || AMERIFLUX_DEFAULT_POLICY),
+      site_ids: sites,
+      intended_use: "research",
+      description: "Download FLUXNET for " + sites.join(", "),
+      agree_policy: true,
+      is_test: false
+    };
+  };
+
+  AmeriFluxSource.prototype.getManualDownloadResult = function (siteId, variant, policy, reason) {
+    var site = String(siteId || "").trim();
+    var manualReason = String(reason || "").trim();
+    var payloadTemplate = this.buildDownloadPayload([site || "SITE_ID_HERE"], variant, policy, {
+      user_id: AMERIFLUX_TEMPLATE_USER_ID,
+      user_email: AMERIFLUX_TEMPLATE_USER_EMAIL
+    });
+    return {
+      mode: "manual",
+      manual_download_required: true,
+      site_id: site,
+      reason: manualReason || "AmeriFlux downloads require configured credentials in a trusted runtime context.",
+      message: "AmeriFlux-only downloads require your own AmeriFlux identity. Copy and run the generated curl command locally.",
+      payload_template: payloadTemplate,
+      curl_command: buildAmeriFluxCurlCommand(site, variant, policy, this.downloadUrl),
+      manifest: {},
+      data_urls: []
+    };
+  };
+
+  AmeriFluxSource.prototype.get_download_urls = function (siteId, variant, policy) {
+    var identity = this.getDownloadIdentity();
+    var site = String(siteId || "").trim();
+    if (!site) {
+      return Promise.reject(new Error("AmeriFlux download requires a site_id."));
+    }
+    if (!identity.enabled) {
+      var reason = !identity.trusted_runtime
+        ? "AmeriFlux API downloads are disabled in this browser runtime."
+        : "AMERIFLUX_USER_ID or AMERIFLUX_USER_EMAIL is missing.";
+      return Promise.resolve(this.getManualDownloadResult(site, variant, policy, reason));
+    }
+
+    var payload = this.buildDownloadPayload([site], variant, policy, identity);
+    return fetchJsonWithRetry(this.downloadUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Accept": "application/json"
+      },
+      body: JSON.stringify(payload)
+    }, this.retryCount, this.retryBaseDelayMs).then(function (result) {
+      var responsePayload = result.payload || {};
+      var dataUrls = Array.isArray(responsePayload.data_urls) ? responsePayload.data_urls : [];
+      if (!dataUrls.length) {
+        throw new Error("AmeriFlux download request succeeded but returned empty data_urls for " + site + ".");
+      }
+      return {
+        mode: "api",
+        manual_download_required: false,
+        manifest: responsePayload.manifest || {},
+        data_urls: dataUrls
+      };
+    }).catch(function (error) {
+      var detail = error && error.message ? error.message : String(error);
+      throw new Error("AmeriFlux download request failed for " + site + ": " + detail);
+    });
+  };
+
+  AmeriFluxSource.prototype.download_site = function (siteId, variant, policy) {
+    return this.get_download_urls(siteId, variant, policy);
+  };
+
   function compareRows(a, b, sortKey, sortDir) {
     var dir = sortDir === "desc" ? -1 : 1;
     var av;
@@ -570,6 +1119,38 @@
     return s;
   }
 
+  function combineWarnings() {
+    var parts = [];
+    var i;
+    for (i = 0; i < arguments.length; i += 1) {
+      var value = String(arguments[i] || "").trim();
+      if (value) {
+        parts.push(value);
+      }
+    }
+    return parts.join(" ");
+  }
+
+  function sourceBadgeClass(sourceLabel) {
+    if (sourceLabel === AMERIFLUX_SOURCE_ONLY) {
+      return "shuttle-explorer__source-badge--ameriflux";
+    }
+    if (sourceLabel === AMERIFLUX_SHUTTLE) {
+      return "shuttle-explorer__source-badge--ameriflux-shuttle";
+    }
+    return "";
+  }
+
+  function renderSourceBadgeHtml(sourceLabel, sourceReason) {
+    var label = String(sourceLabel || "").trim();
+    if (!label) {
+      return "<span class=\"shuttle-explorer__muted\">\u2014</span>";
+    }
+    var klass = sourceBadgeClass(label);
+    var title = sourceReason ? (" title=\"" + escapeHtml(sourceReason) + "\"") : "";
+    return "<span class=\"shuttle-explorer__source-badge " + escapeHtml(klass) + "\"" + title + ">" + escapeHtml(label) + "</span>";
+  }
+
   function ensureStyles() {
     if (document.querySelector("link[href*='shuttle-explorer.css']")) {
       return;
@@ -589,7 +1170,7 @@
       ".shuttle-explorer__status.is-error{background:#fff3f3;color:#8b1e1e;border:1px solid #f2c7c7;}",
       ".shuttle-explorer__status.is-loading{background:#f2f7ff;color:#234d7b;border:1px solid #d6e5fb;}",
       ".shuttle-explorer__status.is-ok{background:#f3fbf4;color:#225e2b;border:1px solid #cfe8d4;}",
-      ".shuttle-explorer__controls{display:grid;grid-template-columns:2fr 1fr 1fr;gap:10px;margin:0 0 10px;}",
+      ".shuttle-explorer__controls{display:grid;grid-template-columns:2fr 1fr 1fr 1fr 1fr;gap:10px;margin:0 0 10px;}",
       ".shuttle-explorer__field{display:flex;flex-direction:column;gap:4px;}",
       ".shuttle-explorer__field label{font-size:.82em;color:#4d5b6a;}",
       ".shuttle-explorer__field input,.shuttle-explorer__field select{width:100%;padding:7px 8px;border:1px solid #b7c1ce;border-radius:6px;background:#fff;font:inherit;}",
@@ -603,9 +1184,12 @@
       ".shuttle-explorer__btn--small{padding:5px 8px;font-size:.86em;}",
       ".shuttle-explorer__btn[disabled]{opacity:.45;cursor:default;}",
       ".shuttle-explorer__table-wrap{overflow:auto;border:1px solid #d5dbe3;border-radius:8px;background:#fff;}",
-      ".shuttle-explorer__table{width:100%;border-collapse:collapse;min-width:760px;font-size:.9em;}",
+      ".shuttle-explorer__table{width:100%;border-collapse:collapse;min-width:880px;font-size:.9em;}",
       ".shuttle-explorer__table th,.shuttle-explorer__table td{padding:8px 10px;border-bottom:1px solid #edf1f5;vertical-align:top;text-align:left;}",
       ".shuttle-explorer__table thead th{position:sticky;top:0;background:#f8fafc;z-index:1;}",
+      ".shuttle-explorer__source-badge{display:inline-flex;align-items:center;padding:2px 8px;border-radius:999px;font-size:.86em;font-weight:600;line-height:1.25;}",
+      ".shuttle-explorer__source-badge--ameriflux{background:#edf7f0;border:1px solid #b6dcc2;color:#1f6c3f;}",
+      ".shuttle-explorer__source-badge--ameriflux-shuttle{background:#eef3fa;border:1px solid #b8c9e4;color:#2a4f7a;}",
       ".shuttle-explorer__sort{display:inline-flex;align-items:center;gap:4px;border:0;background:transparent;padding:0;margin:0;color:inherit;font:inherit;cursor:pointer;}",
       ".shuttle-explorer__sort-indicator{color:#6b7a89;font-size:.9em;}",
       ".shuttle-explorer__muted{color:#607184;}",
@@ -629,7 +1213,7 @@
     root.innerHTML = [
       "<div class=\"shuttle-explorer__header\">",
       "  <h2>FLUXNET Data Explorer</h2>",
-      "  <p class=\"shuttle-explorer__muted\">Explore and download a regularly refreshed snapshot of the FLUXNET database<span data-role=\"widget-last-updated-inline\"></span>, with observations from the various regional networks. Search by site ID or site name, then open hub-hosted download links directly from the table. Data are provided by site teams from around the world and served via the FLUXNET Shuttle.</p>",
+      "  <p class=\"shuttle-explorer__muted\">Explore and download a regularly refreshed snapshot of the FLUXNET database<span data-role=\"widget-last-updated-inline\"></span>, with observations from the various regional networks. Search by site ID or site name, then open hub-hosted download links directly from the table. This explorer merges FLUXNET Shuttle and AmeriFlux API availability, with Shuttle preferred when both sources provide the same site.</p>",
       "</div>",
       "<p class=\"shuttle-explorer__status is-loading\" data-role=\"status\" role=\"status\" aria-live=\"polite\">Loading snapshot…</p>",
       "<div class=\"shuttle-explorer__controls shuttle-explorer__hidden\" data-role=\"controls\">",
@@ -649,6 +1233,14 @@
       "    <label for=\"shuttle-vegetation\">Vegetation type</label>",
       "    <select id=\"shuttle-vegetation\" data-role=\"vegetation-filter\"><option value=\"\">All vegetation types</option></select>",
       "  </div>",
+      "  <div class=\"shuttle-explorer__field\">",
+      "    <label for=\"shuttle-source\">Source</label>",
+      "    <select id=\"shuttle-source\" data-role=\"source-filter\">",
+      "      <option value=\"\">All sources</option>",
+      "      <option value=\"AmeriFlux-shuttle\">AmeriFlux-shuttle</option>",
+      "      <option value=\"AmeriFlux\">AmeriFlux</option>",
+      "    </select>",
+      "  </div>",
       "</div>",
       "<div class=\"shuttle-explorer__hub-filters shuttle-explorer__hidden\" data-role=\"hub-filters\" aria-label=\"Hub filters\"></div>",
       "<div class=\"shuttle-explorer__row shuttle-explorer__hidden\" data-role=\"summary-row\">",
@@ -660,7 +1252,7 @@
       "    <h3 id=\"shuttle-bulk-heading\">Bulk download tools</h3>",
       "    <p class=\"shuttle-explorer__tiny shuttle-explorer__bulk-count\" data-role=\"selection-count\">0 selected</p>",
       "  </div>",
-      "  <p class=\"shuttle-explorer__tiny\">For bulk downloads, use the selection tools below to get a shell script for batch downloads, a command for using the Shuttle CLI, or create a manifest of sites or download links.</p>",
+      "  <p class=\"shuttle-explorer__tiny\">For bulk downloads, use the selection tools below to get a shell script for batch downloads, a command for using the Shuttle CLI, or create a manifest of sites or download links. Shuttle is preferred when both sources exist; AmeriFlux-only downloads require your own AmeriFlux identity.</p>",
       "  <div class=\"shuttle-explorer__bulk-actions\">",
       "    <button type=\"button\" class=\"shuttle-explorer__btn shuttle-explorer__btn--small\" data-role=\"select-filtered\">Select all (filtered results)</button>",
       "    <button type=\"button\" class=\"shuttle-explorer__btn shuttle-explorer__btn--small\" data-role=\"select-all-sites\">Select all (all sites)</button>",
@@ -685,7 +1277,7 @@
       "      <li><strong>Download script (sh)</strong>: a ready-to-run shell script that creates an output folder and downloads selected archives with retries and resume support.</li>",
       "      <li><strong>Show Shuttle CLI command</strong>: reveals a command template that uses your <code>selected_sites.txt</code> and local snapshot file.</li>",
       "      <li><strong>Copy CLI command</strong>: copies the Shuttle CLI helper command shown in the panel.</li>",
-      "      <li><strong>Download selected_sites.txt</strong>: one <code>site_id</code> per line for FLUXNET Shuttle CLI workflows (used with the command shown below).</li>",
+      "      <li><strong>Download selected_sites.txt</strong>: one <code>site_id</code> per line for FLUXNET Shuttle CLI workflows (Shuttle-backed rows only).</li>",
       "      <li><strong>Download manifest (CSV)</strong>: a spreadsheet of the selected sites with hub/network, country, and direct download links for record-keeping or sharing.</li>",
       "      <li><strong>Download links file (TXT)</strong>: one download URL per line for use with terminal tools, download managers, or scripts.</li>",
       "      <li><strong>Copy links</strong>: copies the selected URLs to your clipboard for paste into another app.</li>",
@@ -723,6 +1315,15 @@
     this.jsonUrl = root.getAttribute("data-json-src") || DEFAULT_JSON_URL;
     this.csvUrl = root.getAttribute("data-csv-src") || DEFAULT_CSV_URL;
     this.pageSize = Math.max(1, parseInt(root.getAttribute("data-page-size") || String(DEFAULT_PAGE_SIZE), 10) || DEFAULT_PAGE_SIZE);
+    var ameriIdentity = resolveAmeriFluxIdentityFromRoot(root);
+    this.shuttleSource = new ShuttleSource(this.jsonUrl, this.csvUrl);
+    this.ameriFluxSource = new AmeriFluxSource({
+      availabilityUrl: AMERIFLUX_AVAILABILITY_URL,
+      downloadUrl: AMERIFLUX_DOWNLOAD_URL,
+      userId: ameriIdentity.userId,
+      userEmail: ameriIdentity.userEmail,
+      trustedRuntime: ameriIdentity.trustedRuntime
+    });
 
     this.state = {
       mode: "loading",
@@ -738,12 +1339,17 @@
       selectedNetwork: "",
       selectedCountry: "",
       selectedVegetation: "",
+      selectedSource: "",
       selectedHubs: {},
       selectedKeys: {},
       cliPanelVisible: false,
       sortKey: "data_hub",
       sortDir: "asc",
-      page: 1
+      page: 1,
+      amerifluxTotalSites: 0,
+      amerifluxSitesWithYears: 0,
+      amerifluxOverlapSites: 0,
+      amerifluxOnlySites: 0
     };
 
     createLayout(root);
@@ -762,6 +1368,7 @@
       networkFilter: bySelector(this.root, "[data-role='network-filter']"),
       countryFilter: bySelector(this.root, "[data-role='country-filter']"),
       vegetationFilter: bySelector(this.root, "[data-role='vegetation-filter']"),
+      sourceFilter: bySelector(this.root, "[data-role='source-filter']"),
       hubFilters: bySelector(this.root, "[data-role='hub-filters']"),
       widgetLastUpdatedInline: bySelector(this.root, "[data-role='widget-last-updated-inline']"),
       summaryRow: bySelector(this.root, "[data-role='summary-row']"),
@@ -849,6 +1456,16 @@
         self.updateDerivedState();
         self.render();
         self.trackFilterChange("vegetation_type", self.state.selectedVegetation);
+      });
+    }
+
+    if (b.sourceFilter) {
+      b.sourceFilter.addEventListener("change", function () {
+        self.state.selectedSource = String(b.sourceFilter.value || "");
+        self.state.page = 1;
+        self.updateDerivedState();
+        self.render();
+        self.trackFilterChange("source", self.state.selectedSource);
       });
     }
 
@@ -1011,6 +1628,21 @@
         self.state.selectedKeys[key] = !!target.checked;
         self.render();
       });
+
+      b.tbody.addEventListener("click", function (event) {
+        var target = event.target;
+        while (target && target !== b.tbody && !(target.tagName === "BUTTON" && target.getAttribute("data-role") === "ameriflux-download")) {
+          target = target.parentNode;
+        }
+        if (!target || target === b.tbody) {
+          return;
+        }
+        var siteId = String(target.getAttribute("data-site-id") || "");
+        if (!siteId) {
+          return;
+        }
+        self.handleAmeriFluxRowDownload(siteId, target);
+      });
     }
 
     if (b.copyAttribution) {
@@ -1127,6 +1759,7 @@
     this.state.selectedNetwork = "";
     this.state.selectedCountry = "";
     this.state.selectedVegetation = "";
+    this.state.selectedSource = "";
     Object.keys(this.state.selectedHubs).forEach(function (hub) {
       self.state.selectedHubs[hub] = true;
     });
@@ -1145,6 +1778,9 @@
     }
     if (this.bindings.vegetationFilter) {
       this.bindings.vegetationFilter.value = "";
+    }
+    if (this.bindings.sourceFilter) {
+      this.bindings.sourceFilter.value = "";
     }
     qsa(this.bindings.hubFilters, "input[type='checkbox']").forEach(function (input) {
       input.checked = true;
@@ -1266,14 +1902,92 @@
     return selectedRows;
   };
 
+  Explorer.prototype.isAmeriFluxApiRow = function (row) {
+    return !!(row && row.download_mode === "ameriflux_api");
+  };
+
+  Explorer.prototype.getShuttleRows = function (rows) {
+    return (rows || []).filter(function (row) {
+      return row && row.download_mode !== "ameriflux_api";
+    });
+  };
+
+  Explorer.prototype.resolveRowsForDownloadArtifacts = function (rows) {
+    var self = this;
+    var selectedRows = Array.isArray(rows) ? rows : [];
+    var resolvedRows = [];
+    var skippedSites = [];
+    var manualSites = [];
+    var failedSites = [];
+    var chain = Promise.resolve();
+
+    selectedRows.forEach(function (row) {
+      if (!self.isAmeriFluxApiRow(row)) {
+        resolvedRows.push(row);
+        return;
+      }
+
+      var siteId = String(row.site_id || "").trim();
+      if (!siteId) {
+        return;
+      }
+
+      chain = chain.then(function () {
+        return self.ameriFluxSource.get_download_urls(siteId, AMERIFLUX_DEFAULT_VARIANT, AMERIFLUX_DEFAULT_POLICY)
+          .then(function (result) {
+            if (result && result.manual_download_required) {
+              skippedSites.push(siteId);
+              manualSites.push({
+                site_id: siteId,
+                message: String(result.message || ""),
+                curl_command: String(result.curl_command || "")
+              });
+              return;
+            }
+            var dataUrls = Array.isArray(result && result.data_urls) ? result.data_urls : [];
+            var added = 0;
+            dataUrls.forEach(function (entry) {
+              var downloadUrl = String(entry && entry.url || "").trim();
+              if (!downloadUrl) {
+                return;
+              }
+              var clone = Object.assign({}, row, {
+                _selection_key: "ameriflux_url|" + siteId + "|" + downloadUrl,
+                download_link: downloadUrl,
+                download_mode: "direct"
+              });
+              resolvedRows.push(clone);
+              added += 1;
+            });
+            if (!added) {
+              failedSites.push(siteId);
+            }
+          })
+          .catch(function () {
+            failedSites.push(siteId);
+          });
+      });
+    });
+
+    return chain.then(function () {
+      return {
+        rows: resolvedRows,
+        skippedSites: skippedSites,
+        manualSites: manualSites,
+        failedSites: failedSites
+      };
+    });
+  };
+
   Explorer.prototype.buildSelectionManifestCsv = function (rows) {
     var lines = [
-      ["site_id", "data_hub", "network", "country", "download_link"].join(",")
+      ["site_id", "data_hub", "source_label", "network", "country", "download_link"].join(",")
     ];
     rows.forEach(function (row) {
       lines.push([
         csvEscape(row.site_id),
         csvEscape(row.data_hub),
+        csvEscape(row.source_label || ""),
         csvEscape(row.network_display || row.network || ""),
         csvEscape(row.country || ""),
         csvEscape(row.download_link)
@@ -1658,7 +2372,16 @@
   };
 
   Explorer.prototype.buildShuttleCommandText = function (rows) {
-    var duplicateSiteIds = this.getDuplicateSelectedSiteIds(rows);
+    var shuttleRows = this.getShuttleRows(rows);
+    var duplicateSiteIds = this.getDuplicateSelectedSiteIds(shuttleRows);
+    var skipped = (rows || []).length - shuttleRows.length;
+    if (!shuttleRows.length) {
+      return [
+        "# No Shuttle rows are selected.",
+        "# AmeriFlux-only rows require your own AmeriFlux identity.",
+        "# Use the row-level \"Copy AmeriFlux curl command\" action for those sites."
+      ].join("\n");
+    }
     var lines = [
       "# FLUXNET Shuttle CLI syntax (confirmed from shuttle docs):",
       "# fluxnet-shuttle download -f shuttle_snapshot.csv -s SITE1 SITE2 ...",
@@ -1666,6 +2389,12 @@
       "# The CLI does not support a --sites-file option, so this helper expands selected_sites.txt:",
       "fluxnet-shuttle download -f shuttle_snapshot.csv -o fluxnet_downloads -s $(tr '\\n' ' ' < selected_sites.txt)"
     ];
+    if (skipped > 0) {
+      lines.push(
+        "",
+        "# Note: " + skipped + " AmeriFlux-only selection(s) were excluded from this Shuttle CLI command."
+      );
+    }
     if (duplicateSiteIds.length) {
       lines.push(
         "",
@@ -1678,34 +2407,92 @@
     return lines.join("\n");
   };
 
+  Explorer.prototype.buildResolutionWarning = function (resolution) {
+    var parts = [];
+    if (resolution && Array.isArray(resolution.skippedSites) && resolution.skippedSites.length) {
+      parts.push(
+        "AmeriFlux-only downloads for " +
+        resolution.skippedSites.length +
+        " site(s) require your own AmeriFlux identity in this deployment."
+      );
+    }
+    if (resolution && Array.isArray(resolution.failedSites) && resolution.failedSites.length) {
+      parts.push("Failed to resolve AmeriFlux URLs for " + resolution.failedSites.length + " site(s).");
+    }
+    return parts.join(" ");
+  };
+
+  Explorer.prototype.buildNoResolvedMessage = function (resolution) {
+    if (resolution && Array.isArray(resolution.manualSites) && resolution.manualSites.length) {
+      return "No direct URLs were resolved. Use row-level \"Copy AmeriFlux curl command\" for AmeriFlux-only sites.";
+    }
+    return "No downloadable URLs were resolved for the current selection.";
+  };
+
   Explorer.prototype.handleDownloadManifest = function () {
+    var self = this;
     var rows = this.getSelectedRowsOrWarn();
     if (!rows) {
       return;
     }
-    this.downloadTextFile("fluxnet_selected_manifest.csv", this.buildSelectionManifestCsv(rows), "text/csv;charset=utf-8");
-    this.setBulkStatus("Downloaded manifest CSV for " + rows.length + " selected sites.");
-    gaEvent("fx_manifest_download", { count: rows.length });
+    this.setBulkStatus("Preparing manifest (resolving AmeriFlux URLs where needed)...");
+    this.resolveRowsForDownloadArtifacts(rows).then(function (resolution) {
+      var resolvedRows = Array.isArray(resolution && resolution.rows) ? resolution.rows : [];
+      if (!resolvedRows.length) {
+        self.setBulkStatus(self.buildNoResolvedMessage(resolution));
+        return;
+      }
+      self.downloadTextFile("fluxnet_selected_manifest.csv", self.buildSelectionManifestCsv(resolvedRows), "text/csv;charset=utf-8");
+      var warning = self.buildResolutionWarning(resolution);
+      self.setBulkStatus("Downloaded manifest CSV for " + resolvedRows.length + " resolved download URL(s)." + (warning ? (" " + warning) : ""));
+      gaEvent("fx_manifest_download", { count: resolvedRows.length });
+    }).catch(function (error) {
+      self.setBulkStatus("Failed to build manifest: " + (error && error.message ? error.message : String(error)));
+    });
   };
 
   Explorer.prototype.handleDownloadLinks = function () {
+    var self = this;
     var rows = this.getSelectedRowsOrWarn();
     if (!rows) {
       return;
     }
-    this.downloadTextFile("fluxnet_selected_links.txt", this.buildLinksText(rows), "text/plain;charset=utf-8");
-    this.setBulkStatus("Downloaded links TXT for " + rows.length + " selected sites.");
-    gaEvent("fx_links_download", { count: rows.length });
+    this.setBulkStatus("Preparing links file (resolving AmeriFlux URLs where needed)...");
+    this.resolveRowsForDownloadArtifacts(rows).then(function (resolution) {
+      var resolvedRows = Array.isArray(resolution && resolution.rows) ? resolution.rows : [];
+      if (!resolvedRows.length) {
+        self.setBulkStatus(self.buildNoResolvedMessage(resolution));
+        return;
+      }
+      self.downloadTextFile("fluxnet_selected_links.txt", self.buildLinksText(resolvedRows), "text/plain;charset=utf-8");
+      var warning = self.buildResolutionWarning(resolution);
+      self.setBulkStatus("Downloaded links TXT for " + resolvedRows.length + " resolved download URL(s)." + (warning ? (" " + warning) : ""));
+      gaEvent("fx_links_download", { count: resolvedRows.length });
+    }).catch(function (error) {
+      self.setBulkStatus("Failed to build links file: " + (error && error.message ? error.message : String(error)));
+    });
   };
 
   Explorer.prototype.handleDownloadScript = function () {
+    var self = this;
     var rows = this.getSelectedRowsOrWarn();
     if (!rows) {
       return;
     }
-    this.downloadTextFile("fluxnet_bulk_download.sh", this.buildCurlScript(rows), "text/x-shellscript;charset=utf-8");
-    this.setBulkStatus("Downloaded shell script for " + rows.length + " selected sites.");
-    gaEvent("fx_script_download", { count: rows.length });
+    this.setBulkStatus("Preparing shell script (resolving AmeriFlux URLs where needed)...");
+    this.resolveRowsForDownloadArtifacts(rows).then(function (resolution) {
+      var resolvedRows = Array.isArray(resolution && resolution.rows) ? resolution.rows : [];
+      if (!resolvedRows.length) {
+        self.setBulkStatus(self.buildNoResolvedMessage(resolution));
+        return;
+      }
+      self.downloadTextFile("fluxnet_bulk_download.sh", self.buildCurlScript(resolvedRows), "text/x-shellscript;charset=utf-8");
+      var warning = self.buildResolutionWarning(resolution);
+      self.setBulkStatus("Downloaded shell script for " + resolvedRows.length + " resolved download URL(s)." + (warning ? (" " + warning) : ""));
+      gaEvent("fx_script_download", { count: resolvedRows.length });
+    }).catch(function (error) {
+      self.setBulkStatus("Failed to build shell script: " + (error && error.message ? error.message : String(error)));
+    });
   };
 
   Explorer.prototype.handleDownloadSitesFile = function () {
@@ -1713,17 +2500,98 @@
     if (!rows) {
       return;
     }
-    this.downloadTextFile("selected_sites.txt", this.buildSelectedSitesText(rows), "text/plain;charset=utf-8");
+    var shuttleRows = this.getShuttleRows(rows);
+    if (!shuttleRows.length) {
+      this.setBulkStatus("selected_sites.txt is only available for Shuttle-backed rows.");
+      return;
+    }
+    this.downloadTextFile("selected_sites.txt", this.buildSelectedSitesText(shuttleRows), "text/plain;charset=utf-8");
+    if (shuttleRows.length < rows.length) {
+      this.setBulkStatus("Downloaded selected_sites.txt for Shuttle-backed rows only.");
+      return;
+    }
     this.setBulkStatus("Downloaded selected_sites.txt.");
   };
 
   Explorer.prototype.handleCopyLinks = function () {
+    var self = this;
     var rows = this.getSelectedRowsOrWarn();
     if (!rows) {
       return;
     }
-    this.copyText(this.buildLinksText(rows), "Copied selected download links.");
-    gaEvent("fx_copy_links", { count: rows.length });
+    this.setBulkStatus("Resolving download links...");
+    this.resolveRowsForDownloadArtifacts(rows).then(function (resolution) {
+      var resolvedRows = Array.isArray(resolution && resolution.rows) ? resolution.rows : [];
+      if (!resolvedRows.length) {
+        self.setBulkStatus(self.buildNoResolvedMessage(resolution));
+        return;
+      }
+      self.copyText(self.buildLinksText(resolvedRows), "Copied selected download links.");
+      var warning = self.buildResolutionWarning(resolution);
+      if (warning) {
+        self.setBulkStatus("Copied selected download links. " + warning);
+      }
+      gaEvent("fx_copy_links", { count: resolvedRows.length });
+    }).catch(function (error) {
+      self.setBulkStatus("Failed to resolve links: " + (error && error.message ? error.message : String(error)));
+    });
+  };
+
+  Explorer.prototype.handleAmeriFluxRowDownload = function (siteId, buttonEl) {
+    var self = this;
+    var site = String(siteId || "").trim();
+    if (!site) {
+      return;
+    }
+
+    var originalText = buttonEl ? buttonEl.textContent : "";
+    var canDirectDownload = this.ameriFluxSource.canDownload();
+    if (buttonEl) {
+      buttonEl.disabled = true;
+      buttonEl.textContent = canDirectDownload ? "Requesting AmeriFlux URL…" : "Preparing curl command…";
+    }
+
+    this.ameriFluxSource.download_site(site, AMERIFLUX_DEFAULT_VARIANT, AMERIFLUX_DEFAULT_POLICY)
+      .then(function (result) {
+        if (result && result.manual_download_required) {
+          var curlCommand = String(result.curl_command || "").trim();
+          if (curlCommand) {
+            self.copyText(
+              curlCommand,
+              "Copied AmeriFlux curl command for " + site + ". AmeriFlux-only downloads require your own AmeriFlux identity."
+            );
+          } else {
+            self.setBulkStatus("AmeriFlux-only downloads require your own AmeriFlux identity.");
+          }
+          gaEvent("fx_ameriflux_manual_command", { site_id: site });
+          return;
+        }
+        var dataUrls = Array.isArray(result && result.data_urls) ? result.data_urls : [];
+        var urls = dataUrls.map(function (entry) {
+          return String(entry && entry.url || "").trim();
+        }).filter(Boolean);
+        if (!urls.length) {
+          throw new Error("AmeriFlux returned an empty data_urls list.");
+        }
+
+        if (typeof window.open === "function") {
+          window.open(urls[0], "_blank", "noopener,noreferrer");
+        }
+        if (urls.length > 1) {
+          self.downloadTextFile("ameriflux_" + site + "_links.txt", urls.join("\n") + "\n", "text/plain;charset=utf-8");
+        }
+        self.setBulkStatus("Requested AmeriFlux download URL(s) for " + site + " (" + urls.length + " file" + (urls.length === 1 ? "" : "s") + ").");
+        gaEvent("fx_ameriflux_download", { site_id: site, count: urls.length });
+      })
+      .catch(function (error) {
+        self.setBulkStatus("AmeriFlux download request failed for " + site + ": " + (error && error.message ? error.message : String(error)));
+      })
+      .then(function () {
+        if (buttonEl) {
+          buttonEl.disabled = false;
+          buttonEl.textContent = originalText || (self.ameriFluxSource.canDownload() ? "Request AmeriFlux URL" : "Copy AmeriFlux curl command");
+        }
+      });
   };
 
   Explorer.prototype.toggleCliPanel = function () {
@@ -1731,7 +2599,7 @@
     this.state.cliPanelVisible = !this.state.cliPanelVisible;
     if (this.state.cliPanelVisible && rows.length) {
       if (this.bindings.cliCommand) {
-        this.bindings.cliCommand.textContent = this.buildShuttleCommandText(rows);
+        this.bindings.cliCommand.textContent = this.buildShuttleCommandText(this.getShuttleRows(rows));
       }
     }
     this.render();
@@ -1742,8 +2610,13 @@
     if (!rows) {
       return;
     }
-    this.copyText(this.buildShuttleCommandText(rows), "Copied Shuttle CLI helper command.");
-    gaEvent("fx_copy_command", { count: rows.length });
+    var shuttleRows = this.getShuttleRows(rows);
+    if (!shuttleRows.length) {
+      this.setBulkStatus("No Shuttle-backed rows are selected for a Shuttle CLI command.");
+      return;
+    }
+    this.copyText(this.buildShuttleCommandText(shuttleRows), "Copied Shuttle CLI helper command.");
+    gaEvent("fx_copy_command", { count: shuttleRows.length });
   };
 
   Explorer.prototype.renderBulkPanel = function () {
@@ -1952,6 +2825,22 @@
         this.state.selectedVegetation = "";
       }
     }
+
+    if (b.sourceFilter) {
+      var currentSource = this.state.selectedSource;
+      var sourceOptions = ["", AMERIFLUX_SHUTTLE, AMERIFLUX_SOURCE_ONLY];
+      b.sourceFilter.innerHTML = "";
+      sourceOptions.forEach(function (sourceLabel) {
+        var option = document.createElement("option");
+        option.value = sourceLabel;
+        option.textContent = sourceLabel ? sourceLabel : "All sources";
+        b.sourceFilter.appendChild(option);
+      });
+      b.sourceFilter.value = currentSource;
+      if (b.sourceFilter.value !== currentSource) {
+        this.state.selectedSource = "";
+      }
+    }
   };
 
   Explorer.prototype.updateDerivedState = function () {
@@ -1960,6 +2849,7 @@
     var selectedNetwork = this.state.selectedNetwork;
     var selectedCountry = this.state.selectedCountry;
     var selectedVegetation = this.state.selectedVegetation;
+    var selectedSource = this.state.selectedSource;
     var selectedHubs = this.state.selectedHubs;
 
     this.state.filteredRows = this.state.rows.filter(function (row) {
@@ -1973,6 +2863,9 @@
         return false;
       }
       if (selectedVegetation && row.vegetation_type !== selectedVegetation) {
+        return false;
+      }
+      if (selectedSource && row.source_label !== selectedSource) {
         return false;
       }
       if (Object.keys(selectedHubs).length && !selectedHubs[row.data_hub]) {
@@ -2000,6 +2893,7 @@
     var rows = this.state.filteredRows;
     var pageRows = rows;
     var selectedKeys = this.state.selectedKeys || {};
+    var canAmeriFluxDownload = this.ameriFluxSource.canDownload();
 
     tbody.innerHTML = "";
 
@@ -2013,20 +2907,36 @@
         "<td>" + (row.site_name ? escapeHtml(row.site_name) : "<span class=\"shuttle-explorer__muted\">—</span>") + "</td>",
         "<td>" + (row.country ? escapeHtml(row.country) : "<span class=\"shuttle-explorer__muted\">—</span>") + "</td>",
         "<td>" + escapeHtml(row.data_hub) + "</td>",
+        "<td>" + renderSourceBadgeHtml(row.source_label, row.source_reason) + "</td>",
         "<td>" + (row.network_display ? escapeHtml(row.network_display) : "<span class=\"shuttle-explorer__muted\">—</span>") + "</td>",
         "<td>" + (row.vegetation_type ? escapeHtml(row.vegetation_type) : "<span class=\"shuttle-explorer__muted\">—</span>") + "</td>",
         "<td>" + escapeHtml(row.years) + "</td>"
       ].join("");
 
       var downloadTd = document.createElement("td");
-      var a = document.createElement("a");
-      a.className = "shuttle-explorer__btn shuttle-explorer__btn--small";
-      a.href = row.download_link;
-      a.target = "_blank";
-      a.rel = "noopener noreferrer";
-      a.textContent = row.is_icos ? "Accept ICOS license and download" : "Download";
-      a.setAttribute("aria-label", a.textContent + " for " + row.site_id);
-      downloadTd.appendChild(a);
+
+      if (row.download_mode === "ameriflux_api") {
+        var btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "shuttle-explorer__btn shuttle-explorer__btn--small";
+        btn.setAttribute("data-role", "ameriflux-download");
+        btn.setAttribute("data-site-id", row.site_id);
+        btn.textContent = canAmeriFluxDownload ? "Request AmeriFlux URL" : "Copy AmeriFlux curl command";
+        btn.setAttribute("aria-label", btn.textContent + " for " + row.site_id);
+        if (!canAmeriFluxDownload) {
+          btn.title = "AmeriFlux-only downloads require your own AmeriFlux identity. Click to copy a curl command template.";
+        }
+        downloadTd.appendChild(btn);
+      } else {
+        var a = document.createElement("a");
+        a.className = "shuttle-explorer__btn shuttle-explorer__btn--small";
+        a.href = row.download_link;
+        a.target = "_blank";
+        a.rel = "noopener noreferrer";
+        a.textContent = row.is_icos ? "Accept ICOS license and download" : "Download";
+        a.setAttribute("aria-label", a.textContent + " for " + row.site_id);
+        downloadTd.appendChild(a);
+      }
       tr.appendChild(downloadTd);
 
       tbody.appendChild(tr);
@@ -2062,6 +2972,20 @@
     }
     if (this.state.droppedRows) {
       parts.push("Skipped " + this.state.droppedRows + " malformed rows.");
+    }
+    if (this.state.amerifluxSitesWithYears || this.state.amerifluxTotalSites) {
+      parts.push(
+        "AmeriFlux availability: " +
+        this.state.amerifluxSitesWithYears +
+        " site(s) with publish years; " +
+        this.state.amerifluxOverlapSites +
+        " overlap site(s) served from Shuttle; " +
+        this.state.amerifluxOnlySites +
+        " AmeriFlux-only site(s)."
+      );
+      if (this.state.amerifluxOnlySites && !this.ameriFluxSource.canDownload()) {
+        parts.push("AmeriFlux-only downloads require your own AmeriFlux identity; use \"Copy AmeriFlux curl command\".");
+      }
     }
     if (this.bindings.summary) {
       this.bindings.summary.textContent = parts.join(" ");
@@ -2108,8 +3032,14 @@
   Explorer.prototype.renderHubSummaryInStatus = function () {
     var total = this.state.rows.length;
     var hubCounts = formatHubCounts(this.state.rows);
-    var source = this.state.source ? "Loaded from " + this.state.source.toUpperCase() : "";
+    var source = this.state.source ? "Loaded from " + this.state.source : "";
     var msg = "Loaded " + total + " records. " + hubCounts + (source ? " " + source + "." : "");
+    if (this.state.amerifluxSitesWithYears || this.state.amerifluxTotalSites) {
+      msg += " AmeriFlux values=" + this.state.amerifluxTotalSites +
+        ", with_years=" + this.state.amerifluxSitesWithYears +
+        ", overlap=" + this.state.amerifluxOverlapSites +
+        ", ameriflux_only=" + this.state.amerifluxOnlySites + ".";
+    }
     if (this.state.warning) {
       msg += " " + this.state.warning;
     }
@@ -2172,6 +3102,10 @@
     this.state.sourceUrl = snapshot && snapshot.sourceUrl ? snapshot.sourceUrl : "";
     this.state.warning = snapshot && snapshot.warning ? snapshot.warning : "";
     this.state.lastUpdatedLabel = snapshot && snapshot.lastUpdatedLabel ? snapshot.lastUpdatedLabel : "";
+    this.state.amerifluxTotalSites = snapshot && snapshot.amerifluxTotalSites ? snapshot.amerifluxTotalSites : 0;
+    this.state.amerifluxSitesWithYears = snapshot && snapshot.amerifluxSitesWithYears ? snapshot.amerifluxSitesWithYears : 0;
+    this.state.amerifluxOverlapSites = snapshot && snapshot.amerifluxOverlapSites ? snapshot.amerifluxOverlapSites : 0;
+    this.state.amerifluxOnlySites = snapshot && snapshot.amerifluxOnlySites ? snapshot.amerifluxOnlySites : 0;
     this.state.errorMessage = "";
 
     this.populateFilters();
@@ -2179,6 +3113,28 @@
     this.state.mode = "ready";
     this.render();
     this.trackExplorerLoadedOnce();
+  };
+
+  Explorer.prototype.buildMergedSnapshotState = function (shuttleResult, ameriResult) {
+    var merge = mergeShuttleAndAmeriFluxRows(
+      shuttleResult && Array.isArray(shuttleResult.rows) ? shuttleResult.rows : [],
+      ameriResult && Array.isArray(ameriResult.sites) ? ameriResult.sites : []
+    );
+    return {
+      rows: merge.rows,
+      droppedRows: shuttleResult && shuttleResult.droppedRows ? shuttleResult.droppedRows : 0,
+      source: "Shuttle + AmeriFlux",
+      sourceUrl: shuttleResult && shuttleResult.sourceUrl ? shuttleResult.sourceUrl : this.jsonUrl,
+      warning: combineWarnings(
+        shuttleResult && shuttleResult.warning ? shuttleResult.warning : "",
+        ameriResult && ameriResult.warning ? ameriResult.warning : ""
+      ),
+      lastUpdatedLabel: formatLastUpdatedLabel(shuttleResult && shuttleResult.lastModified ? shuttleResult.lastModified : ""),
+      amerifluxTotalSites: ameriResult && ameriResult.totalSites ? ameriResult.totalSites : 0,
+      amerifluxSitesWithYears: ameriResult && ameriResult.sitesWithYears ? ameriResult.sitesWithYears : 0,
+      amerifluxOverlapSites: merge.amerifluxOverlapSites || 0,
+      amerifluxOnlySites: merge.amerifluxOnlySites || 0
+    };
   };
 
   Explorer.prototype.load = function () {
@@ -2194,39 +3150,40 @@
         source: cached.source || "cache",
         sourceUrl: cached.sourceUrl || this.jsonUrl,
         warning: cached.warning || "",
-        lastUpdatedLabel: cached.lastUpdatedLabel || ""
+        lastUpdatedLabel: cached.lastUpdatedLabel || "",
+        amerifluxTotalSites: cached.amerifluxTotalSites || 0,
+        amerifluxSitesWithYears: cached.amerifluxSitesWithYears || 0,
+        amerifluxOverlapSites: cached.amerifluxOverlapSites || 0,
+        amerifluxOnlySites: cached.amerifluxOnlySites || 0
       });
     }
 
-    loadSnapshot(this.jsonUrl, this.csvUrl)
-      .then(function (result) {
-        var freshnessKey = buildSnapshotFreshnessKey(result);
-        if (hadCache && cached.freshnessKey && cached.freshnessKey === freshnessKey) {
-          if (result.lastModified) {
-            self.state.lastUpdatedLabel = formatLastUpdatedLabel(result.lastModified);
-            self.render();
-          }
-          return;
-        }
+    Promise.all([
+      this.shuttleSource.list_sites(),
+      this.ameriFluxSource.list_sites()
+    ])
+      .then(function (results) {
+        var shuttleResult = results[0] || {};
+        var ameriResult = results[1] || {};
+        var snapshotState = self.buildMergedSnapshotState(shuttleResult, ameriResult);
+        var freshnessKey = [
+          "shuttle:" + buildSnapshotFreshnessKey(shuttleResult),
+          String(ameriResult.freshnessKey || "ameriflux:none")
+        ].join("|");
 
-        var normalized = normalizeRows(result.rawRows || []);
-        var snapshotState = {
-          rows: normalized.rows,
-          droppedRows: normalized.dropped,
-          source: result.source || "",
-          sourceUrl: result.sourceUrl || "",
-          warning: result.warning || "",
-          lastUpdatedLabel: formatLastUpdatedLabel(result.lastModified || "")
-        };
         self.applyLoadedSnapshotState(snapshotState);
         writeSnapshotCache(self.jsonUrl, self.csvUrl, {
           freshnessKey: freshnessKey,
-          rows: normalized.rows,
-          droppedRows: normalized.dropped,
-          source: result.source || "",
-          sourceUrl: result.sourceUrl || "",
-          warning: result.warning || "",
-          lastUpdatedLabel: formatLastUpdatedLabel(result.lastModified || "")
+          rows: snapshotState.rows,
+          droppedRows: snapshotState.droppedRows,
+          source: snapshotState.source,
+          sourceUrl: snapshotState.sourceUrl,
+          warning: snapshotState.warning,
+          lastUpdatedLabel: snapshotState.lastUpdatedLabel,
+          amerifluxTotalSites: snapshotState.amerifluxTotalSites,
+          amerifluxSitesWithYears: snapshotState.amerifluxSitesWithYears,
+          amerifluxOverlapSites: snapshotState.amerifluxOverlapSites,
+          amerifluxOnlySites: snapshotState.amerifluxOnlySites
         });
       })
       .catch(function (error) {
@@ -2283,9 +3240,29 @@
     });
   }
 
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", initAll);
-  } else {
-    initAll();
+  var testHooks = {
+    parseAmeriFluxAvailabilityPayload: parseAmeriFluxAvailabilityPayload,
+    mergeShuttleAndAmeriFluxRows: mergeShuttleAndAmeriFluxRows,
+    stripUrlQueryForFilename: stripUrlQueryForFilename,
+    filenameFromUrl: filenameFromUrl,
+    buildAmeriFluxCurlCommand: buildAmeriFluxCurlCommand,
+    createAmeriFluxSource: function (options) {
+      return new AmeriFluxSource(options || {});
+    }
+  };
+
+  if (typeof module === "object" && module.exports) {
+    module.exports = testHooks;
+  }
+  if (typeof window !== "undefined") {
+    window.ShuttleExplorerTestHooks = testHooks;
+  }
+
+  if (typeof document !== "undefined") {
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", initAll);
+    } else {
+      initAll();
+    }
   }
 })();

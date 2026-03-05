@@ -76,7 +76,7 @@
 
 .shuttle-explorer__controls {
   display: grid;
-  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr);
   gap: 10px;
   margin: 0 0 10px 0;
   padding: 10px 12px;
@@ -324,7 +324,7 @@
 
 .shuttle-explorer__table {
   width: 100%;
-  min-width: 760px;
+  min-width: 880px;
   border-collapse: collapse;
   font-size: 0.9em;
 }
@@ -360,6 +360,28 @@
 
 .shuttle-explorer__table tbody tr:hover {
   background: #fbfdff;
+}
+
+.shuttle-explorer__source-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.82em;
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.shuttle-explorer__source-badge--ameriflux {
+  background: #edf7f0;
+  border: 1px solid #b6dcc2;
+  color: #1f6c3f;
+}
+
+.shuttle-explorer__source-badge--ameriflux-shuttle {
+  background: #eef3fa;
+  border: 1px solid #b8c9e4;
+  color: #2a4f7a;
 }
 
 .shuttle-explorer__sort {
