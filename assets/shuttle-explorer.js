@@ -30,7 +30,6 @@
     { key: "site_name", label: "Site Name", type: "string" },
     { key: "country", label: "Country", type: "string" },
     { key: "data_hub", label: "Hub", type: "string" },
-    { key: "source_label", label: "Source", type: "string" },
     { key: "network", label: "Network", type: "string" },
     { key: "vegetation_type", label: "Veg Type", type: "string" },
     { key: "years", label: "Years", type: "years" }
@@ -1279,10 +1278,7 @@
   }
 
   function buildAttributionText() {
-    return [
-      "FLUXNET data are shared under a CC-BY 4.0 data use license, which requires attribution. Data users must follow dataset-specific attribution and citation guidance included with each downloaded archive, and should note that this varies by providing network.",
-      "The FLUXNET data presented here were discovered using a FLUXNET Shuttle metadata snapshot accessed via the Q.E.D. Lab FLUXNET Data Explorer. We appreciate acknowledgement when appropriate. Available data is updated as of: 2026-03-06."
-    ].join("\n\n");
+    return "The FLUXNET data presented here were discovered using a FLUXNET Shuttle metadata snapshot accessed via the Q.E.D. Lab FLUXNET Data Explorer. We appreciate acknowledgement when appropriate. Available data is updated as of: 2026-03-06.";
   }
 
   function csvEscape(value) {
@@ -1434,10 +1430,10 @@
       "  </div>",
       "  <section class=\"shuttle-explorer__bulk-source shuttle-explorer__hidden\" data-role=\"shuttle-bulk-section\" aria-labelledby=\"shuttle-bulk-source-heading\">",
       "    <div class=\"shuttle-explorer__bulk-header\">",
-      "      <h4 id=\"shuttle-bulk-source-heading\">Shuttle-available bulk download</h4>",
-      "      <p class=\"shuttle-explorer__tiny\" data-role=\"shuttle-selection-count\">0 Shuttle-available selected</p>",
+      "      <h4 id=\"shuttle-bulk-source-heading\">Bulk download for site data available via the FLUXNET Shuttle</h4>",
+      "      <p class=\"shuttle-explorer__tiny\" data-role=\"shuttle-selection-count\">0 sites available via the Shuttle selected</p>",
       "    </div>",
-      "    <p class=\"shuttle-explorer__tiny\">Applies to Shuttle-backed rows only (Shuttle + AmeriFlux-shuttle overlap).</p>",
+      "    <p class=\"shuttle-explorer__tiny\">Applies only to data available via the FLUXNET Shuttle</p>",
       "    <div class=\"shuttle-explorer__bulk-actions\">",
       "      <button type=\"button\" class=\"shuttle-explorer__btn shuttle-explorer__btn--small\" data-role=\"download-script\">Download download_shuttle_selected.sh</button>",
       "      <button type=\"button\" class=\"shuttle-explorer__btn shuttle-explorer__btn--small\" data-role=\"show-cli-command\">Show Shuttle CLI command</button>",
@@ -1454,10 +1450,10 @@
       "  </section>",
       "  <section class=\"shuttle-explorer__bulk-source shuttle-explorer__hidden\" data-role=\"ameriflux-bulk-section\" aria-labelledby=\"ameriflux-bulk-source-heading\">",
       "    <div class=\"shuttle-explorer__bulk-header\">",
-      "      <h4 id=\"ameriflux-bulk-source-heading\">Otherwise-available bulk download</h4>",
-      "      <p class=\"shuttle-explorer__tiny\" data-role=\"ameriflux-selection-count\">0 Otherwise-available selected</p>",
+      "      <h4 id=\"ameriflux-bulk-source-heading\">Bulk download for site data available elsewhere</h4>",
+      "      <p class=\"shuttle-explorer__tiny\" data-role=\"ameriflux-selection-count\">0 sites available elsewhere selected</p>",
       "    </div>",
-      "    <p class=\"shuttle-explorer__tiny\">Applies only to Otherwise-available rows. URLs are requested dynamically via AmeriFlux API.</p>",
+      "    <p class=\"shuttle-explorer__tiny\">Applies to sites that are not available via the Shuttle but are available elsewhere (e.g., via regional network hubs).</p>",
       "    <div class=\"shuttle-explorer__bulk-actions\">",
       "      <button type=\"button\" class=\"shuttle-explorer__btn shuttle-explorer__btn--small\" data-role=\"download-ameriflux-sites-file\">Download ameriflux_selected_sites.txt</button>",
       "      <button type=\"button\" class=\"shuttle-explorer__btn shuttle-explorer__btn--small\" data-role=\"download-ameriflux-script\">Download download_ameriflux_selected.sh</button>",
@@ -1498,7 +1494,7 @@
       "</div>",
       "<aside class=\"shuttle-explorer__attribution\" data-role=\"attribution\">",
       "  <h3>Data Use and Attribution</h3>",
-      "  <p class=\"shuttle-explorer__tiny\">FLUXNET data are shared under a <a href=\"https://creativecommons.org/licenses/by/4.0/\" target=\"_blank\" rel=\"noopener noreferrer\">CC-BY 4.0</a> data use license, which requires attribution. Data users must follow dataset-specific attribution and citation guidance included with each downloaded archive, and should note that this varies by providing network.</p>",
+      "  <p class=\"shuttle-explorer__tiny\">FLUXNET data are shared under a <a href=\"https://creativecommons.org/licenses/by/4.0/\" target=\"_blank\" rel=\"noopener noreferrer\">CC-BY 4.0</a> data use license, which requires attribution. Data users must follow dataset- and network-specific attribution and citation guidance included with each downloaded archive.</p>",
       "  <textarea readonly data-role=\"attribution-text\"></textarea>",
       "</aside>"
     ].join("");
@@ -2795,10 +2791,10 @@
     }
 
     if (b.shuttleSelectionCount) {
-      b.shuttleSelectionCount.textContent = selectionSummary.shuttleCount + " Shuttle/AmeriFlux-shuttle selected";
+      b.shuttleSelectionCount.textContent = selectionSummary.shuttleCount + " sites available via the Shuttle selected";
     }
     if (b.ameriFluxSelectionCount) {
-      b.ameriFluxSelectionCount.textContent = selectionSummary.ameriFluxCount + " AmeriFlux-only selected";
+      b.ameriFluxSelectionCount.textContent = selectionSummary.ameriFluxCount + " sites available elsewhere selected";
     }
 
     if (b.shuttleBulkSection) {
@@ -3067,7 +3063,6 @@
         "<td>" + (row.site_name ? escapeHtml(row.site_name) : "<span class=\"shuttle-explorer__muted\">—</span>") + "</td>",
         "<td>" + (row.country ? escapeHtml(row.country) : "<span class=\"shuttle-explorer__muted\">—</span>") + "</td>",
         "<td>" + escapeHtml(row.data_hub) + "</td>",
-        "<td>" + renderSourceBadgeHtml(row.source_label, row.source_reason) + "</td>",
         "<td>" + (row.network_display ? escapeHtml(row.network_display) : "<span class=\"shuttle-explorer__muted\">—</span>") + "</td>",
         "<td>" + (row.vegetation_type ? escapeHtml(row.vegetation_type) : "<span class=\"shuttle-explorer__muted\">—</span>") + "</td>",
         "<td>" + escapeHtml(row.years) + "</td>"
