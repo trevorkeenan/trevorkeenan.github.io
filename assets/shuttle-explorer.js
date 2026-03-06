@@ -214,6 +214,30 @@
     return parts.length ? parts : [s];
   }
 
+  function hasAmeriFluxNetworkTag(value) {
+    return splitNetworks(value).some(function (token) {
+      return String(token || "").toLowerCase() === "ameriflux";
+    });
+  }
+
+  function normalizeNetworkDisplay(row) {
+    if (!row || typeof row !== "object") {
+      return row;
+    }
+    if (
+      String(row.data_hub || "").toLowerCase() === "ameriflux" ||
+      String(row.source_label || "") === AMERIFLUX_SOURCE_ONLY ||
+      String(row.source_label || "") === AMERIFLUX_SHUTTLE ||
+      hasAmeriFluxNetworkTag(row.network_display) ||
+      hasAmeriFluxNetworkTag(row.network) ||
+      hasAmeriFluxNetworkTag(row.source_network)
+    ) {
+      row.network_display = AMERIFLUX_SOURCE_ONLY;
+      row.network_tokens = [AMERIFLUX_SOURCE_ONLY];
+    }
+    return row;
+  }
+
   function deriveCountry(siteId, fallback) {
     var fb = String(fallback || "").trim();
     if (fb) {
@@ -704,8 +728,9 @@
 
     mergedRows.forEach(function (row, idx) {
       var siteId = String(row.site_id || "").trim();
-      var networkDisplay = String(row.network_display || row.network || row.source_network || "").trim();
       var sourceLabel = String(row.source_label || "").trim();
+      normalizeNetworkDisplay(row);
+      var networkDisplay = String(row.network_display || row.network || row.source_network || "").trim();
       row._index = idx;
       if (!row._selection_key) {
         row._selection_key = String(row.data_hub || "unknown") + "|" + siteId + "|" + String(row.download_link || "dynamic");
@@ -887,8 +912,16 @@
       source_reason: ""
     };
 
+    normalizeNetworkDisplay(row);
     row.is_icos = isIcosRow(row);
-    row.search_text = (siteId + " " + siteName + " " + networkDisplay + " " + sourceNetwork + " " + vegetationType + " " + SHUTTLE_SOURCE).toLowerCase();
+    row.search_text = (
+      siteId + " " +
+      siteName + " " +
+      String(row.network_display || "") + " " +
+      sourceNetwork + " " +
+      vegetationType + " " +
+      SHUTTLE_SOURCE
+    ).toLowerCase();
     return row;
   }
 
@@ -1246,13 +1279,10 @@
   }
 
   function buildAttributionText() {
-    var accessDate = new Date().toISOString().slice(0, 10);
     return [
-      "The FLUXNET data presented here were discovered using a FLUXNET Shuttle metadata snapshot accessed via the Q.E.D. Lab FLUXNET Data Explorer.",
-      "FLUXNET data are shared openly under the CC-BY 4.0 data use license, which requires attribution.",
-      "Please cite the dataset/product-specific citation(s) provided with each downloaded archive, along with any other attribution requirements contained therein.",
-      "Available data is updated as of: " + accessDate + "."
-    ].join(" ");
+      "FLUXNET data are shared under a CC-BY 4.0 data use license, which requires attribution. Data users must follow dataset-specific attribution and citation guidance included with each downloaded archive, and should note that this varies by providing network.",
+      "The FLUXNET data presented here were discovered using a FLUXNET Shuttle metadata snapshot accessed via the Q.E.D. Lab FLUXNET Data Explorer. We appreciate acknowledgement when appropriate. Available data is updated as of: 2026-03-06."
+    ].join("\n\n");
   }
 
   function csvEscape(value) {
@@ -1365,7 +1395,7 @@
     root.innerHTML = [
       "<div class=\"shuttle-explorer__header\">",
       "  <h2>FLUXNET Data Explorer</h2>",
-      "  <p class=\"shuttle-explorer__muted\">Explore and download a regularly refreshed snapshot of the FLUXNET database<span data-role=\"widget-last-updated-inline\"></span>, with observations from the various regional networks. Search by site ID or site name, then open hub-hosted download links directly from the table. This explorer merges FLUXNET Shuttle and AmeriFlux API availability, with Shuttle preferred when both sources provide the same site.</p>",
+      "  <p class=\"shuttle-explorer__muted\">Explore and download a regularly refreshed snapshot of the official FLUXNET database (last updated: 2026-03-05), with observations from the various regional networks fully processed to the FLUXNET standard through the OneFlux pipeline. Search by site ID or site name, then open hub-hosted download links directly from the table. This explorer supplements sites available through the FLUXNET Shuttle with sites that hosted on AmeriFlux.lbl.gov, to provide the maximum amount of FLUXNET data possible. Data are provided by site teams from around the world, processed by one of three processing hubs (AmeriFlux (<a href=\"https://ameriflux.lbl.gov/\" target=\"_blank\" rel=\"noopener\">https://ameriflux.lbl.gov/</a>), ICOS (<a href=\"https://www.icos-etc.eu/icos/\" target=\"_blank\" rel=\"noopener\">https://www.icos-etc.eu/icos/</a>) or TERN (<a href=\"https://www.tern.org.au/\" target=\"_blank\" rel=\"noopener\">https://www.tern.org.au/</a>), and served via the FLUXNET Shuttle (<a href=\"https://data.fluxnet.org/\" target=\"_blank\" rel=\"noopener\">https://data.fluxnet.org/</a>).</p>",
       "</div>",
       "<p class=\"shuttle-explorer__status is-loading\" data-role=\"status\" role=\"status\" aria-live=\"polite\">Loading snapshot…</p>",
       "<div class=\"shuttle-explorer__controls shuttle-explorer__hidden\" data-role=\"controls\">",
@@ -1385,14 +1415,6 @@
       "    <label for=\"shuttle-vegetation\">Vegetation type</label>",
       "    <select id=\"shuttle-vegetation\" data-role=\"vegetation-filter\"><option value=\"\">All vegetation types</option></select>",
       "  </div>",
-      "  <div class=\"shuttle-explorer__field\">",
-      "    <label for=\"shuttle-source\">Source</label>",
-      "    <select id=\"shuttle-source\" data-role=\"source-filter\">",
-      "      <option value=\"\">All sources</option>",
-      "      <option value=\"AmeriFlux-shuttle\">AmeriFlux-shuttle</option>",
-      "      <option value=\"AmeriFlux\">AmeriFlux</option>",
-      "    </select>",
-      "  </div>",
       "</div>",
       "<div class=\"shuttle-explorer__hub-filters shuttle-explorer__hidden\" data-role=\"hub-filters\" aria-label=\"Hub filters\"></div>",
       "<div class=\"shuttle-explorer__row shuttle-explorer__hidden\" data-role=\"summary-row\">",
@@ -1404,7 +1426,7 @@
       "    <h3 id=\"shuttle-bulk-heading\">Bulk download tools</h3>",
       "    <p class=\"shuttle-explorer__tiny shuttle-explorer__bulk-count\" data-role=\"selection-count\">0 selected</p>",
       "  </div>",
-      "  <p class=\"shuttle-explorer__tiny\">Shuttle is preferred when both sources exist. Bulk outputs are split by source: Shuttle (including AmeriFlux-shuttle overlaps) and AmeriFlux-only.</p>",
+      "  <p class=\"shuttle-explorer__tiny\">The FLUXNET Shuttle is the preferred means to access FLUXNET data, but some FLUXNET data is not available through the shuttle. Bulk download options are different for Shuttle-available and Otherwise-available data.</p>",
       "  <div class=\"shuttle-explorer__bulk-actions\">",
       "    <button type=\"button\" class=\"shuttle-explorer__btn shuttle-explorer__btn--small\" data-role=\"select-filtered\">Select all (filtered results)</button>",
       "    <button type=\"button\" class=\"shuttle-explorer__btn shuttle-explorer__btn--small\" data-role=\"select-all-sites\">Select all (all sites)</button>",
@@ -1412,8 +1434,8 @@
       "  </div>",
       "  <section class=\"shuttle-explorer__bulk-source shuttle-explorer__hidden\" data-role=\"shuttle-bulk-section\" aria-labelledby=\"shuttle-bulk-source-heading\">",
       "    <div class=\"shuttle-explorer__bulk-header\">",
-      "      <h4 id=\"shuttle-bulk-source-heading\">Shuttle bulk download</h4>",
-      "      <p class=\"shuttle-explorer__tiny\" data-role=\"shuttle-selection-count\">0 Shuttle/AmeriFlux-shuttle selected</p>",
+      "      <h4 id=\"shuttle-bulk-source-heading\">Shuttle-available bulk download</h4>",
+      "      <p class=\"shuttle-explorer__tiny\" data-role=\"shuttle-selection-count\">0 Shuttle-available selected</p>",
       "    </div>",
       "    <p class=\"shuttle-explorer__tiny\">Applies to Shuttle-backed rows only (Shuttle + AmeriFlux-shuttle overlap).</p>",
       "    <div class=\"shuttle-explorer__bulk-actions\">",
@@ -1432,10 +1454,10 @@
       "  </section>",
       "  <section class=\"shuttle-explorer__bulk-source shuttle-explorer__hidden\" data-role=\"ameriflux-bulk-section\" aria-labelledby=\"ameriflux-bulk-source-heading\">",
       "    <div class=\"shuttle-explorer__bulk-header\">",
-      "      <h4 id=\"ameriflux-bulk-source-heading\">AmeriFlux bulk download</h4>",
-      "      <p class=\"shuttle-explorer__tiny\" data-role=\"ameriflux-selection-count\">0 AmeriFlux-only selected</p>",
+      "      <h4 id=\"ameriflux-bulk-source-heading\">Otherwise-available bulk download</h4>",
+      "      <p class=\"shuttle-explorer__tiny\" data-role=\"ameriflux-selection-count\">0 Otherwise-available selected</p>",
       "    </div>",
-      "    <p class=\"shuttle-explorer__tiny\">Applies only to AmeriFlux-only rows. URLs are requested dynamically via AmeriFlux API.</p>",
+      "    <p class=\"shuttle-explorer__tiny\">Applies only to Otherwise-available rows. URLs are requested dynamically via AmeriFlux API.</p>",
       "    <div class=\"shuttle-explorer__bulk-actions\">",
       "      <button type=\"button\" class=\"shuttle-explorer__btn shuttle-explorer__btn--small\" data-role=\"download-ameriflux-sites-file\">Download ameriflux_selected_sites.txt</button>",
       "      <button type=\"button\" class=\"shuttle-explorer__btn shuttle-explorer__btn--small\" data-role=\"download-ameriflux-script\">Download download_ameriflux_selected.sh</button>",
@@ -1475,8 +1497,8 @@
       "  <span class=\"shuttle-explorer__tiny shuttle-explorer__page-summary\" data-role=\"page-summary\"></span>",
       "</div>",
       "<aside class=\"shuttle-explorer__attribution\" data-role=\"attribution\">",
-      "  <h3>Data use &amp; attribution</h3>",
-      "  <p class=\"shuttle-explorer__tiny\">FLUXNET data are shared under <a href=\"https://creativecommons.org/licenses/by/4.0/\" target=\"_blank\" rel=\"noopener noreferrer\">CC-BY 4.0</a>. Data users <em>must</em> follow dataset-specific attribution and citation guidance included with each downloaded archive.</p>",
+      "  <h3>Data Use and Attribution</h3>",
+      "  <p class=\"shuttle-explorer__tiny\">FLUXNET data are shared under a <a href=\"https://creativecommons.org/licenses/by/4.0/\" target=\"_blank\" rel=\"noopener noreferrer\">CC-BY 4.0</a> data use license, which requires attribution. Data users must follow dataset-specific attribution and citation guidance included with each downloaded archive, and should note that this varies by providing network.</p>",
       "  <textarea readonly data-role=\"attribution-text\"></textarea>",
       "</aside>"
     ].join("");
@@ -1511,7 +1533,6 @@
       selectedNetwork: "",
       selectedCountry: "",
       selectedVegetation: "",
-      selectedSource: "",
       selectedHubs: {},
       selectedKeys: {},
       cliPanelVisible: false,
@@ -1540,7 +1561,6 @@
       networkFilter: bySelector(this.root, "[data-role='network-filter']"),
       countryFilter: bySelector(this.root, "[data-role='country-filter']"),
       vegetationFilter: bySelector(this.root, "[data-role='vegetation-filter']"),
-      sourceFilter: bySelector(this.root, "[data-role='source-filter']"),
       hubFilters: bySelector(this.root, "[data-role='hub-filters']"),
       widgetLastUpdatedInline: bySelector(this.root, "[data-role='widget-last-updated-inline']"),
       summaryRow: bySelector(this.root, "[data-role='summary-row']"),
@@ -1635,16 +1655,6 @@
         self.updateDerivedState();
         self.render();
         self.trackFilterChange("vegetation_type", self.state.selectedVegetation);
-      });
-    }
-
-    if (b.sourceFilter) {
-      b.sourceFilter.addEventListener("change", function () {
-        self.state.selectedSource = String(b.sourceFilter.value || "");
-        self.state.page = 1;
-        self.updateDerivedState();
-        self.render();
-        self.trackFilterChange("source", self.state.selectedSource);
       });
     }
 
@@ -1956,7 +1966,6 @@
     this.state.selectedNetwork = "";
     this.state.selectedCountry = "";
     this.state.selectedVegetation = "";
-    this.state.selectedSource = "";
     Object.keys(this.state.selectedHubs).forEach(function (hub) {
       self.state.selectedHubs[hub] = true;
     });
@@ -1975,9 +1984,6 @@
     }
     if (this.bindings.vegetationFilter) {
       this.bindings.vegetationFilter.value = "";
-    }
-    if (this.bindings.sourceFilter) {
-      this.bindings.sourceFilter.value = "";
     }
     qsa(this.bindings.hubFilters, "input[type='checkbox']").forEach(function (input) {
       input.checked = true;
@@ -2559,7 +2565,7 @@
     }
     var shuttleRows = this.getShuttleRows(rows);
     if (!shuttleRows.length) {
-      this.setBulkStatus("No Shuttle-backed rows are selected. Use AmeriFlux bulk download tools for AmeriFlux-only sites.");
+      this.setBulkStatus("No Shuttle-backed rows are selected. Use the Otherwise-available bulk download tools for AmeriFlux-only sites.");
       return;
     }
     this.downloadTextFile("shuttle_selected_manifest.csv", this.buildSelectionManifestCsv(shuttleRows), "text/csv;charset=utf-8");
@@ -2575,7 +2581,7 @@
     }
     var shuttleRows = this.getShuttleRows(rows);
     if (!shuttleRows.length) {
-      this.setBulkStatus("No Shuttle-backed rows are selected. AmeriFlux-only rows do not produce static links.");
+      this.setBulkStatus("No Shuttle-backed rows are selected. Otherwise-available rows do not produce static links.");
       return;
     }
     this.downloadTextFile("shuttle_links.txt", this.buildLinksText(shuttleRows), "text/plain;charset=utf-8");
@@ -2591,7 +2597,7 @@
     }
     var shuttleRows = this.getShuttleRows(rows);
     if (!shuttleRows.length) {
-      this.setBulkStatus("No Shuttle-backed rows are selected. Use AmeriFlux shell script tools for AmeriFlux-only sites.");
+      this.setBulkStatus("No Shuttle-backed rows are selected. Use the Otherwise-available shell script tools for AmeriFlux-only sites.");
       return;
     }
     this.downloadTextFile("download_shuttle_selected.sh", this.buildCurlScript(shuttleRows), "text/x-shellscript;charset=utf-8");
@@ -2607,7 +2613,7 @@
     }
     var shuttleRows = this.getShuttleRows(rows);
     if (!shuttleRows.length) {
-      this.setBulkStatus("No Shuttle-backed rows are selected. Use ameriflux_selected_sites.txt for AmeriFlux-only rows.");
+      this.setBulkStatus("No Shuttle-backed rows are selected. Use ameriflux_selected_sites.txt for Otherwise-available rows.");
       return;
     }
     this.downloadTextFile("shuttle_selected_sites.txt", this.buildSelectedSitesText(shuttleRows), "text/plain;charset=utf-8");
@@ -2625,11 +2631,11 @@
     }
     var ameriFluxRows = this.getAmeriFluxRows(rows);
     if (!ameriFluxRows.length) {
-      this.setBulkStatus("No AmeriFlux-only rows are selected.");
+      this.setBulkStatus("No Otherwise-available rows are selected.");
       return;
     }
     this.downloadTextFile("ameriflux_selected_sites.txt", this.buildSelectedSitesText(ameriFluxRows), "text/plain;charset=utf-8");
-    this.setBulkStatus("Downloaded ameriflux_selected_sites.txt for " + uniqueSiteIdsFromRows(ameriFluxRows).length + " AmeriFlux-only site(s).");
+    this.setBulkStatus("Downloaded ameriflux_selected_sites.txt for " + uniqueSiteIdsFromRows(ameriFluxRows).length + " Otherwise-available site(s).");
   };
 
   Explorer.prototype.handleDownloadAmeriFluxScript = function () {
@@ -2639,11 +2645,11 @@
     }
     var ameriFluxRows = this.getAmeriFluxRows(rows);
     if (!ameriFluxRows.length) {
-      this.setBulkStatus("No AmeriFlux-only rows are selected.");
+      this.setBulkStatus("No Otherwise-available rows are selected.");
       return;
     }
     this.downloadTextFile("download_ameriflux_selected.sh", this.buildAmeriFluxBulkScript(ameriFluxRows), "text/x-shellscript;charset=utf-8");
-    this.setBulkStatus("Downloaded download_ameriflux_selected.sh for " + uniqueSiteIdsFromRows(ameriFluxRows).length + " AmeriFlux-only site(s).");
+    this.setBulkStatus("Downloaded download_ameriflux_selected.sh for " + uniqueSiteIdsFromRows(ameriFluxRows).length + " Otherwise-available site(s).");
   };
 
   Explorer.prototype.handleCopyAmeriFluxScript = function () {
@@ -2653,10 +2659,10 @@
     }
     var ameriFluxRows = this.getAmeriFluxRows(rows);
     if (!ameriFluxRows.length) {
-      this.setBulkStatus("No AmeriFlux-only rows are selected.");
+      this.setBulkStatus("No Otherwise-available rows are selected.");
       return;
     }
-    this.copyText(this.buildAmeriFluxBulkScript(ameriFluxRows), "Copied AmeriFlux bulk shell script.");
+    this.copyText(this.buildAmeriFluxBulkScript(ameriFluxRows), "Copied Otherwise-available bulk shell script.");
     gaEvent("fx_ameriflux_script_copy", { count: uniqueSiteIdsFromRows(ameriFluxRows).length });
   };
 
@@ -2667,7 +2673,7 @@
     }
     var shuttleRows = this.getShuttleRows(rows);
     if (!shuttleRows.length) {
-      this.setBulkStatus("No Shuttle-backed rows are selected. AmeriFlux-only rows require the AmeriFlux bulk shell script.");
+      this.setBulkStatus("No Shuttle-backed rows are selected. Otherwise-available rows require the Otherwise-available bulk shell script.");
       return;
     }
     this.copyText(this.buildLinksText(shuttleRows), "Copied Shuttle links.");
@@ -2699,7 +2705,7 @@
           if (curlCommand) {
             self.copyText(
               curlCommand,
-              "Copied AmeriFlux curl command for " + site + ". AmeriFlux-only downloads require your own AmeriFlux identity."
+              "Copied AmeriFlux curl command for " + site + "."
             );
           } else {
             self.setBulkStatus("AmeriFlux-only downloads require your own AmeriFlux identity.");
@@ -2999,21 +3005,6 @@
       }
     }
 
-    if (b.sourceFilter) {
-      var currentSource = this.state.selectedSource;
-      var sourceOptions = ["", AMERIFLUX_SHUTTLE, AMERIFLUX_SOURCE_ONLY];
-      b.sourceFilter.innerHTML = "";
-      sourceOptions.forEach(function (sourceLabel) {
-        var option = document.createElement("option");
-        option.value = sourceLabel;
-        option.textContent = sourceLabel ? sourceLabel : "All sources";
-        b.sourceFilter.appendChild(option);
-      });
-      b.sourceFilter.value = currentSource;
-      if (b.sourceFilter.value !== currentSource) {
-        this.state.selectedSource = "";
-      }
-    }
   };
 
   Explorer.prototype.updateDerivedState = function () {
@@ -3022,7 +3013,6 @@
     var selectedNetwork = this.state.selectedNetwork;
     var selectedCountry = this.state.selectedCountry;
     var selectedVegetation = this.state.selectedVegetation;
-    var selectedSource = this.state.selectedSource;
     var selectedHubs = this.state.selectedHubs;
 
     this.state.filteredRows = this.state.rows.filter(function (row) {
@@ -3036,9 +3026,6 @@
         return false;
       }
       if (selectedVegetation && row.vegetation_type !== selectedVegetation) {
-        return false;
-      }
-      if (selectedSource && row.source_label !== selectedSource) {
         return false;
       }
       if (Object.keys(selectedHubs).length && !selectedHubs[row.data_hub]) {
@@ -3134,34 +3121,8 @@
   Explorer.prototype.renderSummary = function () {
     var total = this.state.rows.length;
     var filtered = this.state.filteredRows.length;
-    var parts = [];
-    if (filtered === total) {
-      parts.push("Showing all " + total + " records.");
-    } else {
-      parts.push("Showing " + filtered + " of " + total + " records.");
-    }
-    if (this.state.warning) {
-      parts.push(this.state.warning);
-    }
-    if (this.state.droppedRows) {
-      parts.push("Skipped " + this.state.droppedRows + " malformed rows.");
-    }
-    if (this.state.amerifluxSitesWithYears || this.state.amerifluxTotalSites) {
-      parts.push(
-        "AmeriFlux availability: " +
-        this.state.amerifluxSitesWithYears +
-        " site(s) with publish years; " +
-        this.state.amerifluxOverlapSites +
-        " overlap site(s) served from Shuttle; " +
-        this.state.amerifluxOnlySites +
-        " AmeriFlux-only site(s)."
-      );
-      if (this.state.amerifluxOnlySites && !this.ameriFluxSource.canDownload()) {
-        parts.push("AmeriFlux-only downloads require your own AmeriFlux identity; use \"Copy AmeriFlux curl command\".");
-      }
-    }
     if (this.bindings.summary) {
-      this.bindings.summary.textContent = parts.join(" ");
+      this.bindings.summary.textContent = "Showing " + filtered + " of " + total + " records.";
     }
   };
 
@@ -3205,16 +3166,9 @@
   Explorer.prototype.renderHubSummaryInStatus = function () {
     var total = this.state.rows.length;
     var hubCounts = formatHubCounts(this.state.rows);
-    var source = this.state.source ? "Loaded from " + this.state.source : "";
-    var msg = "Loaded " + total + " records. " + hubCounts + (source ? " " + source + "." : "");
-    if (this.state.amerifluxSitesWithYears || this.state.amerifluxTotalSites) {
-      msg += " AmeriFlux values=" + this.state.amerifluxTotalSites +
-        ", with_years=" + this.state.amerifluxSitesWithYears +
-        ", overlap=" + this.state.amerifluxOverlapSites +
-        ", ameriflux_only=" + this.state.amerifluxOnlySites + ".";
-    }
+    var msg = "There are a total of " + total + " site records available: " + hubCounts;
     if (this.state.warning) {
-      msg += " " + this.state.warning;
+      msg += ". " + this.state.warning;
     }
     this.setMode("ready", msg, "is-ok");
   };

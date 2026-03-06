@@ -31,10 +31,10 @@ test('Merge precedence keeps Shuttle download rows canonical on overlap', () => 
       site_name: 'Arroyo',
       country: 'AR',
       data_hub: 'AmeriFlux',
-      network: 'AmeriFlux',
+      network: 'AmeriFlux;Fluxnet-Canada',
       source_network: 'AmeriFlux',
-      network_display: 'AmeriFlux',
-      network_tokens: ['AmeriFlux'],
+      network_display: 'AmeriFlux;Fluxnet-Canada',
+      network_tokens: ['AmeriFlux', 'Fluxnet-Canada'],
       vegetation_type: '',
       first_year: 2012,
       last_year: 2013,
@@ -43,6 +43,26 @@ test('Merge precedence keeps Shuttle download rows canonical on overlap', () => 
       download_mode: 'direct',
       _selection_key: 'shuttle|AR-Bal|1',
       _index: 0,
+      source_label: '',
+      source_reason: ''
+    },
+    {
+      site_id: 'US-Var',
+      site_name: 'Variant',
+      country: 'US',
+      data_hub: 'AmeriFlux',
+      network: 'AmeriFlux;Phenocam',
+      source_network: 'AmeriFlux',
+      network_display: 'AmeriFlux;Phenocam',
+      network_tokens: ['AmeriFlux', 'Phenocam'],
+      vegetation_type: '',
+      first_year: 2014,
+      last_year: 2015,
+      years: '2014-2015',
+      download_link: 'https://data.fluxnet.org/shuttle/us-var.zip',
+      download_mode: 'direct',
+      _selection_key: 'shuttle|US-Var|1',
+      _index: 1,
       source_label: '',
       source_reason: ''
     }
@@ -56,6 +76,7 @@ test('Merge precedence keeps Shuttle download rows canonical on overlap', () => 
   const merged = hooks.mergeShuttleAndAmeriFluxRows(shuttleRows, ameriSites);
   const overlap = merged.rows.find((row) => row.site_id === 'AR-Bal');
   const ameriOnly = merged.rows.find((row) => row.site_id === 'BR-New');
+  const shuttleAmeriFlux = merged.rows.find((row) => row.site_id === 'US-Var');
 
   assert.equal(merged.amerifluxOverlapSites, 1);
   assert.equal(merged.amerifluxOnlySites, 1);
@@ -63,10 +84,14 @@ test('Merge precedence keeps Shuttle download rows canonical on overlap', () => 
   assert.equal(overlap.source_label, 'AmeriFlux-shuttle');
   assert.equal(overlap.download_mode, 'direct');
   assert.equal(overlap.download_link, 'https://data.fluxnet.org/shuttle/ar-bal.zip');
+  assert.equal(overlap.network_display, 'AmeriFlux');
+  assert.deepEqual(overlap.network_tokens, ['AmeriFlux']);
 
   assert.equal(ameriOnly.source_label, 'AmeriFlux');
   assert.equal(ameriOnly.download_mode, 'ameriflux_api');
   assert.equal(ameriOnly.data_hub, 'AmeriFlux');
+  assert.equal(shuttleAmeriFlux.network_display, 'AmeriFlux');
+  assert.deepEqual(shuttleAmeriFlux.network_tokens, ['AmeriFlux']);
 });
 
 test('Bulk partition routes overlap rows to Shuttle and AmeriFlux-only rows to AmeriFlux bulk set', () => {
