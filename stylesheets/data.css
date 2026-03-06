@@ -256,6 +256,10 @@
 	color: #33475b;
 }
 
+.fluxpulse-title-block p + p {
+	margin-top: 12px;
+}
+
 .fluxpulse-actions {
 	display: flex;
 	flex-wrap: wrap;

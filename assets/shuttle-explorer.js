@@ -1371,6 +1371,7 @@
       ".shuttle-explorer__sort{display:inline-flex;align-items:center;gap:4px;border:0;background:transparent;padding:0;margin:0;color:inherit;font:inherit;cursor:pointer;}",
       ".shuttle-explorer__sort-indicator{color:#6b7a89;font-size:.9em;}",
       ".shuttle-explorer__muted{color:#607184;}",
+      ".shuttle-explorer__header p + p{margin-top:12px;}",
       ".shuttle-explorer__pagination{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:10px 0 0;}",
       ".shuttle-explorer__pages{display:flex;flex-wrap:wrap;gap:6px;}",
       ".shuttle-explorer__page.is-active{background:#e8f0fb;border-color:#a8bddb;}",
@@ -1378,7 +1379,7 @@
       ".shuttle-explorer__hidden{display:none !important;}",
       ".shuttle-explorer__attribution{margin:12px 0 0;padding:10px;border:1px solid #d5dbe3;border-radius:8px;background:#ffffff;}",
       ".shuttle-explorer__attribution h3{margin:0 0 6px;font-size:.95em;}",
-      ".shuttle-explorer__attribution textarea{width:100%;min-height:90px;padding:8px;border:1px solid #b7c1ce;border-radius:6px;font:inherit;line-height:1.35;resize:vertical;background:#fdfefe;}",
+      ".shuttle-explorer__attribution textarea{width:100%;padding:8px;border:1px solid #b7c1ce;border-radius:6px;font:inherit;line-height:1.35;resize:none;overflow:hidden;background:#fdfefe;}",
       ".shuttle-explorer__attribution-row{display:flex;justify-content:space-between;align-items:center;gap:10px;margin:8px 0 0;}",
       ".shuttle-explorer__tiny{font-size:.82em;color:#556779;}",
       "@media (max-width: 860px){.shuttle-explorer__controls{grid-template-columns:1fr;}.shuttle-explorer__row{flex-direction:column;align-items:flex-start;}}"
@@ -1423,7 +1424,7 @@
       "    <h3 id=\"shuttle-bulk-heading\">Bulk download tools</h3>",
       "    <p class=\"shuttle-explorer__tiny shuttle-explorer__bulk-count\" data-role=\"selection-count\">0 selected</p>",
       "  </div>",
-      "  <p class=\"shuttle-explorer__tiny\">The FLUXNET Shuttle is the preferred means to access FLUXNET data, but some FLUXNET data is not available through the shuttle. Bulk download options are different for Shuttle-available and Otherwise-available data.</p>",
+      "  <p class=\"shuttle-explorer__tiny\">The FLUXNET Shuttle is the preferred means to access FLUXNET data, but some FLUXNET data is not available through the shuttle. Bulk download options are different for both Shuttle-available data, and data available elsewhere (e.g., via regional network hubs).</p>",
       "  <div class=\"shuttle-explorer__bulk-actions\">",
       "    <button type=\"button\" class=\"shuttle-explorer__btn shuttle-explorer__btn--small\" data-role=\"select-filtered\">Select all (filtered results)</button>",
       "    <button type=\"button\" class=\"shuttle-explorer__btn shuttle-explorer__btn--small\" data-role=\"select-all-sites\">Select all (all sites)</button>",
@@ -1857,8 +1858,11 @@
   };
 
   Explorer.prototype.setAttributionText = function (text) {
-    if (this.bindings.attributionText) {
-      this.bindings.attributionText.value = text;
+    var textarea = this.bindings.attributionText;
+    if (textarea) {
+      textarea.value = text;
+      textarea.style.height = "auto";
+      textarea.style.height = textarea.scrollHeight + "px";
     }
   };
 
@@ -2788,7 +2792,7 @@
         selectionSummary.shuttleCount +
         " via FLUXNET Shuttle, " +
         selectionSummary.ameriFluxCount +
-        " surfaced elsewhere)";
+        " available elsewhere)";
     }
 
     if (b.shuttleSelectionCount) {
@@ -3162,7 +3166,7 @@
   Explorer.prototype.renderHubSummaryInStatus = function () {
     var total = this.state.rows.length;
     var hubCounts = formatHubCounts(this.state.rows);
-    var msg = "There are a total of " + total + " site records available: " + hubCounts;
+    var msg = "Data is available for a total of " + total + " sites: " + hubCounts;
     if (this.state.warning) {
       msg += ". " + this.state.warning;
     }
