@@ -1392,7 +1392,7 @@
     root.innerHTML = [
       "<div class=\"shuttle-explorer__header\">",
       "  <h2>FLUXNET Data Explorer</h2>",
-      "  <p class=\"shuttle-explorer__muted\">Explore and download a regularly refreshed snapshot of the official FLUXNET database (last updated: 2026-03-05), with observations from the various regional networks fully processed to the FLUXNET standard through the OneFlux pipeline. Search by site ID or site name, then open hub-hosted download links directly from the table. This explorer supplements sites available through the FLUXNET Shuttle with sites that hosted on AmeriFlux.lbl.gov, to provide the maximum amount of FLUXNET data possible.</p>",
+      "  <p class=\"shuttle-explorer__muted\">Explore and download a regularly refreshed snapshot of the official FLUXNET database (last updated: 2026-03-05), with observations from the various regional networks fully processed to the FLUXNET standard through the OneFlux pipeline. Search by site ID or site name, then open hub-hosted download links directly from the table. This explorer supplements sites available through the FLUXNET Shuttle with additional FLUXNET sites that are hosted elsewhere (e.g., on AmeriFlux.lbl.gov), to provide the maximum amount of FLUXNET data possible.</p>",
       "  <p class=\"shuttle-explorer__muted\">Data are provided by site teams from around the world, processed by one of three processing hubs (AmeriFlux (<a href=\"https://ameriflux.lbl.gov/\" target=\"_blank\" rel=\"noopener\">https://ameriflux.lbl.gov/</a>), ICOS (<a href=\"https://www.icos-etc.eu/icos/\" target=\"_blank\" rel=\"noopener\">https://www.icos-etc.eu/icos/</a>) or TERN (<a href=\"https://www.tern.org.au/\" target=\"_blank\" rel=\"noopener\">https://www.tern.org.au/</a>), and served via the FLUXNET Shuttle (<a href=\"https://data.fluxnet.org/\" target=\"_blank\" rel=\"noopener\">https://data.fluxnet.org/</a>).</p>",
       "</div>",
       "<p class=\"shuttle-explorer__status is-loading\" data-role=\"status\" role=\"status\" aria-live=\"polite\">Loading snapshot…</p>",
@@ -1496,7 +1496,7 @@
       "</div>",
       "<aside class=\"shuttle-explorer__attribution\" data-role=\"attribution\">",
       "  <h3>Data Use and Attribution</h3>",
-      "  <p class=\"shuttle-explorer__tiny\">FLUXNET data are shared under a <a href=\"https://creativecommons.org/licenses/by/4.0/\" target=\"_blank\" rel=\"noopener noreferrer\">CC-BY 4.0</a> data use license, which requires attribution. Data users must follow dataset- and network-specific attribution and citation guidance included with each downloaded archive.</p>",
+      "  <p class=\"shuttle-explorer__tiny\">FLUXNET data are shared under a <a href=\"https://creativecommons.org/licenses/by/4.0/\" target=\"_blank\" rel=\"noopener noreferrer\">CC-BY 4.0</a> data use license, which requires attribution. Data users must follow dataset- and network-specific attribution and citation guidance included with each downloaded archive. Note that FLUXNET data that is not available via the FLUXNET Shuttle may be processed with an earlier version of the OneFlux processing code.</p>",
       "  <textarea readonly data-role=\"attribution-text\"></textarea>",
       "</aside>"
     ].join("");
