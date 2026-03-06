@@ -50,12 +50,18 @@ For trusted/private runtime deployments:
 
 ### Bulk download behavior (source-separated)
 
+- `download_all_selected.sh` is the easiest default bulk-download option.
+- It delegates to `download_shuttle_selected.sh` and `download_ameriflux_selected.sh` instead of duplicating their logic.
+- Keep `download_all_selected.sh`, the source-specific scripts, and the generated selected-sites files in the same directory when you run it.
+- Source-specific scripts remain available for debugging and advanced use.
+
 - Shuttle bulk tools apply only to Shuttle-backed rows (including `AmeriFlux-shuttle` overlap rows).
 - AmeriFlux-only rows are handled by a separate AmeriFlux bulk shell-script workflow.
 - AmeriFlux rows are not mixed into Shuttle links files or Shuttle CLI helper outputs.
 
-Generated bulk artifacts are source-specific:
+Generated bulk artifacts include:
 
+- `download_all_selected.sh`
 - `shuttle_selected_sites.txt`
 - `shuttle_links.txt`
 - `download_shuttle_selected.sh`

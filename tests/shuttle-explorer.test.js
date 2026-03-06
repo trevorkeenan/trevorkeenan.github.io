@@ -111,20 +111,28 @@ test('Bulk section visibility helper reflects selected source mix', () => {
     { site_id: 'US-Ton', download_mode: 'direct' },
     { site_id: 'BR-New', download_mode: 'ameriflux_api' }
   ]);
+  assert.equal(mixed.showAllSelectedActions, true);
   assert.equal(mixed.showShuttleSection, true);
   assert.equal(mixed.showAmeriFluxSection, true);
 
   const shuttleOnly = hooks.summarizeBulkSelection([
     { site_id: 'US-Ton', download_mode: 'direct' }
   ]);
+  assert.equal(shuttleOnly.showAllSelectedActions, true);
   assert.equal(shuttleOnly.showShuttleSection, true);
   assert.equal(shuttleOnly.showAmeriFluxSection, false);
 
   const ameriOnly = hooks.summarizeBulkSelection([
     { site_id: 'BR-New', download_mode: 'ameriflux_api' }
   ]);
+  assert.equal(ameriOnly.showAllSelectedActions, true);
   assert.equal(ameriOnly.showShuttleSection, false);
   assert.equal(ameriOnly.showAmeriFluxSection, true);
+
+  const noneSelected = hooks.summarizeBulkSelection([]);
+  assert.equal(noneSelected.showAllSelectedActions, false);
+  assert.equal(noneSelected.showShuttleSection, false);
+  assert.equal(noneSelected.showAmeriFluxSection, false);
 });
 
 test('Filename helper strips URL query strings', () => {
@@ -170,6 +178,42 @@ test('AmeriFlux bulk script generator includes required payload fields and filen
   assert.equal(script.includes('clean_url="${url%%\\?*}"'), true);
   assert.equal(script.includes('filename="$(basename "$clean_url")"'), true);
   assert.equal(script.includes('while IFS= read -r SITE_ID; do'), true);
+});
+
+test('Download-all wrapper script delegates to both child scripts when both source partitions exist', () => {
+  const script = hooks.buildDownloadAllSelectedScriptText({
+    includeShuttle: true,
+    includeAmeriFlux: true
+  });
+
+  assert.equal(script.includes('# Shuttle is preferred for overlap sites (AmeriFlux-shuttle).'), true);
+  assert.equal(script.includes('if [ -f "./shuttle_selected_sites.txt" ] && [ -s "./shuttle_selected_sites.txt" ]; then'), true);
+  assert.equal(script.includes('bash "./download_shuttle_selected.sh" || {'), true);
+  assert.equal(script.includes('if [ -f "./ameriflux_selected_sites.txt" ] && [ -s "./ameriflux_selected_sites.txt" ]; then'), true);
+  assert.equal(script.includes('bash "./download_ameriflux_selected.sh" || {'), true);
+  assert.equal(script.includes('echo "Bulk download complete."'), true);
+});
+
+test('Download-all wrapper script can be generated for Shuttle-only selections', () => {
+  const script = hooks.buildDownloadAllSelectedScriptText({
+    includeShuttle: true,
+    includeAmeriFlux: false
+  });
+
+  assert.equal(script.includes('bash "./download_shuttle_selected.sh" || {'), true);
+  assert.equal(script.includes('echo "No AmeriFlux-only selected sites to download."'), true);
+  assert.equal(script.includes('bash "./download_ameriflux_selected.sh" || {'), false);
+});
+
+test('Download-all wrapper script can be generated for AmeriFlux-only selections', () => {
+  const script = hooks.buildDownloadAllSelectedScriptText({
+    includeShuttle: false,
+    includeAmeriFlux: true
+  });
+
+  assert.equal(script.includes('echo "No Shuttle-backed selected sites to download."'), true);
+  assert.equal(script.includes('bash "./download_shuttle_selected.sh" || {'), false);
+  assert.equal(script.includes('bash "./download_ameriflux_selected.sh" || {'), true);
 });
 
 test('Browser-facing explorer files do not include hardcoded AmeriFlux identity', () => {
