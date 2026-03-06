@@ -69,6 +69,39 @@ test('Merge precedence keeps Shuttle download rows canonical on overlap', () => 
   assert.equal(ameriOnly.data_hub, 'AmeriFlux');
 });
 
+test('Bulk partition routes overlap rows to Shuttle and AmeriFlux-only rows to AmeriFlux bulk set', () => {
+  const selectedRows = [
+    { site_id: 'US-Ton', download_mode: 'direct', source_label: '' },
+    { site_id: 'AR-Bal', download_mode: 'direct', source_label: 'AmeriFlux-shuttle' },
+    { site_id: 'BR-New', download_mode: 'ameriflux_api', source_label: 'AmeriFlux' }
+  ];
+
+  const partition = hooks.partitionRowsByBulkSource(selectedRows);
+  assert.deepEqual(partition.shuttleRows.map((row) => row.site_id), ['US-Ton', 'AR-Bal']);
+  assert.deepEqual(partition.ameriFluxRows.map((row) => row.site_id), ['BR-New']);
+});
+
+test('Bulk section visibility helper reflects selected source mix', () => {
+  const mixed = hooks.summarizeBulkSelection([
+    { site_id: 'US-Ton', download_mode: 'direct' },
+    { site_id: 'BR-New', download_mode: 'ameriflux_api' }
+  ]);
+  assert.equal(mixed.showShuttleSection, true);
+  assert.equal(mixed.showAmeriFluxSection, true);
+
+  const shuttleOnly = hooks.summarizeBulkSelection([
+    { site_id: 'US-Ton', download_mode: 'direct' }
+  ]);
+  assert.equal(shuttleOnly.showShuttleSection, true);
+  assert.equal(shuttleOnly.showAmeriFluxSection, false);
+
+  const ameriOnly = hooks.summarizeBulkSelection([
+    { site_id: 'BR-New', download_mode: 'ameriflux_api' }
+  ]);
+  assert.equal(ameriOnly.showShuttleSection, false);
+  assert.equal(ameriOnly.showAmeriFluxSection, true);
+});
+
 test('Filename helper strips URL query strings', () => {
   const url = 'https://amfcdn.lbl.gov/path/AMF_AR-Bal_FLUXNET_FULLSET_2012-2013_3-7.zip?=username';
   assert.equal(hooks.stripUrlQueryForFilename(url), 'https://amfcdn.lbl.gov/path/AMF_AR-Bal_FLUXNET_FULLSET_2012-2013_3-7.zip');
@@ -96,9 +129,22 @@ test('AmeriFlux curl command generator includes site ID and cleaned filename log
 
   assert.match(command, /"site_ids": \[\s*"AR-Bal"\s*\]/);
   assert.match(command, /"description": "Download FLUXNET for AR-Bal"/);
+  assert.match(command, /"intended_use": "QED Lab FLUXNET Data Explorer"/);
   assert.equal(command.includes('clean_url="${url%%\\?*}"'), true);
   assert.equal(command.includes('filename="$(basename "$clean_url")"'), true);
   assert.equal(command.includes('curl -L "$url" -o "$filename"'), true);
+});
+
+test('AmeriFlux bulk script generator includes required payload fields and filename cleanup', () => {
+  const script = hooks.buildAmeriFluxBulkScriptText(['AR-Bal', 'BR-New']);
+
+  assert.equal(script.includes('\\"data_product\\": \\"FLUXNET\\"'), true);
+  assert.equal(script.includes('\\"data_variant\\": \\"FULLSET\\"'), true);
+  assert.equal(script.includes('\\"data_policy\\": \\"CCBY4.0\\"'), true);
+  assert.equal(script.includes('\\"intended_use\\": \\"QED Lab FLUXNET Data Explorer\\"'), true);
+  assert.equal(script.includes('clean_url="${url%%\\?*}"'), true);
+  assert.equal(script.includes('filename="$(basename "$clean_url")"'), true);
+  assert.equal(script.includes('while IFS= read -r SITE_ID; do'), true);
 });
 
 test('Browser-facing explorer files do not include hardcoded AmeriFlux identity', () => {

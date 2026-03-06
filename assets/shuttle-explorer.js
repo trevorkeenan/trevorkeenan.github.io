@@ -13,6 +13,7 @@
   var AMERIFLUX_DOWNLOAD_URL = "https://amfcdn.lbl.gov/api/v1/data_download";
   var AMERIFLUX_DEFAULT_VARIANT = "FULLSET";
   var AMERIFLUX_DEFAULT_POLICY = "CCBY4.0";
+  var AMERIFLUX_INTENDED_USE = "QED Lab FLUXNET Data Explorer";
   var AMERIFLUX_TEMPLATE_USER_ID = "YOUR_AMERIFLUX_USERNAME";
   var AMERIFLUX_TEMPLATE_USER_EMAIL = "YOUR_EMAIL";
   var AMERIFLUX_TRUSTED_RUNTIME_FLAG = "amerifluxTrustedRuntime";
@@ -273,6 +274,14 @@
     return String(value == null ? "" : value).replace(/'/g, "'\"'\"'");
   }
 
+  function shellDoubleQuote(value) {
+    return String(value == null ? "" : value)
+      .replace(/\\/g, "\\\\")
+      .replace(/"/g, "\\\"")
+      .replace(/\$/g, "\\$")
+      .replace(/`/g, "\\`");
+  }
+
   function buildAmeriFluxCurlCommand(siteId, variant, policy, endpointUrl) {
     var site = String(siteId || "").trim();
     var payload = {
@@ -282,7 +291,7 @@
       data_variant: String(variant || AMERIFLUX_DEFAULT_VARIANT),
       data_policy: String(policy || AMERIFLUX_DEFAULT_POLICY),
       site_ids: site ? [site] : ["SITE_ID_HERE"],
-      intended_use: "research",
+      intended_use: AMERIFLUX_INTENDED_USE,
       description: "Download FLUXNET for " + (site || "SITE_ID_HERE"),
       agree_policy: true,
       is_test: false
@@ -299,6 +308,141 @@
       "  filename=\"$(basename \"$clean_url\")\"",
       "  curl -L \"$url\" -o \"$filename\"",
       "done"
+    ].join("\n");
+  }
+
+  function uniqueSiteIdsFromRows(rows) {
+    var seen = {};
+    var siteIds = [];
+    (rows || []).forEach(function (row) {
+      var siteId = String(row && row.site_id || "").trim();
+      if (!siteId || seen[siteId]) {
+        return;
+      }
+      seen[siteId] = true;
+      siteIds.push(siteId);
+    });
+    return siteIds;
+  }
+
+  function selectedSiteIdsText(siteIds) {
+    var ids = Array.isArray(siteIds) ? siteIds.filter(Boolean) : [];
+    return ids.join("\n") + "\n";
+  }
+
+  function partitionRowsByBulkSource(rows) {
+    var shuttleRows = [];
+    var ameriFluxRows = [];
+    (rows || []).forEach(function (row) {
+      if (!row) {
+        return;
+      }
+      if (row.download_mode === "ameriflux_api") {
+        ameriFluxRows.push(row);
+        return;
+      }
+      shuttleRows.push(row);
+    });
+    return {
+      shuttleRows: shuttleRows,
+      ameriFluxRows: ameriFluxRows
+    };
+  }
+
+  function summarizeBulkSelection(rows) {
+    var partition = partitionRowsByBulkSource(rows);
+    var shuttleCount = partition.shuttleRows.length;
+    var ameriFluxCount = partition.ameriFluxRows.length;
+    return {
+      shuttleRows: partition.shuttleRows,
+      ameriFluxRows: partition.ameriFluxRows,
+      shuttleCount: shuttleCount,
+      ameriFluxCount: ameriFluxCount,
+      showShuttleSection: shuttleCount > 0,
+      showAmeriFluxSection: ameriFluxCount > 0
+    };
+  }
+
+  function buildAmeriFluxBulkScriptText(siteIds, options) {
+    var opts = options || {};
+    var ids = Array.isArray(siteIds) ? siteIds.filter(Boolean) : [];
+    var embeddedSites = ids.length ? ids.join("\n") : "# Add AmeriFlux site IDs, one per line (e.g., AR-Bal)";
+    var defaultUserId = shellDoubleQuote(String(opts.defaultUserId || AMERIFLUX_TEMPLATE_USER_ID));
+    var defaultUserEmail = shellDoubleQuote(String(opts.defaultUserEmail || AMERIFLUX_TEMPLATE_USER_EMAIL));
+    var downloadUrl = shellDoubleQuote(String(opts.downloadUrl || AMERIFLUX_DOWNLOAD_URL));
+    var variant = shellDoubleQuote(String(opts.variant || AMERIFLUX_DEFAULT_VARIANT));
+    var policy = shellDoubleQuote(String(opts.policy || AMERIFLUX_DEFAULT_POLICY));
+    var intendedUse = shellDoubleQuote(String(opts.intendedUse || AMERIFLUX_INTENDED_USE));
+
+    return [
+      "#!/usr/bin/env bash",
+      "set -euo pipefail",
+      "",
+      "OUTDIR=\"${1:-ameriflux_downloads}\"",
+      "SITES_FILE=\"${2:-ameriflux_selected_sites.txt}\"",
+      "LOGFILE=\"${3:-ameriflux_bulk_download.log}\"",
+      "USER_ID=\"${AMERIFLUX_USER_ID:-" + defaultUserId + "}\"",
+      "USER_EMAIL=\"${AMERIFLUX_USER_EMAIL:-" + defaultUserEmail + "}\"",
+      "",
+      "mkdir -p \"$OUTDIR\"",
+      "cd \"$OUTDIR\"",
+      ": > \"$LOGFILE\"",
+      "",
+      "if ! command -v jq >/dev/null 2>&1; then",
+      "  echo \"jq is required but was not found in PATH.\" >&2",
+      "  exit 1",
+      "fi",
+      "",
+      "if [ ! -f \"$SITES_FILE\" ]; then",
+      "  cat > \"$SITES_FILE\" <<'AMERIFLUX_SITES'",
+      embeddedSites,
+      "AMERIFLUX_SITES",
+      "fi",
+      "",
+      "if [ ! -s \"$SITES_FILE\" ]; then",
+      "  echo \"No AmeriFlux sites provided in $SITES_FILE.\" | tee -a \"$LOGFILE\"",
+      "  exit 0",
+      "fi",
+      "",
+      "while IFS= read -r SITE_ID; do",
+      "  [ -n \"$SITE_ID\" ] || continue",
+      "  echo \"Requesting AmeriFlux FLUXNET URLs for ${SITE_ID}...\" | tee -a \"$LOGFILE\"",
+      "",
+      "  RESPONSE=$(curl -sS -X POST \"" + downloadUrl + "\" \\",
+      "    -H \"Content-Type: application/json\" \\",
+      "    -H \"accept: application/json\" \\",
+      "    --data-binary \"{",
+      "      \\\"user_id\\\": \\\"${USER_ID}\\\",",
+      "      \\\"user_email\\\": \\\"${USER_EMAIL}\\\",",
+      "      \\\"data_product\\\": \\\"FLUXNET\\\",",
+      "      \\\"data_variant\\\": \\\"" + variant + "\\\",",
+      "      \\\"data_policy\\\": \\\"" + policy + "\\\",",
+      "      \\\"site_ids\\\": [\\\"${SITE_ID}\\\"],",
+      "      \\\"intended_use\\\": \\\"" + intendedUse + "\\\",",
+      "      \\\"description\\\": \\\"Download FLUXNET for ${SITE_ID}\\\",",
+      "      \\\"agree_policy\\\": true,",
+      "      \\\"is_test\\\": false",
+      "    }\") || {",
+      "      echo \"Request failed for ${SITE_ID}; skipping.\" | tee -a \"$LOGFILE\"",
+      "      continue",
+      "    }",
+      "",
+      "  URLS=$(printf '%s' \"$RESPONSE\" | jq -r '.data_urls[]?.url // empty' 2>/dev/null || true)",
+      "  if [ -z \"$URLS\" ]; then",
+      "    echo \"No data_urls returned for ${SITE_ID}; continuing.\" | tee -a \"$LOGFILE\"",
+      "    continue",
+      "  fi",
+      "",
+      "  while IFS= read -r url; do",
+      "    [ -n \"$url\" ] || continue",
+      "    clean_url=\"${url%%\\?*}\"",
+      "    filename=\"$(basename \"$clean_url\")\"",
+      "    echo \"Downloading ${filename} (${SITE_ID})\" | tee -a \"$LOGFILE\"",
+      "    curl -L \"$url\" -o \"$filename\" || echo \"Download failed for ${SITE_ID}: $url\" | tee -a \"$LOGFILE\"",
+      "  done <<< \"$URLS\"",
+      "done < \"$SITES_FILE\"",
+      "",
+      "echo \"AmeriFlux bulk download complete.\" | tee -a \"$LOGFILE\""
     ].join("\n");
   }
 
@@ -973,7 +1117,7 @@
       data_variant: String(variant || AMERIFLUX_DEFAULT_VARIANT),
       data_policy: String(policy || AMERIFLUX_DEFAULT_POLICY),
       site_ids: sites,
-      intended_use: "research",
+      intended_use: AMERIFLUX_INTENDED_USE,
       description: "Download FLUXNET for " + sites.join(", "),
       agree_policy: true,
       is_test: false
@@ -1177,6 +1321,14 @@
       ".shuttle-explorer__hub-filters{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 10px;}",
       ".shuttle-explorer__hub-chip{display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border:1px solid #d5dbe3;border-radius:999px;background:#f8fafc;font-size:.88em;}",
       ".shuttle-explorer__row{display:flex;justify-content:space-between;align-items:center;gap:10px;margin:0 0 10px;}",
+      ".shuttle-explorer__bulk{margin:0 0 10px;padding:10px;border:1px solid #d5dbe3;border-radius:8px;background:#fbfdff;}",
+      ".shuttle-explorer__bulk-header{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin:0 0 8px;}",
+      ".shuttle-explorer__bulk-actions{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0 0;}",
+      ".shuttle-explorer__bulk-source{margin:10px 0 0;padding:10px;border:1px solid #dce3eb;border-radius:8px;background:#ffffff;}",
+      ".shuttle-explorer__bulk-source h4{margin:0;font-size:.95em;}",
+      ".shuttle-explorer__bulk-guide{margin:10px 0 0;}",
+      ".shuttle-explorer__cli-panel{margin:10px 0 0;padding:10px;border:1px solid #dce3eb;border-radius:8px;background:#ffffff;}",
+      ".shuttle-explorer__cli-pre{margin:8px 0 0;padding:10px;border-radius:6px;background:#f3f6fa;overflow:auto;font-size:.82em;line-height:1.35;}",
       ".shuttle-explorer__summary{font-size:.9em;color:#33475b;}",
       ".shuttle-explorer__btn{display:inline-block;padding:7px 10px;border:1px solid #b7c1ce;border-radius:6px;background:#fff;color:#23364a;text-decoration:none;font:inherit;cursor:pointer;}",
       ".shuttle-explorer__btn:hover,.shuttle-explorer__btn:focus{background:#eef3f9;text-decoration:none;}",
@@ -1252,39 +1404,59 @@
       "    <h3 id=\"shuttle-bulk-heading\">Bulk download tools</h3>",
       "    <p class=\"shuttle-explorer__tiny shuttle-explorer__bulk-count\" data-role=\"selection-count\">0 selected</p>",
       "  </div>",
-      "  <p class=\"shuttle-explorer__tiny\">For bulk downloads, use the selection tools below to get a shell script for batch downloads, a command for using the Shuttle CLI, or create a manifest of sites or download links. Shuttle is preferred when both sources exist; AmeriFlux-only downloads require your own AmeriFlux identity.</p>",
+      "  <p class=\"shuttle-explorer__tiny\">Shuttle is preferred when both sources exist. Bulk outputs are split by source: Shuttle (including AmeriFlux-shuttle overlaps) and AmeriFlux-only.</p>",
       "  <div class=\"shuttle-explorer__bulk-actions\">",
       "    <button type=\"button\" class=\"shuttle-explorer__btn shuttle-explorer__btn--small\" data-role=\"select-filtered\">Select all (filtered results)</button>",
       "    <button type=\"button\" class=\"shuttle-explorer__btn shuttle-explorer__btn--small\" data-role=\"select-all-sites\">Select all (all sites)</button>",
       "    <button type=\"button\" class=\"shuttle-explorer__btn shuttle-explorer__btn--small\" data-role=\"clear-selection\">Clear selection</button>",
       "  </div>",
-      "  <div class=\"shuttle-explorer__bulk-actions\">",
-      "    <button type=\"button\" class=\"shuttle-explorer__btn shuttle-explorer__btn--small\" data-role=\"download-script\">Download script (sh)</button>",
-      "    <button type=\"button\" class=\"shuttle-explorer__btn shuttle-explorer__btn--small\" data-role=\"show-cli-command\">Show Shuttle CLI command</button>",
-      "  </div>",
-      "  <div class=\"shuttle-explorer__bulk-actions\">",
-      "    <button type=\"button\" class=\"shuttle-explorer__btn shuttle-explorer__btn--small\" data-role=\"download-manifest\">Download manifest (CSV)</button>",
-      "    <button type=\"button\" class=\"shuttle-explorer__btn shuttle-explorer__btn--small\" data-role=\"download-links\">Download links file (TXT)</button>",
-      "    <button type=\"button\" class=\"shuttle-explorer__btn shuttle-explorer__btn--small\" data-role=\"download-sites-file\">Download selected_sites.txt</button>",
-      "  </div>",
-      "  <div class=\"shuttle-explorer__bulk-actions\">",
-      "    <button type=\"button\" class=\"shuttle-explorer__btn shuttle-explorer__btn--small\" data-role=\"copy-links\">Copy links</button>",
-      "    <button type=\"button\" class=\"shuttle-explorer__btn shuttle-explorer__btn--small\" data-role=\"copy-command\">Copy CLI command</button>",
-      "  </div>",
+      "  <section class=\"shuttle-explorer__bulk-source shuttle-explorer__hidden\" data-role=\"shuttle-bulk-section\" aria-labelledby=\"shuttle-bulk-source-heading\">",
+      "    <div class=\"shuttle-explorer__bulk-header\">",
+      "      <h4 id=\"shuttle-bulk-source-heading\">Shuttle bulk download</h4>",
+      "      <p class=\"shuttle-explorer__tiny\" data-role=\"shuttle-selection-count\">0 Shuttle/AmeriFlux-shuttle selected</p>",
+      "    </div>",
+      "    <p class=\"shuttle-explorer__tiny\">Applies to Shuttle-backed rows only (Shuttle + AmeriFlux-shuttle overlap).</p>",
+      "    <div class=\"shuttle-explorer__bulk-actions\">",
+      "      <button type=\"button\" class=\"shuttle-explorer__btn shuttle-explorer__btn--small\" data-role=\"download-script\">Download download_shuttle_selected.sh</button>",
+      "      <button type=\"button\" class=\"shuttle-explorer__btn shuttle-explorer__btn--small\" data-role=\"show-cli-command\">Show Shuttle CLI command</button>",
+      "    </div>",
+      "    <div class=\"shuttle-explorer__bulk-actions\">",
+      "      <button type=\"button\" class=\"shuttle-explorer__btn shuttle-explorer__btn--small\" data-role=\"download-manifest\">Download shuttle_selected_manifest.csv</button>",
+      "      <button type=\"button\" class=\"shuttle-explorer__btn shuttle-explorer__btn--small\" data-role=\"download-links\">Download shuttle_links.txt</button>",
+      "      <button type=\"button\" class=\"shuttle-explorer__btn shuttle-explorer__btn--small\" data-role=\"download-sites-file\">Download shuttle_selected_sites.txt</button>",
+      "    </div>",
+      "    <div class=\"shuttle-explorer__bulk-actions\">",
+      "      <button type=\"button\" class=\"shuttle-explorer__btn shuttle-explorer__btn--small\" data-role=\"copy-links\">Copy Shuttle links</button>",
+      "      <button type=\"button\" class=\"shuttle-explorer__btn shuttle-explorer__btn--small\" data-role=\"copy-command\">Copy Shuttle CLI command</button>",
+      "    </div>",
+      "  </section>",
+      "  <section class=\"shuttle-explorer__bulk-source shuttle-explorer__hidden\" data-role=\"ameriflux-bulk-section\" aria-labelledby=\"ameriflux-bulk-source-heading\">",
+      "    <div class=\"shuttle-explorer__bulk-header\">",
+      "      <h4 id=\"ameriflux-bulk-source-heading\">AmeriFlux bulk download</h4>",
+      "      <p class=\"shuttle-explorer__tiny\" data-role=\"ameriflux-selection-count\">0 AmeriFlux-only selected</p>",
+      "    </div>",
+      "    <p class=\"shuttle-explorer__tiny\">Applies only to AmeriFlux-only rows. URLs are requested dynamically via AmeriFlux API.</p>",
+      "    <div class=\"shuttle-explorer__bulk-actions\">",
+      "      <button type=\"button\" class=\"shuttle-explorer__btn shuttle-explorer__btn--small\" data-role=\"download-ameriflux-sites-file\">Download ameriflux_selected_sites.txt</button>",
+      "      <button type=\"button\" class=\"shuttle-explorer__btn shuttle-explorer__btn--small\" data-role=\"download-ameriflux-script\">Download download_ameriflux_selected.sh</button>",
+      "      <button type=\"button\" class=\"shuttle-explorer__btn shuttle-explorer__btn--small\" data-role=\"copy-ameriflux-script\">Copy AmeriFlux shell script</button>",
+      "    </div>",
+      "  </section>",
       "  <details class=\"shuttle-explorer__bulk-guide\">",
       "    <summary>How to use these bulk tools</summary>",
       "    <ul>",
-      "      <li><strong>Download script (sh)</strong>: a ready-to-run shell script that creates an output folder and downloads selected archives with retries and resume support.</li>",
-      "      <li><strong>Show Shuttle CLI command</strong>: reveals a command template that uses your <code>selected_sites.txt</code> and local snapshot file.</li>",
-      "      <li><strong>Copy CLI command</strong>: copies the Shuttle CLI helper command shown in the panel.</li>",
-      "      <li><strong>Download selected_sites.txt</strong>: one <code>site_id</code> per line for FLUXNET Shuttle CLI workflows (Shuttle-backed rows only).</li>",
-      "      <li><strong>Download manifest (CSV)</strong>: a spreadsheet of the selected sites with hub/network, country, and direct download links for record-keeping or sharing.</li>",
-      "      <li><strong>Download links file (TXT)</strong>: one download URL per line for use with terminal tools, download managers, or scripts.</li>",
-      "      <li><strong>Copy links</strong>: copies the selected URLs to your clipboard for paste into another app.</li>",
+      "      <li><strong>Shuttle script</strong>: uses direct Shuttle URLs and retries/resume support for Shuttle-backed rows only.</li>",
+      "      <li><strong>AmeriFlux script</strong>: requests URLs dynamically per AmeriFlux-only site via POST <code>/api/v1/data_download</code>, then downloads each returned file.</li>",
+      "      <li><strong>Show Shuttle CLI command</strong>: reveals a command template that uses <code>shuttle_selected_sites.txt</code> and your local snapshot file.</li>",
+      "      <li><strong>Copy Shuttle CLI command</strong>: copies the Shuttle CLI helper command shown in the panel.</li>",
+      "      <li><strong>shuttle_selected_sites.txt</strong>: one <code>site_id</code> per line for Shuttle CLI workflows.</li>",
+      "      <li><strong>ameriflux_selected_sites.txt</strong>: one <code>site_id</code> per line for AmeriFlux-only workflows.</li>",
+      "      <li><strong>shuttle_selected_manifest.csv</strong>: selected Shuttle-backed rows with source metadata and direct links.</li>",
+      "      <li><strong>shuttle_links.txt / Copy Shuttle links</strong>: Shuttle direct URLs only (AmeriFlux rows are excluded).</li>",
       "    </ul>",
       "  </details>",
       "  <div class=\"shuttle-explorer__cli-panel shuttle-explorer__hidden\" data-role=\"cli-panel\">",
-      "    <p class=\"shuttle-explorer__tiny\">The FLUXNET Shuttle CLI supports <code>download -f SNAPSHOT.csv -s SITE1 SITE2 ...</code> but does not provide a sites-file option. Use the helper command below with <code>selected_sites.txt</code>.</p>",
+      "    <p class=\"shuttle-explorer__tiny\">The FLUXNET Shuttle CLI supports <code>download -f SNAPSHOT.csv -s SITE1 SITE2 ...</code> but does not provide a sites-file option. Use the helper command below with <code>shuttle_selected_sites.txt</code>.</p>",
       "    <pre class=\"shuttle-explorer__cli-pre\" data-role=\"cli-command\"></pre>",
       "  </div>",
       "  <p class=\"shuttle-explorer__tiny shuttle-explorer__bulk-status\" data-role=\"bulk-status\" aria-live=\"polite\"></p>",
@@ -1376,6 +1548,10 @@
       reset: bySelector(this.root, "[data-role='reset']"),
       bulkPanel: bySelector(this.root, "[data-role='bulk-panel']"),
       selectionCount: bySelector(this.root, "[data-role='selection-count']"),
+      shuttleBulkSection: bySelector(this.root, "[data-role='shuttle-bulk-section']"),
+      shuttleSelectionCount: bySelector(this.root, "[data-role='shuttle-selection-count']"),
+      ameriFluxBulkSection: bySelector(this.root, "[data-role='ameriflux-bulk-section']"),
+      ameriFluxSelectionCount: bySelector(this.root, "[data-role='ameriflux-selection-count']"),
       selectFiltered: bySelector(this.root, "[data-role='select-filtered']"),
       selectAllSites: bySelector(this.root, "[data-role='select-all-sites']"),
       clearSelection: bySelector(this.root, "[data-role='clear-selection']"),
@@ -1383,6 +1559,9 @@
       downloadLinks: bySelector(this.root, "[data-role='download-links']"),
       downloadScript: bySelector(this.root, "[data-role='download-script']"),
       downloadSitesFile: bySelector(this.root, "[data-role='download-sites-file']"),
+      downloadAmeriFluxSitesFile: bySelector(this.root, "[data-role='download-ameriflux-sites-file']"),
+      downloadAmeriFluxScript: bySelector(this.root, "[data-role='download-ameriflux-script']"),
+      copyAmeriFluxScript: bySelector(this.root, "[data-role='copy-ameriflux-script']"),
       copyLinks: bySelector(this.root, "[data-role='copy-links']"),
       showCliCommand: bySelector(this.root, "[data-role='show-cli-command']"),
       copyCommand: bySelector(this.root, "[data-role='copy-command']"),
@@ -1535,6 +1714,24 @@
     if (b.downloadSitesFile) {
       b.downloadSitesFile.addEventListener("click", function () {
         self.handleDownloadSitesFile();
+      });
+    }
+
+    if (b.downloadAmeriFluxSitesFile) {
+      b.downloadAmeriFluxSitesFile.addEventListener("click", function () {
+        self.handleDownloadAmeriFluxSitesFile();
+      });
+    }
+
+    if (b.downloadAmeriFluxScript) {
+      b.downloadAmeriFluxScript.addEventListener("click", function () {
+        self.handleDownloadAmeriFluxScript();
+      });
+    }
+
+    if (b.copyAmeriFluxScript) {
+      b.copyAmeriFluxScript.addEventListener("click", function () {
+        self.handleCopyAmeriFluxScript();
       });
     }
 
@@ -1902,81 +2099,16 @@
     return selectedRows;
   };
 
-  Explorer.prototype.isAmeriFluxApiRow = function (row) {
-    return !!(row && row.download_mode === "ameriflux_api");
-  };
-
   Explorer.prototype.getShuttleRows = function (rows) {
-    return (rows || []).filter(function (row) {
-      return row && row.download_mode !== "ameriflux_api";
-    });
+    return partitionRowsByBulkSource(rows).shuttleRows;
   };
 
-  Explorer.prototype.resolveRowsForDownloadArtifacts = function (rows) {
-    var self = this;
-    var selectedRows = Array.isArray(rows) ? rows : [];
-    var resolvedRows = [];
-    var skippedSites = [];
-    var manualSites = [];
-    var failedSites = [];
-    var chain = Promise.resolve();
+  Explorer.prototype.getAmeriFluxRows = function (rows) {
+    return partitionRowsByBulkSource(rows).ameriFluxRows;
+  };
 
-    selectedRows.forEach(function (row) {
-      if (!self.isAmeriFluxApiRow(row)) {
-        resolvedRows.push(row);
-        return;
-      }
-
-      var siteId = String(row.site_id || "").trim();
-      if (!siteId) {
-        return;
-      }
-
-      chain = chain.then(function () {
-        return self.ameriFluxSource.get_download_urls(siteId, AMERIFLUX_DEFAULT_VARIANT, AMERIFLUX_DEFAULT_POLICY)
-          .then(function (result) {
-            if (result && result.manual_download_required) {
-              skippedSites.push(siteId);
-              manualSites.push({
-                site_id: siteId,
-                message: String(result.message || ""),
-                curl_command: String(result.curl_command || "")
-              });
-              return;
-            }
-            var dataUrls = Array.isArray(result && result.data_urls) ? result.data_urls : [];
-            var added = 0;
-            dataUrls.forEach(function (entry) {
-              var downloadUrl = String(entry && entry.url || "").trim();
-              if (!downloadUrl) {
-                return;
-              }
-              var clone = Object.assign({}, row, {
-                _selection_key: "ameriflux_url|" + siteId + "|" + downloadUrl,
-                download_link: downloadUrl,
-                download_mode: "direct"
-              });
-              resolvedRows.push(clone);
-              added += 1;
-            });
-            if (!added) {
-              failedSites.push(siteId);
-            }
-          })
-          .catch(function () {
-            failedSites.push(siteId);
-          });
-      });
-    });
-
-    return chain.then(function () {
-      return {
-        rows: resolvedRows,
-        skippedSites: skippedSites,
-        manualSites: manualSites,
-        failedSites: failedSites
-      };
-    });
+  Explorer.prototype.getBulkSelectionSummary = function (rows) {
+    return summarizeBulkSelection(rows);
   };
 
   Explorer.prototype.buildSelectionManifestCsv = function (rows) {
@@ -2003,17 +2135,22 @@
   };
 
   Explorer.prototype.buildSelectedSitesText = function (rows) {
-    var seen = {};
-    var siteIds = [];
-    rows.forEach(function (row) {
-      var siteId = String(row.site_id || "").trim();
-      if (!siteId || seen[siteId]) {
-        return;
-      }
-      seen[siteId] = true;
-      siteIds.push(siteId);
+    return selectedSiteIdsText(uniqueSiteIdsFromRows(rows));
+  };
+
+  Explorer.prototype.buildAmeriFluxBulkScript = function (rows) {
+    var siteIds = uniqueSiteIdsFromRows(rows);
+    var identity = this.ameriFluxSource.getDownloadIdentity();
+    var defaultUserId = identity.enabled ? identity.user_id : AMERIFLUX_TEMPLATE_USER_ID;
+    var defaultUserEmail = identity.enabled ? identity.user_email : AMERIFLUX_TEMPLATE_USER_EMAIL;
+    return buildAmeriFluxBulkScriptText(siteIds, {
+      defaultUserId: defaultUserId,
+      defaultUserEmail: defaultUserEmail,
+      downloadUrl: this.ameriFluxSource.downloadUrl,
+      variant: AMERIFLUX_DEFAULT_VARIANT,
+      policy: AMERIFLUX_DEFAULT_POLICY,
+      intendedUse: AMERIFLUX_INTENDED_USE
     });
-    return siteIds.join("\n") + "\n";
   };
 
   Explorer.prototype.getDuplicateSelectedSiteIds = function (rows) {
@@ -2379,15 +2516,15 @@
       return [
         "# No Shuttle rows are selected.",
         "# AmeriFlux-only rows require your own AmeriFlux identity.",
-        "# Use the row-level \"Copy AmeriFlux curl command\" action for those sites."
+        "# Use the AmeriFlux bulk shell script output for those sites."
       ].join("\n");
     }
     var lines = [
       "# FLUXNET Shuttle CLI syntax (confirmed from shuttle docs):",
       "# fluxnet-shuttle download -f shuttle_snapshot.csv -s SITE1 SITE2 ...",
       "#",
-      "# The CLI does not support a --sites-file option, so this helper expands selected_sites.txt:",
-      "fluxnet-shuttle download -f shuttle_snapshot.csv -o fluxnet_downloads -s $(tr '\\n' ' ' < selected_sites.txt)"
+      "# The CLI does not support a --sites-file option, so this helper expands shuttle_selected_sites.txt:",
+      "fluxnet-shuttle download -f shuttle_snapshot.csv -o fluxnet_downloads -s $(tr '\\n' ' ' < shuttle_selected_sites.txt)"
     ];
     if (skipped > 0) {
       lines.push(
@@ -2407,92 +2544,60 @@
     return lines.join("\n");
   };
 
-  Explorer.prototype.buildResolutionWarning = function (resolution) {
-    var parts = [];
-    if (resolution && Array.isArray(resolution.skippedSites) && resolution.skippedSites.length) {
-      parts.push(
-        "AmeriFlux-only downloads for " +
-        resolution.skippedSites.length +
-        " site(s) require your own AmeriFlux identity in this deployment."
-      );
+  Explorer.prototype.buildShuttleExclusionWarning = function (selectedCount, shuttleCount) {
+    var excluded = Math.max(0, (selectedCount || 0) - (shuttleCount || 0));
+    if (!excluded) {
+      return "";
     }
-    if (resolution && Array.isArray(resolution.failedSites) && resolution.failedSites.length) {
-      parts.push("Failed to resolve AmeriFlux URLs for " + resolution.failedSites.length + " site(s).");
-    }
-    return parts.join(" ");
-  };
-
-  Explorer.prototype.buildNoResolvedMessage = function (resolution) {
-    if (resolution && Array.isArray(resolution.manualSites) && resolution.manualSites.length) {
-      return "No direct URLs were resolved. Use row-level \"Copy AmeriFlux curl command\" for AmeriFlux-only sites.";
-    }
-    return "No downloadable URLs were resolved for the current selection.";
+    return excluded + " AmeriFlux-only selection(s) were excluded from Shuttle bulk output.";
   };
 
   Explorer.prototype.handleDownloadManifest = function () {
-    var self = this;
     var rows = this.getSelectedRowsOrWarn();
     if (!rows) {
       return;
     }
-    this.setBulkStatus("Preparing manifest (resolving AmeriFlux URLs where needed)...");
-    this.resolveRowsForDownloadArtifacts(rows).then(function (resolution) {
-      var resolvedRows = Array.isArray(resolution && resolution.rows) ? resolution.rows : [];
-      if (!resolvedRows.length) {
-        self.setBulkStatus(self.buildNoResolvedMessage(resolution));
-        return;
-      }
-      self.downloadTextFile("fluxnet_selected_manifest.csv", self.buildSelectionManifestCsv(resolvedRows), "text/csv;charset=utf-8");
-      var warning = self.buildResolutionWarning(resolution);
-      self.setBulkStatus("Downloaded manifest CSV for " + resolvedRows.length + " resolved download URL(s)." + (warning ? (" " + warning) : ""));
-      gaEvent("fx_manifest_download", { count: resolvedRows.length });
-    }).catch(function (error) {
-      self.setBulkStatus("Failed to build manifest: " + (error && error.message ? error.message : String(error)));
-    });
+    var shuttleRows = this.getShuttleRows(rows);
+    if (!shuttleRows.length) {
+      this.setBulkStatus("No Shuttle-backed rows are selected. Use AmeriFlux bulk download tools for AmeriFlux-only sites.");
+      return;
+    }
+    this.downloadTextFile("shuttle_selected_manifest.csv", this.buildSelectionManifestCsv(shuttleRows), "text/csv;charset=utf-8");
+    var warning = this.buildShuttleExclusionWarning(rows.length, shuttleRows.length);
+    this.setBulkStatus("Downloaded shuttle_selected_manifest.csv for " + shuttleRows.length + " Shuttle-backed row(s)." + (warning ? (" " + warning) : ""));
+    gaEvent("fx_manifest_download", { count: shuttleRows.length });
   };
 
   Explorer.prototype.handleDownloadLinks = function () {
-    var self = this;
     var rows = this.getSelectedRowsOrWarn();
     if (!rows) {
       return;
     }
-    this.setBulkStatus("Preparing links file (resolving AmeriFlux URLs where needed)...");
-    this.resolveRowsForDownloadArtifacts(rows).then(function (resolution) {
-      var resolvedRows = Array.isArray(resolution && resolution.rows) ? resolution.rows : [];
-      if (!resolvedRows.length) {
-        self.setBulkStatus(self.buildNoResolvedMessage(resolution));
-        return;
-      }
-      self.downloadTextFile("fluxnet_selected_links.txt", self.buildLinksText(resolvedRows), "text/plain;charset=utf-8");
-      var warning = self.buildResolutionWarning(resolution);
-      self.setBulkStatus("Downloaded links TXT for " + resolvedRows.length + " resolved download URL(s)." + (warning ? (" " + warning) : ""));
-      gaEvent("fx_links_download", { count: resolvedRows.length });
-    }).catch(function (error) {
-      self.setBulkStatus("Failed to build links file: " + (error && error.message ? error.message : String(error)));
-    });
+    var shuttleRows = this.getShuttleRows(rows);
+    if (!shuttleRows.length) {
+      this.setBulkStatus("No Shuttle-backed rows are selected. AmeriFlux-only rows do not produce static links.");
+      return;
+    }
+    this.downloadTextFile("shuttle_links.txt", this.buildLinksText(shuttleRows), "text/plain;charset=utf-8");
+    var warning = this.buildShuttleExclusionWarning(rows.length, shuttleRows.length);
+    this.setBulkStatus("Downloaded shuttle_links.txt for " + shuttleRows.length + " Shuttle-backed row(s)." + (warning ? (" " + warning) : ""));
+    gaEvent("fx_links_download", { count: shuttleRows.length });
   };
 
   Explorer.prototype.handleDownloadScript = function () {
-    var self = this;
     var rows = this.getSelectedRowsOrWarn();
     if (!rows) {
       return;
     }
-    this.setBulkStatus("Preparing shell script (resolving AmeriFlux URLs where needed)...");
-    this.resolveRowsForDownloadArtifacts(rows).then(function (resolution) {
-      var resolvedRows = Array.isArray(resolution && resolution.rows) ? resolution.rows : [];
-      if (!resolvedRows.length) {
-        self.setBulkStatus(self.buildNoResolvedMessage(resolution));
-        return;
-      }
-      self.downloadTextFile("fluxnet_bulk_download.sh", self.buildCurlScript(resolvedRows), "text/x-shellscript;charset=utf-8");
-      var warning = self.buildResolutionWarning(resolution);
-      self.setBulkStatus("Downloaded shell script for " + resolvedRows.length + " resolved download URL(s)." + (warning ? (" " + warning) : ""));
-      gaEvent("fx_script_download", { count: resolvedRows.length });
-    }).catch(function (error) {
-      self.setBulkStatus("Failed to build shell script: " + (error && error.message ? error.message : String(error)));
-    });
+    var shuttleRows = this.getShuttleRows(rows);
+    if (!shuttleRows.length) {
+      this.setBulkStatus("No Shuttle-backed rows are selected. Use AmeriFlux shell script tools for AmeriFlux-only sites.");
+      return;
+    }
+    this.downloadTextFile("download_shuttle_selected.sh", this.buildCurlScript(shuttleRows), "text/x-shellscript;charset=utf-8");
+    var warning = this.buildShuttleExclusionWarning(rows.length, shuttleRows.length);
+    this.setBulkStatus("Downloaded download_shuttle_selected.sh for " + shuttleRows.length + " Shuttle-backed row(s)." + (warning ? (" " + warning) : ""));
+    gaEvent("fx_script_download", { count: shuttleRows.length });
   };
 
   Explorer.prototype.handleDownloadSitesFile = function () {
@@ -2502,39 +2607,75 @@
     }
     var shuttleRows = this.getShuttleRows(rows);
     if (!shuttleRows.length) {
-      this.setBulkStatus("selected_sites.txt is only available for Shuttle-backed rows.");
+      this.setBulkStatus("No Shuttle-backed rows are selected. Use ameriflux_selected_sites.txt for AmeriFlux-only rows.");
       return;
     }
-    this.downloadTextFile("selected_sites.txt", this.buildSelectedSitesText(shuttleRows), "text/plain;charset=utf-8");
+    this.downloadTextFile("shuttle_selected_sites.txt", this.buildSelectedSitesText(shuttleRows), "text/plain;charset=utf-8");
     if (shuttleRows.length < rows.length) {
-      this.setBulkStatus("Downloaded selected_sites.txt for Shuttle-backed rows only.");
+      this.setBulkStatus("Downloaded shuttle_selected_sites.txt for Shuttle-backed rows only.");
       return;
     }
-    this.setBulkStatus("Downloaded selected_sites.txt.");
+    this.setBulkStatus("Downloaded shuttle_selected_sites.txt.");
   };
 
-  Explorer.prototype.handleCopyLinks = function () {
-    var self = this;
+  Explorer.prototype.handleDownloadAmeriFluxSitesFile = function () {
     var rows = this.getSelectedRowsOrWarn();
     if (!rows) {
       return;
     }
-    this.setBulkStatus("Resolving download links...");
-    this.resolveRowsForDownloadArtifacts(rows).then(function (resolution) {
-      var resolvedRows = Array.isArray(resolution && resolution.rows) ? resolution.rows : [];
-      if (!resolvedRows.length) {
-        self.setBulkStatus(self.buildNoResolvedMessage(resolution));
-        return;
-      }
-      self.copyText(self.buildLinksText(resolvedRows), "Copied selected download links.");
-      var warning = self.buildResolutionWarning(resolution);
-      if (warning) {
-        self.setBulkStatus("Copied selected download links. " + warning);
-      }
-      gaEvent("fx_copy_links", { count: resolvedRows.length });
-    }).catch(function (error) {
-      self.setBulkStatus("Failed to resolve links: " + (error && error.message ? error.message : String(error)));
-    });
+    var ameriFluxRows = this.getAmeriFluxRows(rows);
+    if (!ameriFluxRows.length) {
+      this.setBulkStatus("No AmeriFlux-only rows are selected.");
+      return;
+    }
+    this.downloadTextFile("ameriflux_selected_sites.txt", this.buildSelectedSitesText(ameriFluxRows), "text/plain;charset=utf-8");
+    this.setBulkStatus("Downloaded ameriflux_selected_sites.txt for " + uniqueSiteIdsFromRows(ameriFluxRows).length + " AmeriFlux-only site(s).");
+  };
+
+  Explorer.prototype.handleDownloadAmeriFluxScript = function () {
+    var rows = this.getSelectedRowsOrWarn();
+    if (!rows) {
+      return;
+    }
+    var ameriFluxRows = this.getAmeriFluxRows(rows);
+    if (!ameriFluxRows.length) {
+      this.setBulkStatus("No AmeriFlux-only rows are selected.");
+      return;
+    }
+    this.downloadTextFile("download_ameriflux_selected.sh", this.buildAmeriFluxBulkScript(ameriFluxRows), "text/x-shellscript;charset=utf-8");
+    this.setBulkStatus("Downloaded download_ameriflux_selected.sh for " + uniqueSiteIdsFromRows(ameriFluxRows).length + " AmeriFlux-only site(s).");
+  };
+
+  Explorer.prototype.handleCopyAmeriFluxScript = function () {
+    var rows = this.getSelectedRowsOrWarn();
+    if (!rows) {
+      return;
+    }
+    var ameriFluxRows = this.getAmeriFluxRows(rows);
+    if (!ameriFluxRows.length) {
+      this.setBulkStatus("No AmeriFlux-only rows are selected.");
+      return;
+    }
+    this.copyText(this.buildAmeriFluxBulkScript(ameriFluxRows), "Copied AmeriFlux bulk shell script.");
+    gaEvent("fx_ameriflux_script_copy", { count: uniqueSiteIdsFromRows(ameriFluxRows).length });
+  };
+
+  Explorer.prototype.handleCopyLinks = function () {
+    var rows = this.getSelectedRowsOrWarn();
+    if (!rows) {
+      return;
+    }
+    var shuttleRows = this.getShuttleRows(rows);
+    if (!shuttleRows.length) {
+      this.setBulkStatus("No Shuttle-backed rows are selected. AmeriFlux-only rows require the AmeriFlux bulk shell script.");
+      return;
+    }
+    this.copyText(this.buildLinksText(shuttleRows), "Copied Shuttle links.");
+    var warning = this.buildShuttleExclusionWarning(rows.length, shuttleRows.length);
+    if (warning) {
+      this.setBulkStatus("Copied Shuttle links. " + warning);
+    }
+    gaEvent("fx_copy_links", { count: shuttleRows.length });
   };
 
   Explorer.prototype.handleAmeriFluxRowDownload = function (siteId, buttonEl) {
@@ -2599,7 +2740,7 @@
     this.state.cliPanelVisible = !this.state.cliPanelVisible;
     if (this.state.cliPanelVisible && rows.length) {
       if (this.bindings.cliCommand) {
-        this.bindings.cliCommand.textContent = this.buildShuttleCommandText(this.getShuttleRows(rows));
+        this.bindings.cliCommand.textContent = this.buildShuttleCommandText(rows);
       }
     }
     this.render();
@@ -2615,7 +2756,7 @@
       this.setBulkStatus("No Shuttle-backed rows are selected for a Shuttle CLI command.");
       return;
     }
-    this.copyText(this.buildShuttleCommandText(shuttleRows), "Copied Shuttle CLI helper command.");
+    this.copyText(this.buildShuttleCommandText(rows), "Copied Shuttle CLI helper command.");
     gaEvent("fx_copy_command", { count: shuttleRows.length });
   };
 
@@ -2624,7 +2765,9 @@
     var hasData = this.state.mode === "ready" && this.state.rows.length > 0;
     var selectedRows = this.getSelectedRows();
     var selectedCount = selectedRows.length;
-    var disabled = !selectedCount;
+    var selectionSummary = this.getBulkSelectionSummary(selectedRows);
+    var shuttleDisabled = !selectionSummary.shuttleCount;
+    var ameriFluxDisabled = !selectionSummary.ameriFluxCount;
 
     if (!b.bulkPanel) {
       return;
@@ -2636,7 +2779,27 @@
     }
 
     if (b.selectionCount) {
-      b.selectionCount.textContent = selectedCount + " selected";
+      b.selectionCount.textContent =
+        selectedCount +
+        " selected (" +
+        selectionSummary.shuttleCount +
+        " Shuttle/AmeriFlux-shuttle, " +
+        selectionSummary.ameriFluxCount +
+        " AmeriFlux-only)";
+    }
+
+    if (b.shuttleSelectionCount) {
+      b.shuttleSelectionCount.textContent = selectionSummary.shuttleCount + " Shuttle/AmeriFlux-shuttle selected";
+    }
+    if (b.ameriFluxSelectionCount) {
+      b.ameriFluxSelectionCount.textContent = selectionSummary.ameriFluxCount + " AmeriFlux-only selected";
+    }
+
+    if (b.shuttleBulkSection) {
+      b.shuttleBulkSection.classList.toggle("shuttle-explorer__hidden", !selectionSummary.showShuttleSection);
+    }
+    if (b.ameriFluxBulkSection) {
+      b.ameriFluxBulkSection.classList.toggle("shuttle-explorer__hidden", !selectionSummary.showAmeriFluxSection);
     }
 
     [
@@ -2648,20 +2811,30 @@
       b.copyCommand
     ].forEach(function (btn) {
       if (btn) {
-        btn.disabled = disabled;
+        btn.disabled = shuttleDisabled;
+      }
+    });
+
+    [
+      b.downloadAmeriFluxSitesFile,
+      b.downloadAmeriFluxScript,
+      b.copyAmeriFluxScript
+    ].forEach(function (btn) {
+      if (btn) {
+        btn.disabled = ameriFluxDisabled;
       }
     });
 
     if (b.showCliCommand) {
-      b.showCliCommand.disabled = disabled;
+      b.showCliCommand.disabled = shuttleDisabled;
       b.showCliCommand.textContent = this.state.cliPanelVisible ? "Hide Shuttle CLI command" : "Show Shuttle CLI command";
     }
 
     if (b.cliPanel) {
-      b.cliPanel.classList.toggle("shuttle-explorer__hidden", !(this.state.cliPanelVisible && selectedCount));
+      b.cliPanel.classList.toggle("shuttle-explorer__hidden", !(this.state.cliPanelVisible && !shuttleDisabled));
     }
 
-    if (b.cliCommand && selectedCount) {
+    if (b.cliCommand && selectionSummary.shuttleCount) {
       b.cliCommand.textContent = this.buildShuttleCommandText(selectedRows);
     } else if (b.cliCommand) {
       b.cliCommand.textContent = "";
@@ -3246,6 +3419,9 @@
     stripUrlQueryForFilename: stripUrlQueryForFilename,
     filenameFromUrl: filenameFromUrl,
     buildAmeriFluxCurlCommand: buildAmeriFluxCurlCommand,
+    buildAmeriFluxBulkScriptText: buildAmeriFluxBulkScriptText,
+    partitionRowsByBulkSource: partitionRowsByBulkSource,
+    summarizeBulkSelection: summarizeBulkSelection,
     createAmeriFluxSource: function (options) {
       return new AmeriFluxSource(options || {});
     }

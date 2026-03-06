@@ -48,6 +48,29 @@ For trusted/private runtime deployments:
   - `amerifluxUserEmail` (from `AMERIFLUX_USER_EMAIL`)
 - When both sources contain a site, Shuttle download flow remains canonical.
 
+### Bulk download behavior (source-separated)
+
+- Shuttle bulk tools apply only to Shuttle-backed rows (including `AmeriFlux-shuttle` overlap rows).
+- AmeriFlux-only rows are handled by a separate AmeriFlux bulk shell-script workflow.
+- AmeriFlux rows are not mixed into Shuttle links files or Shuttle CLI helper outputs.
+
+Generated bulk artifacts are source-specific:
+
+- `shuttle_selected_sites.txt`
+- `shuttle_links.txt`
+- `download_shuttle_selected.sh`
+- `shuttle_selected_manifest.csv`
+- `ameriflux_selected_sites.txt`
+- `download_ameriflux_selected.sh`
+
+AmeriFlux bulk script behavior:
+
+- Iterates selected AmeriFlux-only site IDs.
+- POSTs to `https://amfcdn.lbl.gov/api/v1/data_download` per site with `FLUXNET` / `FULLSET` / `CCBY4.0`.
+- Uses `intended_use: "QED Lab FLUXNET Data Explorer"`.
+- Parses `data_urls[].url` dynamically and downloads files.
+- Uses query-strip filename logic for local naming while keeping the full URL for requests.
+
 ## Dev checks
 
 - Unit tests (Node built-in test runner): `node --test tests/shuttle-explorer.test.js`
