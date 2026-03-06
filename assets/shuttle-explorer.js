@@ -1347,7 +1347,7 @@
   }
 
   function buildAttributionText() {
-    return "The FLUXNET data presented here were discovered using a FLUXNET Shuttle metadata snapshot accessed via the Q.E.D. Lab FLUXNET Data Explorer. We appreciate acknowledgement when appropriate. Available data is updated as of: 2026-03-06.";
+    return "The FLUXNET data presented here were discovered using a FLUXNET Shuttle metadata snapshot accessed via the Q.E.D. Lab FLUXNET Data Explorer. We appreciate acknowledgement of the QED FLUXNET Data Explorer when appropriate. Available data is updated as of: 2026-03-06.";
   }
 
   function csvEscape(value) {
