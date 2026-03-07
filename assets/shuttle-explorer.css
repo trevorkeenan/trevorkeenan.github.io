@@ -382,10 +382,20 @@
   color: #1f6c3f;
 }
 
+.shuttle-explorer__source-badge--fluxnet2015 {
+  background: #fff4e5;
+  border: 1px solid #ebc47d;
+  color: #8a5600;
+}
+
 .shuttle-explorer__source-badge--ameriflux-shuttle {
   background: #eef3fa;
   border: 1px solid #b8c9e4;
   color: #2a4f7a;
+}
+
+.shuttle-explorer__site-badge {
+  margin-top: 4px;
 }
 
 .shuttle-explorer__sort {

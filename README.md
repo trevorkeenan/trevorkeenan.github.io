@@ -13,17 +13,26 @@ This supports a no-backend GitHub Pages setup where the site reads stable snapsh
 
 ## AmeriFlux source integration
 
-The explorer now merges two sources:
+The explorer now merges three effective source layers:
 
 - FLUXNET Shuttle snapshot rows (`assets/shuttle_snapshot.json` / `assets/shuttle_snapshot.csv`)
 - AmeriFlux FLUXNET API availability (`https://amfcdn.lbl.gov/api/v2/data_availability/AmeriFlux/FLUXNET/CCBY4.0`)
+- AmeriFlux FLUXNET2015 API availability (`https://amfcdn.lbl.gov/api/v2/data_availability/FLUXNET/FLUXNET2015/CCBY4.0`)
+
+Canonical precedence is:
+
+- Shuttle
+- AmeriFlux FLUXNET
+- FLUXNET2015
 
 Merge behavior:
 
-- If a site exists in both sources, Shuttle is canonical and the row is labeled `AmeriFlux-shuttle`.
-- If a site exists only in the AmeriFlux API (with non-empty `publish_years`), it is shown as `AmeriFlux`.
+- If a site exists in Shuttle and AmeriFlux FLUXNET, Shuttle is canonical and the row is labeled `AmeriFlux-shuttle`.
+- If a site exists only in AmeriFlux FLUXNET, it is shown as `AmeriFlux`.
+- `FLUXNET2015` is used only as a fallback for sites missing from both Shuttle and AmeriFlux FLUXNET.
+- If a site exists in both AmeriFlux FLUXNET and FLUXNET2015, only the AmeriFlux FLUXNET row is kept.
 
-AmeriFlux availability is cached in browser localStorage (`shuttle-explorer:ameriflux-availability:v1`) to avoid calling the availability endpoint on every page load.
+AmeriFlux availability is cached in browser localStorage with separate keys for AmeriFlux FLUXNET and FLUXNET2015 availability refreshes, so the app does not call those endpoints on every page load.
 
 ### AmeriFlux download identity and static deployments
 
@@ -33,7 +42,8 @@ AmeriFlux availability is cached in browser localStorage (`shuttle-explorer:amer
 
 For static/public deployments (for example GitHub Pages):
 
-- AmeriFlux-only rows show `Copy AmeriFlux curl command`.
+- AmeriFlux rows show `Copy AmeriFlux curl command`.
+- FLUXNET2015 rows show `Copy FLUXNET2015 curl command`.
 - The copied command contains placeholders (`YOUR_AMERIFLUX_USERNAME`, `YOUR_EMAIL`) and a site-specific payload.
 - The command preserves the filename fix by stripping query strings for naming:
   - `clean_url="${url%%\\?*}"`
@@ -56,8 +66,8 @@ For trusted/private runtime deployments:
 - Source-specific scripts remain available for debugging and advanced use.
 
 - Shuttle bulk tools apply only to Shuttle-backed rows (including `AmeriFlux-shuttle` overlap rows).
-- AmeriFlux-only rows are handled by a separate AmeriFlux bulk shell-script workflow.
-- AmeriFlux rows are not mixed into Shuttle links files or Shuttle CLI helper outputs.
+- AmeriFlux API bulk tools apply to both `AmeriFlux` and `FLUXNET2015` rows.
+- AmeriFlux API-backed rows are not mixed into Shuttle links files or Shuttle CLI helper outputs.
 
 Generated bulk artifacts include:
 
@@ -69,10 +79,12 @@ Generated bulk artifacts include:
 - `ameriflux_selected_sites.txt`
 - `download_ameriflux_selected.sh`
 
-AmeriFlux bulk script behavior:
+AmeriFlux API bulk script behavior:
 
-- Iterates selected AmeriFlux-only site IDs.
-- POSTs to `https://amfcdn.lbl.gov/api/v1/data_download` per site with `FLUXNET` / `FULLSET` / `CCBY4.0`.
+- Iterates selected AmeriFlux API-backed site IDs.
+- Reads `ameriflux_selected_sites.txt` as tab-delimited `site_id`, `data_product`, `source_label`.
+- POSTs to `https://amfcdn.lbl.gov/api/v1/data_download` per site with `FULLSET` / `CCBY4.0`.
+- Uses `data_product: FLUXNET` for `AmeriFlux` rows and `data_product: FLUXNET2015` for `FLUXNET2015` rows.
 - Uses `intended_use: "QED Lab FLUXNET Data Explorer"`.
 - Parses `data_urls[].url` dynamically and downloads files.
 - Uses query-strip filename logic for local naming while keeping the full URL for requests.

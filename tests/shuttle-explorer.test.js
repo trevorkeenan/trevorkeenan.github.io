@@ -24,7 +24,26 @@ test('AmeriFlux availability parser filters entries with empty publish_years', (
   assert.deepEqual(parsed.sites[1].publish_years, [2010, 2011]);
 });
 
-test('Merge precedence keeps Shuttle download rows canonical on overlap', () => {
+test('FLUXNET2015 availability payload uses the same filtering rules', () => {
+  const payload = {
+    values: [
+      { site_id: 'US-Leg', publish_years: [2001, 2002] },
+      { site_id: 'US-None', publish_years: [] },
+      { site_id: 'CA-Old', publish_years: [1999] }
+    ]
+  };
+
+  const parsed = hooks.parseAmeriFluxAvailabilityPayload(payload, 'fluxnet2015');
+  assert.equal(parsed.totalSites, 3);
+  assert.equal(parsed.sitesWithYears, 2);
+  assert.deepEqual(
+    parsed.sites.map((site) => site.site_id),
+    ['CA-Old', 'US-Leg']
+  );
+  assert.match(parsed.freshnessKey, /^fluxnet2015:/);
+});
+
+test('Merge precedence is Shuttle > AmeriFlux > FLUXNET2015 with no duplicates', () => {
   const shuttleRows = [
     {
       site_id: 'AR-Bal',
@@ -73,13 +92,23 @@ test('Merge precedence keeps Shuttle download rows canonical on overlap', () => 
     { site_id: 'BR-New', publish_years: [2019], first_year: 2019, last_year: 2019 }
   ];
 
-  const merged = hooks.mergeShuttleAndAmeriFluxRows(shuttleRows, ameriSites);
+  const fluxnet2015Sites = [
+    { site_id: 'AR-Bal', publish_years: [2012], first_year: 2012, last_year: 2012 },
+    { site_id: 'BR-New', publish_years: [2019], first_year: 2019, last_year: 2019 },
+    { site_id: 'CL-Old', publish_years: [2005], first_year: 2005, last_year: 2005 }
+  ];
+
+  const merged = hooks.mergeCatalogRows(shuttleRows, ameriSites, fluxnet2015Sites);
   const overlap = merged.rows.find((row) => row.site_id === 'AR-Bal');
   const ameriOnly = merged.rows.find((row) => row.site_id === 'BR-New');
+  const fluxnet2015Only = merged.rows.find((row) => row.site_id === 'CL-Old');
   const shuttleAmeriFlux = merged.rows.find((row) => row.site_id === 'US-Var');
 
   assert.equal(merged.amerifluxOverlapSites, 1);
   assert.equal(merged.amerifluxOnlySites, 1);
+  assert.equal(merged.fluxnet2015OnlySites, 1);
+  assert.equal(merged.rows.filter((row) => row.site_id === 'AR-Bal').length, 1);
+  assert.equal(merged.rows.filter((row) => row.site_id === 'BR-New').length, 1);
 
   assert.equal(overlap.source_label, 'AmeriFlux-shuttle');
   assert.equal(overlap.download_mode, 'direct');
@@ -90,20 +119,29 @@ test('Merge precedence keeps Shuttle download rows canonical on overlap', () => 
   assert.equal(ameriOnly.source_label, 'AmeriFlux');
   assert.equal(ameriOnly.download_mode, 'ameriflux_api');
   assert.equal(ameriOnly.data_hub, 'AmeriFlux');
+  assert.equal(ameriOnly.api_data_product, 'FLUXNET');
+
+  assert.equal(fluxnet2015Only.source_label, 'FLUXNET2015');
+  assert.equal(fluxnet2015Only.download_mode, 'ameriflux_api');
+  assert.equal(fluxnet2015Only.api_data_product, 'FLUXNET2015');
+  assert.equal(fluxnet2015Only.data_hub, 'AmeriFlux');
+  assert.equal(fluxnet2015Only.network_display, 'AmeriFlux');
+
   assert.equal(shuttleAmeriFlux.network_display, 'AmeriFlux');
   assert.deepEqual(shuttleAmeriFlux.network_tokens, ['AmeriFlux']);
 });
 
-test('Bulk partition routes overlap rows to Shuttle and AmeriFlux-only rows to AmeriFlux bulk set', () => {
+test('Bulk partition routes overlap rows to Shuttle and AmeriFlux API rows to the AmeriFlux bulk set', () => {
   const selectedRows = [
     { site_id: 'US-Ton', download_mode: 'direct', source_label: '' },
     { site_id: 'AR-Bal', download_mode: 'direct', source_label: 'AmeriFlux-shuttle' },
-    { site_id: 'BR-New', download_mode: 'ameriflux_api', source_label: 'AmeriFlux' }
+    { site_id: 'BR-New', download_mode: 'ameriflux_api', source_label: 'AmeriFlux', api_data_product: 'FLUXNET' },
+    { site_id: 'CL-Old', download_mode: 'ameriflux_api', source_label: 'FLUXNET2015', api_data_product: 'FLUXNET2015' }
   ];
 
   const partition = hooks.partitionRowsByBulkSource(selectedRows);
   assert.deepEqual(partition.shuttleRows.map((row) => row.site_id), ['US-Ton', 'AR-Bal']);
-  assert.deepEqual(partition.ameriFluxRows.map((row) => row.site_id), ['BR-New']);
+  assert.deepEqual(partition.ameriFluxRows.map((row) => row.site_id), ['BR-New', 'CL-Old']);
 });
 
 test('Bulk section visibility helper reflects selected source mix', () => {
@@ -135,17 +173,30 @@ test('Bulk section visibility helper reflects selected source mix', () => {
   assert.equal(noneSelected.showAmeriFluxSection, false);
 });
 
+test('Source filter options include Shuttle, AmeriFlux, AmeriFlux-shuttle, and FLUXNET2015', () => {
+  const values = hooks.uniqueSourceFilterValues([
+    { source_label: '' },
+    { source_label: 'AmeriFlux' },
+    { source_label: 'AmeriFlux-shuttle' },
+    { source_label: 'FLUXNET2015' }
+  ]);
+
+  assert.deepEqual(values, ['AmeriFlux', 'AmeriFlux-shuttle', 'FLUXNET2015', 'Shuttle']);
+});
+
 test('Filename helper strips URL query strings', () => {
   const url = 'https://amfcdn.lbl.gov/path/AMF_AR-Bal_FLUXNET_FULLSET_2012-2013_3-7.zip?=username';
   assert.equal(hooks.stripUrlQueryForFilename(url), 'https://amfcdn.lbl.gov/path/AMF_AR-Bal_FLUXNET_FULLSET_2012-2013_3-7.zip');
   assert.equal(hooks.filenameFromUrl(url), 'AMF_AR-Bal_FLUXNET_FULLSET_2012-2013_3-7.zip');
 });
 
-test('AmeriFlux-only download returns manual fallback when trusted credentials are unavailable', async () => {
+test('AmeriFlux API download returns manual fallback when trusted credentials are unavailable', async () => {
   const source = hooks.createAmeriFluxSource({
     trustedRuntime: false,
     userId: '',
-    userEmail: ''
+    userEmail: '',
+    dataProduct: 'FLUXNET2015',
+    sourceLabel: 'FLUXNET2015'
   });
 
   const result = await source.get_download_urls('AR-Bal', 'FULLSET', 'CCBY4.0');
@@ -153,31 +204,50 @@ test('AmeriFlux-only download returns manual fallback when trusted credentials a
   assert.equal(result.mode, 'manual');
   assert.equal(result.manual_download_required, true);
   assert.equal(result.site_id, 'AR-Bal');
+  assert.equal(result.payload_template.data_product, 'FLUXNET2015');
   assert.equal(Array.isArray(result.data_urls), true);
   assert.equal(result.data_urls.length, 0);
 });
 
-test('AmeriFlux curl command generator includes site ID and cleaned filename logic', () => {
-  const command = hooks.buildAmeriFluxCurlCommand('AR-Bal', 'FULLSET', 'CCBY4.0');
+test('AmeriFlux curl command generator includes site ID, product, and cleaned filename logic', () => {
+  const command = hooks.buildAmeriFluxCurlCommand('AR-Bal', 'FULLSET', 'CCBY4.0', undefined, 'FLUXNET2015');
 
   assert.match(command, /"site_ids": \[\s*"AR-Bal"\s*\]/);
-  assert.match(command, /"description": "Download FLUXNET for AR-Bal"/);
+  assert.match(command, /"description": "Download FLUXNET2015 for AR-Bal"/);
+  assert.match(command, /"data_product": "FLUXNET2015"/);
   assert.match(command, /"intended_use": "QED Lab FLUXNET Data Explorer"/);
   assert.equal(command.includes('clean_url="${url%%\\?*}"'), true);
   assert.equal(command.includes('filename="$(basename "$clean_url")"'), true);
   assert.equal(command.includes('curl -L "$url" -o "$filename"'), true);
 });
 
-test('AmeriFlux bulk script generator includes required payload fields and filename cleanup', () => {
-  const script = hooks.buildAmeriFluxBulkScriptText(['AR-Bal', 'BR-New']);
+test('AmeriFlux selected-sites export includes source label and data product', () => {
+  const text = hooks.buildAmeriFluxSelectedSitesText([
+    { site_id: 'AR-Bal', data_product: 'FLUXNET', source_label: 'AmeriFlux' },
+    { site_id: 'CL-Old', data_product: 'FLUXNET2015', source_label: 'FLUXNET2015' }
+  ]);
 
-  assert.equal(script.includes('\\"data_product\\": \\"FLUXNET\\"'), true);
+  assert.match(text, /^# site_id\tdata_product\tsource_label/m);
+  assert.match(text, /^AR-Bal\tFLUXNET\tAmeriFlux$/m);
+  assert.match(text, /^CL-Old\tFLUXNET2015\tFLUXNET2015$/m);
+});
+
+test('AmeriFlux bulk script generator supports mixed FLUXNET and FLUXNET2015 products and filename cleanup', () => {
+  const script = hooks.buildAmeriFluxBulkScriptText([
+    { site_id: 'AR-Bal', data_product: 'FLUXNET', source_label: 'AmeriFlux' },
+    { site_id: 'CL-Old', data_product: 'FLUXNET2015', source_label: 'FLUXNET2015' }
+  ]);
+
+  assert.equal(script.includes('# site_id\tdata_product\tsource_label'), true);
+  assert.equal(script.includes('AR-Bal\tFLUXNET\tAmeriFlux'), true);
+  assert.equal(script.includes('CL-Old\tFLUXNET2015\tFLUXNET2015'), true);
+  assert.equal(script.includes('\\"data_product\\": \\"${DATA_PRODUCT}\\"'), true);
   assert.equal(script.includes('\\"data_variant\\": \\"FULLSET\\"'), true);
   assert.equal(script.includes('\\"data_policy\\": \\"CCBY4.0\\"'), true);
   assert.equal(script.includes('\\"intended_use\\": \\"QED Lab FLUXNET Data Explorer\\"'), true);
+  assert.equal(script.includes('while IFS=$\'\\t\' read -r SITE_ID DATA_PRODUCT SOURCE_LABEL; do'), true);
   assert.equal(script.includes('clean_url="${url%%\\?*}"'), true);
   assert.equal(script.includes('filename="$(basename "$clean_url")"'), true);
-  assert.equal(script.includes('while IFS= read -r SITE_ID; do'), true);
 });
 
 test('Download-all wrapper script delegates to both child scripts when both source partitions exist', () => {
@@ -187,6 +257,7 @@ test('Download-all wrapper script delegates to both child scripts when both sour
   });
 
   assert.equal(script.includes('# Shuttle is preferred for overlap sites (AmeriFlux-shuttle).'), true);
+  assert.equal(script.includes('# AmeriFlux API-backed sites (AmeriFlux and FLUXNET2015) are downloaded via the AmeriFlux API.'), true);
   assert.equal(script.includes('if [ -f "./shuttle_selected_sites.txt" ] && [ -s "./shuttle_selected_sites.txt" ]; then'), true);
   assert.equal(script.includes('bash "./download_shuttle_selected.sh" || {'), true);
   assert.equal(script.includes('if [ -f "./ameriflux_selected_sites.txt" ] && [ -s "./ameriflux_selected_sites.txt" ]; then'), true);
@@ -201,11 +272,11 @@ test('Download-all wrapper script can be generated for Shuttle-only selections',
   });
 
   assert.equal(script.includes('bash "./download_shuttle_selected.sh" || {'), true);
-  assert.equal(script.includes('echo "No AmeriFlux-only selected sites to download."'), true);
+  assert.equal(script.includes('echo "No AmeriFlux API-backed selected sites to download."'), true);
   assert.equal(script.includes('bash "./download_ameriflux_selected.sh" || {'), false);
 });
 
-test('Download-all wrapper script can be generated for AmeriFlux-only selections', () => {
+test('Download-all wrapper script can be generated for AmeriFlux API-only selections', () => {
   const script = hooks.buildDownloadAllSelectedScriptText({
     includeShuttle: false,
     includeAmeriFlux: true
