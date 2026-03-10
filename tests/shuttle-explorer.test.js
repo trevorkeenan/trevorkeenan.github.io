@@ -120,15 +120,42 @@ test('Merge precedence is Shuttle > AmeriFlux > FLUXNET2015 with no duplicates',
   assert.equal(ameriOnly.download_mode, 'ameriflux_api');
   assert.equal(ameriOnly.data_hub, 'AmeriFlux');
   assert.equal(ameriOnly.api_data_product, 'FLUXNET');
+  assert.equal(ameriOnly.length_years, 1);
 
   assert.equal(fluxnet2015Only.source_label, 'FLUXNET2015');
   assert.equal(fluxnet2015Only.download_mode, 'ameriflux_api');
   assert.equal(fluxnet2015Only.api_data_product, 'FLUXNET2015');
   assert.equal(fluxnet2015Only.data_hub, 'AmeriFlux');
-  assert.equal(fluxnet2015Only.network_display, 'AmeriFlux');
+  assert.equal(fluxnet2015Only.network, 'FLUXNET2015');
+  assert.equal(fluxnet2015Only.source_network, 'FLUXNET2015');
+  assert.equal(fluxnet2015Only.network_display, 'FLUXNET2015');
+  assert.deepEqual(fluxnet2015Only.network_tokens, ['FLUXNET2015']);
+  assert.equal(fluxnet2015Only.length_years, 1);
 
   assert.equal(shuttleAmeriFlux.network_display, 'AmeriFlux');
   assert.deepEqual(shuttleAmeriFlux.network_tokens, ['AmeriFlux']);
+});
+
+test('Coverage length helper counts inclusive years and returns null for incomplete ranges', () => {
+  assert.equal(hooks.calculateCoverageLength(2001, 2005), 5);
+  assert.equal(hooks.calculateCoverageLength(2010, 2010), 1);
+  assert.equal(hooks.calculateCoverageLength(2010, null), null);
+  assert.equal(hooks.calculateCoverageLength(null, 2010), null);
+});
+
+test('Bulk tools disclosure helper only activates for multi-site selections', () => {
+  assert.equal(hooks.shouldShowBulkToolsDisclosure(0), false);
+  assert.equal(hooks.shouldShowBulkToolsDisclosure(1), false);
+  assert.equal(hooks.shouldShowBulkToolsDisclosure(2), true);
+  assert.equal(hooks.formatSelectedSiteCount(1), '1 selected site');
+  assert.equal(hooks.formatSelectedSiteCount(3), '3 selected sites');
+});
+
+test('Attribution text includes the contact sentence', () => {
+  assert.match(
+    hooks.buildAttributionText(),
+    /Contact TF Keenan \(trevorkeenan@berkeley\.edu\) with any questions\./
+  );
 });
 
 test('Bulk partition routes overlap rows to Shuttle and AmeriFlux API rows to the AmeriFlux bulk set', () => {
@@ -433,12 +460,13 @@ test('Download-all wrapper script can be generated for AmeriFlux API-only select
   assert.equal(script.includes('bash "./download_ameriflux_selected.sh" || {'), true);
 });
 
-test('Browser-facing explorer files do not include hardcoded AmeriFlux identity', () => {
+test('Browser-facing explorer markup does not include hardcoded AmeriFlux identity attributes', () => {
   const explorerJs = fs.readFileSync(path.join(__dirname, '..', 'assets', 'shuttle-explorer.js'), 'utf8');
   const explorerHtml = fs.readFileSync(path.join(__dirname, '..', 'fluxnet-explorer.html'), 'utf8');
   const dataLandingHtml = fs.readFileSync(path.join(__dirname, '..', 'data.html'), 'utf8');
 
-  assert.equal(explorerJs.includes('trevorkeenan@berkeley.edu'), false);
+  assert.equal(explorerJs.includes('data-ameriflux-user-id='), false);
+  assert.equal(explorerJs.includes('data-ameriflux-user-email='), false);
   assert.equal(explorerHtml.includes('trevorkeenan@berkeley.edu'), false);
   assert.equal(explorerHtml.includes('data-ameriflux-user-id='), false);
   assert.equal(explorerHtml.includes('data-ameriflux-user-email='), false);

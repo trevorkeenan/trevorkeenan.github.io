@@ -171,10 +171,62 @@
 
 .shuttle-explorer__bulk {
   margin: 0 0 12px 0;
-  padding: 10px;
   border: 1px solid #d5dbe3;
   border-radius: 8px;
   background: #ffffff;
+}
+
+.shuttle-explorer__bulk[open] {
+  padding: 10px;
+}
+
+.shuttle-explorer__bulk-summary {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  cursor: pointer;
+  list-style: none;
+  color: #23364a;
+  font-weight: 600;
+}
+
+.shuttle-explorer__bulk-summary::-webkit-details-marker {
+  display: none;
+}
+
+.shuttle-explorer__bulk-summary::after {
+  content: "+";
+  margin-left: auto;
+  color: #607184;
+  font-size: 1.1em;
+  line-height: 1;
+}
+
+.shuttle-explorer__bulk[open] .shuttle-explorer__bulk-summary {
+  margin: 0 0 8px 0;
+  padding: 0 0 10px 0;
+  border-bottom: 1px solid #e7edf4;
+}
+
+.shuttle-explorer__bulk[open] .shuttle-explorer__bulk-summary::after {
+  content: "−";
+}
+
+.shuttle-explorer__bulk-summary-label {
+  font-size: 0.95em;
+}
+
+.shuttle-explorer__bulk-summary-count {
+  margin: 0;
+  color: #556779;
+  font-size: 0.82em;
+  font-weight: 400;
+}
+
+.shuttle-explorer__bulk-body {
+  display: block;
 }
 
 .shuttle-explorer__bulk-header {
@@ -281,7 +333,7 @@
 }
 
 .shuttle-explorer__map-panel {
-  margin: 0 0 12px 0;
+  margin: 12px 0 12px 0;
   padding: 10px;
   border: 1px solid #d5dbe3;
   border-radius: 8px;
@@ -615,6 +667,15 @@
   .shuttle-explorer__bulk-header {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .shuttle-explorer__bulk-summary {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .shuttle-explorer__bulk-summary::after {
+    margin-left: 0;
   }
 
   .shuttle-explorer__map-header {

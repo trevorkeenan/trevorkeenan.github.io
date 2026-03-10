@@ -38,9 +38,9 @@
     { key: "site_name", label: "Site Name", type: "string" },
     { key: "country", label: "Country", type: "string" },
     { key: "data_hub", label: "Hub", type: "string" },
-    { key: "network", label: "Network", type: "string" },
     { key: "vegetation_type", label: "Veg Type", type: "string" },
-    { key: "years", label: "Years", type: "years" }
+    { key: "years", label: "Years", type: "years" },
+    { key: "length_years", label: "Length", type: "number" }
   ];
 
   function bySelector(root, selector) {
@@ -272,9 +272,13 @@
     return parts.length ? parts : [s];
   }
 
-  function hasAmeriFluxNetworkTag(value) {
+  function hasNetworkTag(value, expected) {
+    var target = String(expected || "").trim().toLowerCase();
+    if (!target) {
+      return false;
+    }
     return splitNetworks(value).some(function (token) {
-      return String(token || "").toLowerCase() === "ameriflux";
+      return String(token || "").toLowerCase() === target;
     });
   }
 
@@ -282,18 +286,31 @@
     if (!row || typeof row !== "object") {
       return row;
     }
+    var sourceLabel = String(row.source_label || "").trim();
+    var dataProduct = String(row.api_data_product || "").trim().toUpperCase();
+    var networkDisplay = String(row.network_display || row.network || row.source_network || "").trim();
     if (
-      String(row.data_hub || "").toLowerCase() === "ameriflux" ||
-      String(row.source_label || "") === AMERIFLUX_SOURCE_ONLY ||
-      String(row.source_label || "") === FLUXNET2015_SOURCE_ONLY ||
-      String(row.source_label || "") === AMERIFLUX_SHUTTLE ||
-      hasAmeriFluxNetworkTag(row.network_display) ||
-      hasAmeriFluxNetworkTag(row.network) ||
-      hasAmeriFluxNetworkTag(row.source_network)
+      sourceLabel === FLUXNET2015_SOURCE_ONLY ||
+      dataProduct === FLUXNET2015_PRODUCT ||
+      hasNetworkTag(row.network_display, FLUXNET2015_SOURCE_ONLY) ||
+      hasNetworkTag(row.network, FLUXNET2015_SOURCE_ONLY) ||
+      hasNetworkTag(row.source_network, FLUXNET2015_SOURCE_ONLY)
     ) {
-      row.network_display = AMERIFLUX_SOURCE_ONLY;
-      row.network_tokens = [AMERIFLUX_SOURCE_ONLY];
+      row.network = FLUXNET2015_SOURCE_ONLY;
+      row.source_network = FLUXNET2015_SOURCE_ONLY;
+      networkDisplay = FLUXNET2015_SOURCE_ONLY;
+    } else if (
+      String(row.data_hub || "").toLowerCase() === "ameriflux" ||
+      sourceLabel === AMERIFLUX_SOURCE_ONLY ||
+      sourceLabel === AMERIFLUX_SHUTTLE ||
+      hasNetworkTag(row.network_display, AMERIFLUX_SOURCE_ONLY) ||
+      hasNetworkTag(row.network, AMERIFLUX_SOURCE_ONLY) ||
+      hasNetworkTag(row.source_network, AMERIFLUX_SOURCE_ONLY)
+    ) {
+      networkDisplay = AMERIFLUX_SOURCE_ONLY;
     }
+    row.network_display = networkDisplay;
+    row.network_tokens = splitNetworks(networkDisplay);
     return row;
   }
 
@@ -335,6 +352,46 @@
       return "-" + String(lastYear);
     }
     return "\u2014";
+  }
+
+  function calculateCoverageLength(firstYear, lastYear) {
+    var start = parseIntOrNull(firstYear);
+    var end = parseIntOrNull(lastYear);
+    if (start == null || end == null || end < start) {
+      return null;
+    }
+    return (end - start) + 1;
+  }
+
+  function buildRowSearchText(row) {
+    var networkDisplay = String(row && (row.network_display || row.network || row.source_network) || "").trim();
+    return (
+      String(row && row.site_id || "") + " " +
+      String(row && row.site_name || "") + " " +
+      String(row && row.country || "") + " " +
+      networkDisplay + " " +
+      String(row && row.source_network || "") + " " +
+      String(row && row.vegetation_type || "") + " " +
+      String(row && row.source_label || "") + " " +
+      String(row && row.source_filter || "")
+    ).toLowerCase();
+  }
+
+  function finalizeRowComputedState(row) {
+    if (!row || typeof row !== "object") {
+      return row;
+    }
+    row.first_year = parseIntOrNull(row.first_year);
+    row.last_year = parseIntOrNull(row.last_year);
+    row.years = yearRangeLabel(row.first_year, row.last_year);
+    row.length_years = calculateCoverageLength(row.first_year, row.last_year);
+    normalizeNetworkDisplay(row);
+    row.source_filter = sourceFilterValue(row);
+    row.is_icos = isIcosRow(row);
+    row.has_coordinates = parseCoordinate(row.latitude, -90, 90) != null &&
+      parseCoordinate(row.longitude, -180, 180) != null;
+    row.search_text = buildRowSearchText(row);
+    return row;
   }
 
   function stripUrlQueryForFilename(url) {
@@ -898,9 +955,11 @@
     var latitude = parseCoordinate(site && site.latitude, -90, 90);
     var longitude = parseCoordinate(site && site.longitude, -180, 180);
     var dataProduct = String(opts.dataProduct || AMERIFLUX_FLUXNET_PRODUCT).trim().toUpperCase();
+    var networkLabel;
     if (dataProduct !== FLUXNET2015_PRODUCT) {
       dataProduct = AMERIFLUX_FLUXNET_PRODUCT;
     }
+    networkLabel = dataProduct === FLUXNET2015_PRODUCT ? FLUXNET2015_SOURCE_ONLY : AMERIFLUX_SOURCE_ONLY;
     var sourceLabel = String(opts.sourceLabel || "").trim() || (dataProduct === FLUXNET2015_PRODUCT ? FLUXNET2015_SOURCE_ONLY : AMERIFLUX_SOURCE_ONLY);
     var sourceReason = String(opts.sourceReason || "").trim() || (sourceLabel === FLUXNET2015_SOURCE_ONLY
       ? "Only available from AmeriFlux API FLUXNET2015 fallback."
@@ -912,14 +971,15 @@
       site_name: siteName,
       country: country,
       data_hub: AMERIFLUX_DATA_HUB,
-      network: AMERIFLUX_SOURCE_ONLY,
-      source_network: AMERIFLUX_SOURCE_ONLY,
-      network_display: AMERIFLUX_SOURCE_ONLY,
-      network_tokens: [AMERIFLUX_SOURCE_ONLY],
+      network: networkLabel,
+      source_network: networkLabel,
+      network_display: networkLabel,
+      network_tokens: [networkLabel],
       vegetation_type: "",
       first_year: firstYear,
       last_year: lastYear,
       years: years,
+      length_years: calculateCoverageLength(firstYear, lastYear),
       latitude: latitude,
       longitude: longitude,
       download_link: "",
@@ -929,18 +989,7 @@
       api_data_product: dataProduct,
       publish_years: Array.isArray(site && site.publish_years) ? site.publish_years.slice() : []
     };
-    row.is_icos = false;
-    row.has_coordinates = latitude != null && longitude != null;
-    row.source_filter = sourceFilterValue(row);
-    row.search_text = (
-      row.site_id + " " +
-      siteName + " " +
-      country + " " +
-      row.network_display + " " +
-      row.source_label + " " +
-      row.source_filter
-    ).toLowerCase();
-    return row;
+    return finalizeRowComputedState(row);
   }
 
   function mergeCatalogRows(shuttleRows, ameriFluxSites, fluxnet2015Sites) {
@@ -1017,23 +1066,11 @@
 
     mergedRows.forEach(function (row, idx) {
       var siteId = String(row.site_id || "").trim();
-      var sourceLabel = String(row.source_label || "").trim();
-      normalizeNetworkDisplay(row);
-      var networkDisplay = String(row.network_display || row.network || row.source_network || "").trim();
-      row.source_filter = sourceFilterValue(row);
       row._index = idx;
       if (!row._selection_key) {
         row._selection_key = String(row.data_hub || "unknown") + "|" + siteId + "|" + String(row.download_link || "dynamic");
       }
-      row.search_text = (
-        siteId + " " +
-        String(row.site_name || "") + " " +
-        networkDisplay + " " +
-        String(row.source_network || "") + " " +
-        String(row.vegetation_type || "") + " " +
-        sourceLabel + " " +
-        String(row.source_filter || "")
-      ).toLowerCase();
+      finalizeRowComputedState(row);
     });
 
     return {
@@ -1441,6 +1478,7 @@
       first_year: firstYear,
       last_year: lastYear,
       years: yearRangeLabel(firstYear, lastYear),
+      length_years: calculateCoverageLength(firstYear, lastYear),
       latitude: latitude,
       longitude: longitude,
       download_link: downloadLink,
@@ -1449,21 +1487,7 @@
       source_reason: "",
       api_data_product: ""
     };
-
-    normalizeNetworkDisplay(row);
-    row.source_filter = sourceFilterValue(row);
-    row.is_icos = isIcosRow(row);
-    row.has_coordinates = latitude != null && longitude != null;
-    row.search_text = (
-      siteId + " " +
-      siteName + " " +
-      String(row.network_display || "") + " " +
-      sourceNetwork + " " +
-      vegetationType + " " +
-      SHUTTLE_SOURCE + " " +
-      String(row.source_filter || "")
-    ).toLowerCase();
-    return row;
+    return finalizeRowComputedState(row);
   }
 
   function normalizeRows(rawRows) {
@@ -1808,8 +1832,8 @@
         return (av < bv ? -1 : 1) * dir;
       }
     } else {
-      av = sortKey === "network" ? (a.network_display || a.network) : a[sortKey];
-      bv = sortKey === "network" ? (b.network_display || b.network) : b[sortKey];
+      av = a[sortKey];
+      bv = b[sortKey];
       if (typeof av === "number" || typeof bv === "number") {
         av = av == null ? Number.POSITIVE_INFINITY : av;
         bv = bv == null ? Number.POSITIVE_INFINITY : bv;
@@ -1850,7 +1874,7 @@
   }
 
   function buildAttributionText() {
-    return "The FLUXNET data presented here were discovered using a FLUXNET Shuttle metadata snapshot accessed via the Q.E.D. Lab FLUXNET Data Explorer. We appreciate acknowledgement of the QED FLUXNET Data Explorer when appropriate. Available data is updated as of: 2026-03-06.";
+    return "The FLUXNET data presented here were discovered using a FLUXNET Shuttle metadata snapshot accessed via the Q.E.D. Lab FLUXNET Data Explorer. Contact TF Keenan (trevorkeenan@berkeley.edu) with any questions. We appreciate acknowledgement of the QED FLUXNET Data Explorer when appropriate. Available data is updated as of: 2026-03-06.";
   }
 
   function csvEscape(value) {
@@ -1871,6 +1895,15 @@
       }
     }
     return parts.join(" ");
+  }
+
+  function shouldShowBulkToolsDisclosure(selectedCount) {
+    return (parseIntOrNull(selectedCount) || 0) > 1;
+  }
+
+  function formatSelectedSiteCount(selectedCount) {
+    var count = parseIntOrNull(selectedCount) || 0;
+    return count + " selected " + (count === 1 ? "site" : "sites");
   }
 
   function sourceBadgeClass(sourceLabel) {
@@ -1922,7 +1955,16 @@
       ".shuttle-explorer__hub-filters{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 10px;}",
       ".shuttle-explorer__hub-chip{display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border:1px solid #d5dbe3;border-radius:999px;background:#f8fafc;font-size:.88em;}",
       ".shuttle-explorer__row{display:flex;justify-content:space-between;align-items:center;gap:10px;margin:0 0 10px;}",
-      ".shuttle-explorer__bulk{margin:0 0 10px;padding:10px;border:1px solid #d5dbe3;border-radius:8px;background:#fbfdff;}",
+      ".shuttle-explorer__bulk{margin:0 0 10px;border:1px solid #d5dbe3;border-radius:8px;background:#fbfdff;}",
+      ".shuttle-explorer__bulk[open]{padding:10px;}",
+      ".shuttle-explorer__bulk-summary{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px;cursor:pointer;list-style:none;font-weight:600;color:#23364a;}",
+      ".shuttle-explorer__bulk-summary::-webkit-details-marker{display:none;}",
+      ".shuttle-explorer__bulk-summary::after{content:'+';margin-left:auto;color:#607184;font-size:1.1em;line-height:1;}",
+      ".shuttle-explorer__bulk[open] .shuttle-explorer__bulk-summary{padding:0 0 10px 0;margin:0 0 8px 0;border-bottom:1px solid #e7edf4;}",
+      ".shuttle-explorer__bulk[open] .shuttle-explorer__bulk-summary::after{content:'−';}",
+      ".shuttle-explorer__bulk-summary-label{font-size:.95em;}",
+      ".shuttle-explorer__bulk-summary-count{margin:0;color:#556779;font-size:.82em;font-weight:400;}",
+      ".shuttle-explorer__bulk-body{display:block;}",
       ".shuttle-explorer__bulk-header{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin:0 0 8px;}",
       ".shuttle-explorer__bulk-actions{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0 0;}",
       ".shuttle-explorer__bulk-source{margin:10px 0 0;padding:10px;border:1px solid #dce3eb;border-radius:8px;background:#ffffff;}",
@@ -2000,11 +2042,12 @@
       "  <div class=\"shuttle-explorer__summary\" data-role=\"summary\"></div>",
       "  <button type=\"button\" class=\"shuttle-explorer__btn shuttle-explorer__btn--small\" data-role=\"reset\">Reset filters</button>",
       "</div>",
-      "<section class=\"shuttle-explorer__bulk shuttle-explorer__hidden\" data-role=\"bulk-panel\" aria-labelledby=\"shuttle-bulk-heading\">",
-      "  <div class=\"shuttle-explorer__bulk-header\">",
-      "    <h3 id=\"shuttle-bulk-heading\">Bulk download tools</h3>",
-      "    <p class=\"shuttle-explorer__tiny shuttle-explorer__bulk-count\" data-role=\"selection-count\">0 selected</p>",
-      "  </div>",
+      "<details class=\"shuttle-explorer__bulk shuttle-explorer__hidden\" data-role=\"bulk-panel\">",
+      "  <summary class=\"shuttle-explorer__bulk-summary\">",
+      "    <span class=\"shuttle-explorer__bulk-summary-label\">Bulk download tools</span>",
+      "    <span class=\"shuttle-explorer__bulk-summary-count\" data-role=\"selection-count\">0 selected sites</span>",
+      "  </summary>",
+      "  <div class=\"shuttle-explorer__bulk-body\">",
       "  <p class=\"shuttle-explorer__tiny\">The FLUXNET Shuttle is the preferred means to access FLUXNET data, but some FLUXNET data is not available through the shuttle. Bulk download options are different for both Shuttle-available data, and data available elsewhere (e.g., via regional network hubs).</p>",
       "  <div class=\"shuttle-explorer__bulk-actions\">",
       "    <button type=\"button\" class=\"shuttle-explorer__btn shuttle-explorer__btn--small\" data-role=\"select-filtered\">Select all (filtered results)</button>",
@@ -2066,20 +2109,8 @@
       "    <pre class=\"shuttle-explorer__cli-pre\" data-role=\"cli-command\"></pre>",
       "  </div>",
       "  <p class=\"shuttle-explorer__tiny shuttle-explorer__bulk-status\" data-role=\"bulk-status\" aria-live=\"polite\"></p>",
-      "</section>",
-      "<section class=\"shuttle-explorer__map-panel shuttle-explorer__hidden\" data-role=\"map-panel\" aria-labelledby=\"shuttle-map-heading\">",
-      "  <div class=\"shuttle-explorer__map-header\">",
-      "    <div>",
-      "      <h3 id=\"shuttle-map-heading\">Selected sites map</h3>",
-      "      <p class=\"shuttle-explorer__tiny shuttle-explorer__map-summary\" data-role=\"map-summary\">Select one or more sites to show them on the map.</p>",
-      "    </div>",
-      "    <button type=\"button\" class=\"shuttle-explorer__btn shuttle-explorer__btn--small shuttle-explorer__hidden\" data-role=\"reset-map-view\">Reset map view</button>",
       "  </div>",
-      "  <div class=\"shuttle-explorer__map-shell\">",
-      "    <div class=\"shuttle-explorer__map-canvas\" data-role=\"map-canvas\" aria-label=\"Map of selected FLUXNET sites\"></div>",
-      "    <div class=\"shuttle-explorer__map-empty\" data-role=\"map-empty\" aria-live=\"polite\">Select one or more sites to show them on the map.</div>",
-      "  </div>",
-      "</section>",
+      "</details>",
       "<div class=\"shuttle-explorer__table-wrap shuttle-explorer__hidden\" data-role=\"table-wrap\">",
       "  <table class=\"shuttle-explorer__table\" data-role=\"table\">",
       "    <thead><tr data-role=\"thead-row\"></tr></thead>",
@@ -2093,6 +2124,19 @@
       "  <button type=\"button\" class=\"shuttle-explorer__btn shuttle-explorer__btn--small\" data-role=\"next-page\">Next</button>",
       "  <span class=\"shuttle-explorer__tiny shuttle-explorer__page-summary\" data-role=\"page-summary\"></span>",
       "</div>",
+      "<section class=\"shuttle-explorer__map-panel shuttle-explorer__hidden\" data-role=\"map-panel\" aria-labelledby=\"shuttle-map-heading\">",
+      "  <div class=\"shuttle-explorer__map-header\">",
+      "    <div>",
+      "      <h3 id=\"shuttle-map-heading\">Selected sites map</h3>",
+      "      <p class=\"shuttle-explorer__tiny shuttle-explorer__map-summary\" data-role=\"map-summary\">Select one or more sites to show them on the map.</p>",
+      "    </div>",
+      "    <button type=\"button\" class=\"shuttle-explorer__btn shuttle-explorer__btn--small shuttle-explorer__hidden\" data-role=\"reset-map-view\">Reset map view</button>",
+      "  </div>",
+      "  <div class=\"shuttle-explorer__map-shell\">",
+      "    <div class=\"shuttle-explorer__map-canvas\" data-role=\"map-canvas\" aria-label=\"Map of selected FLUXNET sites\"></div>",
+      "    <div class=\"shuttle-explorer__map-empty\" data-role=\"map-empty\" aria-live=\"polite\">Select one or more sites to show them on the map.</div>",
+      "  </div>",
+      "</section>",
       "<aside class=\"shuttle-explorer__attribution\" data-role=\"attribution\">",
       "  <h3>Data Use and Attribution</h3>",
       "  <p class=\"shuttle-explorer__tiny\">FLUXNET data are shared under a <a href=\"https://creativecommons.org/licenses/by/4.0/\" target=\"_blank\" rel=\"noopener noreferrer\">CC-BY 4.0</a> data use license, which requires attribution. Data users must follow dataset- and network-specific attribution and citation guidance included with each downloaded archive. Note that FLUXNET data that is not available via the FLUXNET Shuttle may be processed with an earlier version of the OneFlux processing code.</p>",
@@ -3714,28 +3758,30 @@
     var hasData = this.state.mode === "ready" && this.state.rows.length > 0;
     var selectedRows = this.getSelectedRows();
     var selectedCount = selectedRows.length;
+    var showBulkDisclosure = hasData && shouldShowBulkToolsDisclosure(selectedCount);
     var selectionSummary = this.getBulkSelectionSummary(selectedRows);
     var allSelectedDisabled = !selectionSummary.showAllSelectedActions;
     var shuttleDisabled = !selectionSummary.shuttleCount;
     var ameriFluxDisabled = !selectionSummary.ameriFluxCount;
+    var wasHidden;
 
     if (!b.bulkPanel) {
       return;
     }
 
-    b.bulkPanel.classList.toggle("shuttle-explorer__hidden", !hasData);
-    if (!hasData) {
+    wasHidden = b.bulkPanel.classList.contains("shuttle-explorer__hidden");
+    b.bulkPanel.classList.toggle("shuttle-explorer__hidden", !showBulkDisclosure);
+    if (!showBulkDisclosure) {
+      b.bulkPanel.open = false;
+      this.state.cliPanelVisible = false;
       return;
+    }
+    if (wasHidden) {
+      b.bulkPanel.open = false;
     }
 
     if (b.selectionCount) {
-      b.selectionCount.textContent =
-        selectedCount +
-        " selected sites (" +
-        selectionSummary.shuttleCount +
-        " via FLUXNET Shuttle, " +
-        selectionSummary.ameriFluxCount +
-        " available elsewhere)";
+      b.selectionCount.textContent = formatSelectedSiteCount(selectedCount);
     }
 
     if (b.allSelectedActions) {
@@ -4047,9 +4093,9 @@
         "<td>" + (row.site_name ? escapeHtml(row.site_name) : "<span class=\"shuttle-explorer__muted\">—</span>") + "</td>",
         "<td>" + (row.country ? escapeHtml(row.country) : "<span class=\"shuttle-explorer__muted\">—</span>") + "</td>",
         "<td>" + escapeHtml(row.data_hub) + "</td>",
-        "<td>" + (row.network_display ? escapeHtml(row.network_display) : "<span class=\"shuttle-explorer__muted\">—</span>") + "</td>",
         "<td>" + (row.vegetation_type ? escapeHtml(row.vegetation_type) : "<span class=\"shuttle-explorer__muted\">—</span>") + "</td>",
-        "<td>" + escapeHtml(row.years) + "</td>"
+        "<td>" + escapeHtml(row.years) + "</td>",
+        "<td>" + (row.length_years == null ? "<span class=\"shuttle-explorer__muted\">—</span>" : escapeHtml(row.length_years)) + "</td>"
       ].join("");
 
       var downloadTd = document.createElement("td");
@@ -4211,7 +4257,11 @@
   };
 
   Explorer.prototype.applyLoadedSnapshotState = function (snapshot) {
-    this.state.rows = Array.isArray(snapshot && snapshot.rows) ? snapshot.rows : [];
+    this.state.rows = Array.isArray(snapshot && snapshot.rows)
+      ? snapshot.rows.map(function (row) {
+        return finalizeRowComputedState(Object.assign({}, row));
+      })
+      : [];
     this.pruneSelection();
     this.state.droppedRows = snapshot && snapshot.droppedRows ? snapshot.droppedRows : 0;
     this.state.source = snapshot && snapshot.source ? snapshot.source : "";
@@ -4395,6 +4445,10 @@
     parseAmeriFluxAvailabilityPayload: parseAmeriFluxAvailabilityPayload,
     mergeCatalogRows: mergeCatalogRows,
     mergeShuttleAndAmeriFluxRows: mergeShuttleAndAmeriFluxRows,
+    calculateCoverageLength: calculateCoverageLength,
+    shouldShowBulkToolsDisclosure: shouldShowBulkToolsDisclosure,
+    formatSelectedSiteCount: formatSelectedSiteCount,
+    buildAttributionText: buildAttributionText,
     stripUrlQueryForFilename: stripUrlQueryForFilename,
     filenameFromUrl: filenameFromUrl,
     buildAmeriFluxCurlCommand: buildAmeriFluxCurlCommand,
