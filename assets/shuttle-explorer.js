@@ -1897,7 +1897,7 @@
     return parts.join(" ");
   }
 
-  function shouldShowBulkToolsDisclosure(selectedCount) {
+  function shouldEnableBulkToolsActions(selectedCount) {
     return (parseIntOrNull(selectedCount) || 0) > 1;
   }
 
@@ -1955,16 +1955,13 @@
       ".shuttle-explorer__hub-filters{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 10px;}",
       ".shuttle-explorer__hub-chip{display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border:1px solid #d5dbe3;border-radius:999px;background:#f8fafc;font-size:.88em;}",
       ".shuttle-explorer__row{display:flex;justify-content:space-between;align-items:center;gap:10px;margin:0 0 10px;}",
+      ".shuttle-explorer__selection-actions{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 10px;}",
       ".shuttle-explorer__bulk{margin:0 0 10px;border:1px solid #d5dbe3;border-radius:8px;background:#fbfdff;}",
-      ".shuttle-explorer__bulk[open]{padding:10px;}",
-      ".shuttle-explorer__bulk-summary{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px;cursor:pointer;list-style:none;font-weight:600;color:#23364a;}",
-      ".shuttle-explorer__bulk-summary::-webkit-details-marker{display:none;}",
-      ".shuttle-explorer__bulk-summary::after{content:'+';margin-left:auto;color:#607184;font-size:1.1em;line-height:1;}",
-      ".shuttle-explorer__bulk[open] .shuttle-explorer__bulk-summary{padding:0 0 10px 0;margin:0 0 8px 0;border-bottom:1px solid #e7edf4;}",
-      ".shuttle-explorer__bulk[open] .shuttle-explorer__bulk-summary::after{content:'−';}",
-      ".shuttle-explorer__bulk-summary-label{font-size:.95em;}",
-      ".shuttle-explorer__bulk-summary-count{margin:0;color:#556779;font-size:.82em;font-weight:400;}",
-      ".shuttle-explorer__bulk-body{display:block;}",
+      ".shuttle-explorer__bulk-summary{margin:0;padding:10px;cursor:pointer;font-weight:600;font-size:.88em;color:#23364a;}",
+      ".shuttle-explorer__bulk-summary-label{font-size:inherit;}",
+      ".shuttle-explorer__bulk-summary-count{display:inline-block;margin-left:8px;color:#556779;font-size:.92em;font-weight:400;}",
+      ".shuttle-explorer__bulk[open] .shuttle-explorer__bulk-summary{margin:0 0 8px 0;border-bottom:1px solid #e7edf4;}",
+      ".shuttle-explorer__bulk-body{display:block;padding:0 10px 10px;}",
       ".shuttle-explorer__bulk-header{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin:0 0 8px;}",
       ".shuttle-explorer__bulk-actions{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0 0;}",
       ".shuttle-explorer__bulk-source{margin:10px 0 0;padding:10px;border:1px solid #dce3eb;border-radius:8px;background:#ffffff;}",
@@ -2042,18 +2039,17 @@
       "  <div class=\"shuttle-explorer__summary\" data-role=\"summary\"></div>",
       "  <button type=\"button\" class=\"shuttle-explorer__btn shuttle-explorer__btn--small\" data-role=\"reset\">Reset filters</button>",
       "</div>",
+      "<div class=\"shuttle-explorer__selection-actions shuttle-explorer__hidden\" data-role=\"selection-actions\">",
+      "  <button type=\"button\" class=\"shuttle-explorer__btn shuttle-explorer__btn--small\" data-role=\"select-filtered\">Select all (filtered results)</button>",
+      "  <button type=\"button\" class=\"shuttle-explorer__btn shuttle-explorer__btn--small\" data-role=\"select-all-sites\">Select all (all sites)</button>",
+      "  <button type=\"button\" class=\"shuttle-explorer__btn shuttle-explorer__btn--small\" data-role=\"clear-selection\">Clear selection</button>",
+      "</div>",
       "<details class=\"shuttle-explorer__bulk shuttle-explorer__hidden\" data-role=\"bulk-panel\">",
       "  <summary class=\"shuttle-explorer__bulk-summary\">",
       "    <span class=\"shuttle-explorer__bulk-summary-label\">Bulk download tools</span>",
       "    <span class=\"shuttle-explorer__bulk-summary-count\" data-role=\"selection-count\">0 selected sites</span>",
       "  </summary>",
       "  <div class=\"shuttle-explorer__bulk-body\">",
-      "  <p class=\"shuttle-explorer__tiny\">The FLUXNET Shuttle is the preferred means to access FLUXNET data, but some FLUXNET data is not available through the shuttle. Bulk download options are different for both Shuttle-available data, and data available elsewhere (e.g., via regional network hubs).</p>",
-      "  <div class=\"shuttle-explorer__bulk-actions\">",
-      "    <button type=\"button\" class=\"shuttle-explorer__btn shuttle-explorer__btn--small\" data-role=\"select-filtered\">Select all (filtered results)</button>",
-      "    <button type=\"button\" class=\"shuttle-explorer__btn shuttle-explorer__btn--small\" data-role=\"select-all-sites\">Select all (all sites)</button>",
-      "    <button type=\"button\" class=\"shuttle-explorer__btn shuttle-explorer__btn--small\" data-role=\"clear-selection\">Clear selection</button>",
-      "  </div>",
       "  <div class=\"shuttle-explorer__bulk-actions shuttle-explorer__hidden\" data-role=\"all-selected-actions\">",
       "    <button type=\"button\" class=\"shuttle-explorer__btn shuttle-explorer__btn--small\" data-role=\"download-all-selected-script\">Download all selected script</button>",
       "    <button type=\"button\" class=\"shuttle-explorer__btn shuttle-explorer__btn--small\" data-role=\"copy-all-selected-script\">Copy download all selected script</button>",
@@ -2232,6 +2228,7 @@
       summaryRow: bySelector(this.root, "[data-role='summary-row']"),
       summary: bySelector(this.root, "[data-role='summary']"),
       reset: bySelector(this.root, "[data-role='reset']"),
+      selectionActions: bySelector(this.root, "[data-role='selection-actions']"),
       bulkPanel: bySelector(this.root, "[data-role='bulk-panel']"),
       selectionCount: bySelector(this.root, "[data-role='selection-count']"),
       allSelectedActions: bySelector(this.root, "[data-role='all-selected-actions']"),
@@ -3758,7 +3755,7 @@
     var hasData = this.state.mode === "ready" && this.state.rows.length > 0;
     var selectedRows = this.getSelectedRows();
     var selectedCount = selectedRows.length;
-    var showBulkDisclosure = hasData && shouldShowBulkToolsDisclosure(selectedCount);
+    var allowBulkActions = shouldEnableBulkToolsActions(selectedCount);
     var selectionSummary = this.getBulkSelectionSummary(selectedRows);
     var allSelectedDisabled = !selectionSummary.showAllSelectedActions;
     var shuttleDisabled = !selectionSummary.shuttleCount;
@@ -3770,8 +3767,8 @@
     }
 
     wasHidden = b.bulkPanel.classList.contains("shuttle-explorer__hidden");
-    b.bulkPanel.classList.toggle("shuttle-explorer__hidden", !showBulkDisclosure);
-    if (!showBulkDisclosure) {
+    b.bulkPanel.classList.toggle("shuttle-explorer__hidden", !hasData);
+    if (!hasData) {
       b.bulkPanel.open = false;
       this.state.cliPanelVisible = false;
       return;
@@ -3785,7 +3782,7 @@
     }
 
     if (b.allSelectedActions) {
-      b.allSelectedActions.classList.toggle("shuttle-explorer__hidden", !selectionSummary.showAllSelectedActions);
+      b.allSelectedActions.classList.toggle("shuttle-explorer__hidden", !(allowBulkActions && selectionSummary.showAllSelectedActions));
     }
 
     if (b.shuttleSelectionCount) {
@@ -3796,10 +3793,10 @@
     }
 
     if (b.shuttleBulkSection) {
-      b.shuttleBulkSection.classList.toggle("shuttle-explorer__hidden", !selectionSummary.showShuttleSection);
+      b.shuttleBulkSection.classList.toggle("shuttle-explorer__hidden", !(allowBulkActions && selectionSummary.showShuttleSection));
     }
     if (b.ameriFluxBulkSection) {
-      b.ameriFluxBulkSection.classList.toggle("shuttle-explorer__hidden", !selectionSummary.showAmeriFluxSection);
+      b.ameriFluxBulkSection.classList.toggle("shuttle-explorer__hidden", !(allowBulkActions && selectionSummary.showAmeriFluxSection));
     }
 
     [
@@ -3835,12 +3832,17 @@
     });
 
     if (b.showCliCommand) {
-      b.showCliCommand.disabled = shuttleDisabled;
+      b.showCliCommand.disabled = !allowBulkActions || shuttleDisabled;
       b.showCliCommand.textContent = this.state.cliPanelVisible ? "Hide Shuttle CLI command" : "Show Shuttle CLI command";
     }
 
+    if (!allowBulkActions) {
+      this.state.cliPanelVisible = false;
+      this.setBulkStatus("");
+    }
+
     if (b.cliPanel) {
-      b.cliPanel.classList.toggle("shuttle-explorer__hidden", !(this.state.cliPanelVisible && !shuttleDisabled));
+      b.cliPanel.classList.toggle("shuttle-explorer__hidden", !(allowBulkActions && this.state.cliPanelVisible && !shuttleDisabled));
     }
 
     if (b.cliCommand && selectionSummary.shuttleCount) {
@@ -4226,6 +4228,9 @@
     if (b.summaryRow) {
       b.summaryRow.classList.toggle("shuttle-explorer__hidden", !hasData);
     }
+    if (b.selectionActions) {
+      b.selectionActions.classList.toggle("shuttle-explorer__hidden", !hasData);
+    }
     if (b.mapPanel) {
       b.mapPanel.classList.toggle("shuttle-explorer__hidden", !hasData);
     }
@@ -4446,7 +4451,7 @@
     mergeCatalogRows: mergeCatalogRows,
     mergeShuttleAndAmeriFluxRows: mergeShuttleAndAmeriFluxRows,
     calculateCoverageLength: calculateCoverageLength,
-    shouldShowBulkToolsDisclosure: shouldShowBulkToolsDisclosure,
+    shouldEnableBulkToolsActions: shouldEnableBulkToolsActions,
     formatSelectedSiteCount: formatSelectedSiteCount,
     buildAttributionText: buildAttributionText,
     stripUrlQueryForFilename: stripUrlQueryForFilename,

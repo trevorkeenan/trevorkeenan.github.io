@@ -143,10 +143,10 @@ test('Coverage length helper counts inclusive years and returns null for incompl
   assert.equal(hooks.calculateCoverageLength(null, 2010), null);
 });
 
-test('Bulk tools disclosure helper only activates for multi-site selections', () => {
-  assert.equal(hooks.shouldShowBulkToolsDisclosure(0), false);
-  assert.equal(hooks.shouldShowBulkToolsDisclosure(1), false);
-  assert.equal(hooks.shouldShowBulkToolsDisclosure(2), true);
+test('Bulk tools action helper only activates for multi-site selections', () => {
+  assert.equal(hooks.shouldEnableBulkToolsActions(0), false);
+  assert.equal(hooks.shouldEnableBulkToolsActions(1), false);
+  assert.equal(hooks.shouldEnableBulkToolsActions(2), true);
   assert.equal(hooks.formatSelectedSiteCount(1), '1 selected site');
   assert.equal(hooks.formatSelectedSiteCount(3), '3 selected sites');
 });
