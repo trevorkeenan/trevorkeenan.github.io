@@ -280,6 +280,79 @@
   margin: 4px 0 0 0;
 }
 
+.shuttle-explorer__map-panel {
+  margin: 0 0 12px 0;
+  padding: 10px;
+  border: 1px solid #d5dbe3;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.shuttle-explorer__map-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 0 0 8px 0;
+}
+
+.shuttle-explorer__map-header h3 {
+  margin: 0 0 4px 0;
+}
+
+.shuttle-explorer__map-summary {
+  margin: 0;
+}
+
+.shuttle-explorer__map-shell {
+  position: relative;
+  min-height: 340px;
+  border: 1px solid #d5dbe3;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #f8fafc;
+}
+
+.shuttle-explorer__map-canvas {
+  width: 100%;
+  height: 340px;
+}
+
+.shuttle-explorer__map-canvas.leaflet-container {
+  font: inherit;
+}
+
+.shuttle-explorer__map-empty {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  top: 12px;
+  z-index: 500;
+  padding: 8px 10px;
+  border: 1px solid #d5dbe3;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.95);
+  color: #33475b;
+  font-size: 0.9em;
+  line-height: 1.35;
+  box-shadow: 0 2px 8px rgba(35, 54, 74, 0.08);
+}
+
+.shuttle-explorer__map-popup {
+  min-width: 150px;
+}
+
+.shuttle-explorer__map-popup strong {
+  display: block;
+  margin: 0 0 2px 0;
+  color: #23364a;
+}
+
+.shuttle-explorer__map-popup-meta {
+  color: #556779;
+  font-size: 0.92em;
+}
+
 /* Match the existing FluxPulse button pattern in stylesheets/data.css */
 .shuttle-explorer__btn {
   display: inline-block;
@@ -542,6 +615,22 @@
   .shuttle-explorer__bulk-header {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .shuttle-explorer__map-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .shuttle-explorer__map-header .shuttle-explorer__btn {
+    width: 100%;
+    text-align: center;
+  }
+
+  .shuttle-explorer__map-shell,
+  .shuttle-explorer__map-canvas {
+    min-height: 280px;
+    height: 280px;
   }
 
   .shuttle-explorer__bulk-actions {

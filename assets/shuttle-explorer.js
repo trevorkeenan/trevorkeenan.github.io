@@ -866,6 +866,8 @@
       first_year: firstYear,
       last_year: lastYear,
       years: years,
+      latitude: null,
+      longitude: null,
       download_link: "",
       download_mode: "ameriflux_api",
       source_label: sourceLabel,
@@ -874,6 +876,7 @@
       publish_years: Array.isArray(site && site.publish_years) ? site.publish_years.slice() : []
     };
     row.is_icos = false;
+    row.has_coordinates = false;
     row.source_filter = sourceFilterValue(row);
     row.search_text = (row.site_id + " " + row.network_display + " " + row.source_label + " " + row.source_filter).toLowerCase();
     return row;
@@ -1108,6 +1111,86 @@
     throw new Error("Unsupported snapshot JSON format");
   }
 
+  function buildRawSelectionKey(raw) {
+    var siteId = String(raw && (raw.site_id || raw.site) || "").trim();
+    var hub = String(raw && (raw.data_hub || raw.hub) || "").trim();
+    var downloadLink = String(raw && (raw.download_link || raw.url) || "").trim();
+    if (!siteId || !hub || !downloadLink) {
+      return "";
+    }
+    return hub + "|" + siteId + "|" + downloadLink;
+  }
+
+  function parseCoordinate(value, min, max) {
+    var number = typeof value === "number" ? value : parseFloat(String(value == null ? "" : value).trim());
+    if (!isFinite(number)) {
+      return null;
+    }
+    if (typeof min === "number" && number < min) {
+      return null;
+    }
+    if (typeof max === "number" && number > max) {
+      return null;
+    }
+    return number;
+  }
+
+  function extractRawLatitude(raw) {
+    return parseCoordinate(
+      raw && (raw.location_lat || raw.latitude || raw.lat),
+      -90,
+      90
+    );
+  }
+
+  function extractRawLongitude(raw) {
+    return parseCoordinate(
+      raw && (raw.location_long || raw.location_lon || raw.longitude || raw.lon || raw.lng),
+      -180,
+      180
+    );
+  }
+
+  function buildCoordinateLookup(rawRows) {
+    var lookup = {};
+    (Array.isArray(rawRows) ? rawRows : []).forEach(function (raw) {
+      var key = buildRawSelectionKey(raw);
+      var latitude = extractRawLatitude(raw);
+      var longitude = extractRawLongitude(raw);
+      if (!key || latitude == null || longitude == null) {
+        return;
+      }
+      lookup[key] = {
+        location_lat: latitude,
+        location_long: longitude
+      };
+    });
+    return lookup;
+  }
+
+  function enrichRowsWithCoordinateLookup(rawRows, coordinateLookup) {
+    if (!Array.isArray(rawRows) || !coordinateLookup) {
+      return Array.isArray(rawRows) ? rawRows.slice() : [];
+    }
+    return rawRows.map(function (raw) {
+      var key = buildRawSelectionKey(raw);
+      var coords = key ? coordinateLookup[key] : null;
+      var latitude = extractRawLatitude(raw);
+      var longitude = extractRawLongitude(raw);
+      var enriched;
+      if (!coords || (latitude != null && longitude != null)) {
+        return raw;
+      }
+      enriched = {};
+      Object.keys(raw || {}).forEach(function (prop) {
+        enriched[prop] = raw[prop];
+      });
+      enriched.location_lat = coords.location_lat;
+      enriched.location_long = coords.location_long;
+      return enriched;
+    });
+  }
+
   function normalizeRow(raw, index) {
     var siteId = String(raw.site_id || raw.site || "").trim();
     var siteName = String(raw.site_name || "").trim();
@@ -1120,6 +1203,8 @@
     var firstYear = parseIntOrNull(raw.first_year || raw.year_start || "");
     var lastYear = parseIntOrNull(raw.last_year || raw.year_end || "");
     var downloadLink = String(raw.download_link || raw.url || "").trim();
+    var latitude = extractRawLatitude(raw);
+    var longitude = extractRawLongitude(raw);
 
     if (!siteId || !hub || !downloadLink) {
       return null;
@@ -1140,6 +1225,8 @@
       first_year: firstYear,
       last_year: lastYear,
       years: yearRangeLabel(firstYear, lastYear),
+      latitude: latitude,
+      longitude: longitude,
       download_link: downloadLink,
       download_mode: "direct",
       source_label: "",
@@ -1150,6 +1237,7 @@
     normalizeNetworkDisplay(row);
     row.source_filter = sourceFilterValue(row);
     row.is_icos = isIcosRow(row);
+    row.has_coordinates = latitude != null && longitude != null;
     row.search_text = (
       siteId + " " +
       siteName + " " +
@@ -1226,40 +1314,62 @@
   }
 
   function loadSnapshot(jsonUrl, csvUrl) {
-    return fetchJson(jsonUrl)
-      .then(function (jsonResult) {
-        var meta = extractSnapshotMeta(jsonResult.payload);
+    function settle(promise) {
+      return promise.then(function (value) {
+        return { ok: true, value: value };
+      }).catch(function (error) {
+        return { ok: false, error: error };
+      });
+    }
+
+    return Promise.all([
+      settle(fetchJson(jsonUrl)),
+      settle(fetchText(csvUrl))
+    ]).then(function (results) {
+      var jsonResult = results[0] && results[0].ok ? results[0].value : null;
+      var csvResult = results[1] && results[1].ok ? results[1].value : null;
+      var jsonError = results[0] && !results[0].ok ? results[0].error : null;
+      var csvError = results[1] && !results[1].ok ? results[1].error : null;
+      var csvRows;
+      var coordinateLookup;
+
+      if (jsonResult) {
+        csvRows = csvResult ? csvTextToObjects(csvResult.text) : [];
+        coordinateLookup = csvRows.length ? buildCoordinateLookup(csvRows) : null;
         return {
-          rawRows: payloadJsonToObjects(jsonResult.payload),
+          rawRows: coordinateLookup
+            ? enrichRowsWithCoordinateLookup(payloadJsonToObjects(jsonResult.payload), coordinateLookup)
+            : payloadJsonToObjects(jsonResult.payload),
           source: "json",
           sourceUrl: jsonUrl,
           lastModified: jsonResult.lastModified || "",
-          meta: meta
+          meta: extractSnapshotMeta(jsonResult.payload),
+          warning: ""
         };
-      })
-      .catch(function (jsonError) {
-        return fetchText(csvUrl).then(function (csvResult) {
-          return {
-            rawRows: csvTextToObjects(csvResult.text),
-            source: "csv",
-            sourceUrl: csvUrl,
-            lastModified: csvResult.lastModified || "",
-            meta: {},
-            warning: "JSON snapshot unavailable; loaded CSV fallback.",
-            jsonError: jsonError
-          };
-        }).catch(function (csvError) {
-          var error = new Error(
-            "Failed to load snapshot JSON and CSV fallback. JSON error: " +
-            (jsonError && jsonError.message ? jsonError.message : String(jsonError)) +
-            "; CSV error: " +
-            (csvError && csvError.message ? csvError.message : String(csvError))
-          );
-          error.jsonError = jsonError;
-          error.csvError = csvError;
-          throw error;
-        });
-      });
+      }
+
+      if (csvResult) {
+        return {
+          rawRows: csvTextToObjects(csvResult.text),
+          source: "csv",
+          sourceUrl: csvUrl,
+          lastModified: csvResult.lastModified || "",
+          meta: {},
+          warning: "JSON snapshot unavailable; loaded CSV fallback.",
+          jsonError: jsonError
+        };
+      }
+
+      var error = new Error(
+        "Failed to load snapshot JSON and CSV fallback. JSON error: " +
+        (jsonError && jsonError.message ? jsonError.message : String(jsonError)) +
+        "; CSV error: " +
+        (csvError && csvError.message ? csvError.message : String(csvError))
+      );
+      error.jsonError = jsonError;
+      error.csvError = csvError;
+      throw error;
+    });
   }
 
   function ShuttleSource(jsonUrl, csvUrl) {
@@ -1741,6 +1851,19 @@
       "  </div>",
       "  <p class=\"shuttle-explorer__tiny shuttle-explorer__bulk-status\" data-role=\"bulk-status\" aria-live=\"polite\"></p>",
       "</section>",
+      "<section class=\"shuttle-explorer__map-panel shuttle-explorer__hidden\" data-role=\"map-panel\" aria-labelledby=\"shuttle-map-heading\">",
+      "  <div class=\"shuttle-explorer__map-header\">",
+      "    <div>",
+      "      <h3 id=\"shuttle-map-heading\">Selected sites map</h3>",
+      "      <p class=\"shuttle-explorer__tiny shuttle-explorer__map-summary\" data-role=\"map-summary\">Select one or more sites to show them on the map.</p>",
+      "    </div>",
+      "    <button type=\"button\" class=\"shuttle-explorer__btn shuttle-explorer__btn--small shuttle-explorer__hidden\" data-role=\"reset-map-view\">Reset map view</button>",
+      "  </div>",
+      "  <div class=\"shuttle-explorer__map-shell\">",
+      "    <div class=\"shuttle-explorer__map-canvas\" data-role=\"map-canvas\" aria-label=\"Map of selected FLUXNET sites\"></div>",
+      "    <div class=\"shuttle-explorer__map-empty\" data-role=\"map-empty\" aria-live=\"polite\">Select one or more sites to show them on the map.</div>",
+      "  </div>",
+      "</section>",
       "<div class=\"shuttle-explorer__table-wrap shuttle-explorer__hidden\" data-role=\"table-wrap\">",
       "  <table class=\"shuttle-explorer__table\" data-role=\"table\">",
       "    <thead><tr data-role=\"thead-row\"></tr></thead>",
@@ -1872,6 +1995,11 @@
       cliPanel: bySelector(this.root, "[data-role='cli-panel']"),
       cliCommand: bySelector(this.root, "[data-role='cli-command']"),
       bulkStatus: bySelector(this.root, "[data-role='bulk-status']"),
+      mapPanel: bySelector(this.root, "[data-role='map-panel']"),
+      mapSummary: bySelector(this.root, "[data-role='map-summary']"),
+      mapCanvas: bySelector(this.root, "[data-role='map-canvas']"),
+      mapEmpty: bySelector(this.root, "[data-role='map-empty']"),
+      resetMapView: bySelector(this.root, "[data-role='reset-map-view']"),
       tableWrap: bySelector(this.root, "[data-role='table-wrap']"),
       table: bySelector(this.root, "[data-role='table']"),
       theadRow: bySelector(this.root, "[data-role='thead-row']"),
@@ -2066,6 +2194,12 @@
     if (b.copyCommand) {
       b.copyCommand.addEventListener("click", function () {
         self.handleCopyCommand();
+      });
+    }
+
+    if (b.resetMapView) {
+      b.resetMapView.addEventListener("click", function () {
+        self.resetMapView();
       });
     }
 
@@ -2340,6 +2474,229 @@
   Explorer.prototype.clearAllSelection = function () {
     this.state.selectedKeys = {};
     this.render();
+  };
+
+  Explorer.prototype.getMapSelectionState = function () {
+    var selectedRows = this.getSelectedRows();
+    var mappableRows = [];
+    var missingCoordinates = 0;
+    var signatureParts = [];
+
+    selectedRows.forEach(function (row) {
+      var latitude = parseCoordinate(row && row.latitude, -90, 90);
+      var longitude = parseCoordinate(row && row.longitude, -180, 180);
+      if (latitude == null || longitude == null) {
+        missingCoordinates += 1;
+        return;
+      }
+      row.latitude = latitude;
+      row.longitude = longitude;
+      row.has_coordinates = true;
+      mappableRows.push(row);
+      signatureParts.push(String(row._selection_key || "") + ":" + latitude + ":" + longitude);
+    });
+
+    signatureParts.sort();
+
+    return {
+      selectedRows: selectedRows,
+      mappableRows: mappableRows,
+      missingCoordinates: missingCoordinates,
+      signature: [
+        String(selectedRows.length),
+        String(missingCoordinates),
+        signatureParts.join("|")
+      ].join("::")
+    };
+  };
+
+  Explorer.prototype.ensureMap = function () {
+    var L;
+    if (this.map || !this.bindings.mapCanvas) {
+      return !!this.map;
+    }
+    if (typeof window === "undefined" || !window.L) {
+      return false;
+    }
+
+    L = window.L;
+    this.map = L.map(this.bindings.mapCanvas, {
+      scrollWheelZoom: false,
+      worldCopyJump: true
+    });
+    this.map.setView([20, 0], 2);
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      attribution: "&copy; OpenStreetMap contributors",
+      maxZoom: 18
+    }).addTo(this.map);
+    this.mapMarkerLayer = L.featureGroup().addTo(this.map);
+    if (this.map.attributionControl && this.map.attributionControl.setPrefix) {
+      this.map.attributionControl.setPrefix("");
+    }
+    if (!this._mapResizeHandler) {
+      var self = this;
+      this._mapResizeHandler = function () {
+        self.invalidateMapSize(false);
+      };
+      window.addEventListener("resize", this._mapResizeHandler);
+    }
+    return true;
+  };
+
+  Explorer.prototype.invalidateMapSize = function (refit) {
+    var self = this;
+    if (!this.map) {
+      return;
+    }
+    var callback = function () {
+      if (!self.map) {
+        return;
+      }
+      self.map.invalidateSize(false);
+      if (refit) {
+        self.fitMapToMarkers();
+      }
+    };
+    if (typeof window !== "undefined" && window.requestAnimationFrame) {
+      window.requestAnimationFrame(callback);
+      return;
+    }
+    window.setTimeout(callback, 0);
+  };
+
+  Explorer.prototype.fitMapToMarkers = function () {
+    var layers;
+    if (!this.map || !this.mapMarkerLayer) {
+      return;
+    }
+    layers = this.mapMarkerLayer.getLayers();
+    if (!layers.length) {
+      this.map.setView([20, 0], 2);
+      return;
+    }
+    if (layers.length === 1) {
+      this.map.setView(layers[0].getLatLng(), 6);
+      return;
+    }
+    this.map.fitBounds(this.mapMarkerLayer.getBounds(), {
+      padding: [24, 24],
+      maxZoom: 6
+    });
+  };
+
+  Explorer.prototype.resetMapView = function () {
+    if (!this.ensureMap()) {
+      return;
+    }
+    this.fitMapToMarkers();
+  };
+
+  Explorer.prototype.buildMapPopupHtml = function (row) {
+    var lines = [
+      "<div class=\"shuttle-explorer__map-popup\">",
+      "  <strong>" + escapeHtml(row.site_id || "") + "</strong>"
+    ];
+
+    if (row.site_name) {
+      lines.push("  <div>" + escapeHtml(row.site_name) + "</div>");
+    }
+    if (row.country) {
+      lines.push("  <div class=\"shuttle-explorer__map-popup-meta\">" + escapeHtml(row.country) + "</div>");
+    }
+    lines.push("</div>");
+    return lines.join("");
+  };
+
+  Explorer.prototype.renderMapMarkers = function (rows) {
+    var self = this;
+    var L;
+    if (!this.ensureMap() || !this.mapMarkerLayer) {
+      return;
+    }
+    L = window.L;
+    this.mapMarkerLayer.clearLayers();
+    (rows || []).forEach(function (row) {
+      var marker = L.circleMarker([row.latitude, row.longitude], {
+        radius: 6,
+        weight: 1.5,
+        color: "#2f5374",
+        fillColor: "#5f8bb3",
+        fillOpacity: 0.9
+      });
+      marker.bindPopup(self.buildMapPopupHtml(row), {
+        autoPan: true
+      });
+      marker.on("click", function () {
+        if (self.map) {
+          self.map.panTo(marker.getLatLng(), {
+            animate: true
+          });
+        }
+      });
+      self.mapMarkerLayer.addLayer(marker);
+    });
+  };
+
+  Explorer.prototype.setMapEmptyState = function (message) {
+    var empty = this.bindings.mapEmpty;
+    if (!empty) {
+      return;
+    }
+    empty.textContent = message || "";
+    empty.classList.toggle("shuttle-explorer__hidden", !message);
+  };
+
+  Explorer.prototype.renderMap = function () {
+    var b = this.bindings;
+    var selectionState;
+    var selectionChanged;
+    var summary;
+    var message = "";
+    if (!b.mapPanel) {
+      return;
+    }
+
+    selectionState = this.getMapSelectionState();
+
+    if (b.mapSummary) {
+      if (!selectionState.selectedRows.length) {
+        summary = "Select one or more sites to show them on the map.";
+      } else if (!selectionState.mappableRows.length) {
+        summary = selectionState.selectedRows.length + " selected " + (selectionState.selectedRows.length === 1 ? "site" : "sites") + ", but coordinates are unavailable in the current snapshot.";
+      } else {
+        summary = "Showing " + selectionState.mappableRows.length + " selected " + (selectionState.mappableRows.length === 1 ? "site" : "sites") + " on the map.";
+        if (selectionState.missingCoordinates) {
+          summary += " " + selectionState.missingCoordinates + " selected " + (selectionState.missingCoordinates === 1 ? "site was" : "sites were") + " omitted because coordinates are unavailable.";
+        }
+      }
+      b.mapSummary.textContent = summary;
+    }
+
+    if (!this.ensureMap()) {
+      if (b.resetMapView) {
+        b.resetMapView.classList.add("shuttle-explorer__hidden");
+      }
+      this.setMapEmptyState("Map preview unavailable because the map library did not load.");
+      return;
+    }
+
+    selectionChanged = selectionState.signature !== this._mapSelectionSignature;
+    if (selectionChanged) {
+      this._mapSelectionSignature = selectionState.signature;
+      this.renderMapMarkers(selectionState.mappableRows);
+    }
+
+    if (b.resetMapView) {
+      b.resetMapView.classList.toggle("shuttle-explorer__hidden", !selectionState.mappableRows.length);
+    }
+
+    if (!selectionState.selectedRows.length) {
+      message = "Select one or more sites to show them on the map.";
+    } else if (!selectionState.mappableRows.length) {
+      message = "The selected sites do not include map coordinates in the current metadata snapshot.";
+    }
+    this.setMapEmptyState(message);
+    this.invalidateMapSize(selectionChanged);
   };
 
   Explorer.prototype.pruneSelection = function () {
@@ -3605,6 +3962,9 @@
     if (b.summaryRow) {
       b.summaryRow.classList.toggle("shuttle-explorer__hidden", !hasData);
     }
+    if (b.mapPanel) {
+      b.mapPanel.classList.toggle("shuttle-explorer__hidden", !hasData);
+    }
     this.renderBulkPanel();
     if (b.tableWrap) {
       b.tableWrap.classList.toggle("shuttle-explorer__hidden", !hasMatches);
@@ -3621,6 +3981,9 @@
     }
     this.renderPagination();
     this.renderEmptyState();
+    if (hasData) {
+      this.renderMap();
+    }
 
     var emptyReset = bySelector(this.bindings.empty, "[data-role='empty-reset']");
     if (emptyReset && !emptyReset._boundReset) {
@@ -3805,6 +4168,8 @@
     partitionRowsByBulkSource: partitionRowsByBulkSource,
     summarizeBulkSelection: summarizeBulkSelection,
     uniqueSourceFilterValues: uniqueSourceFilterValues,
+    buildCoordinateLookup: buildCoordinateLookup,
+    enrichRowsWithCoordinateLookup: enrichRowsWithCoordinateLookup,
     createAmeriFluxSource: function (options) {
       return new AmeriFluxSource(options || {});
     }

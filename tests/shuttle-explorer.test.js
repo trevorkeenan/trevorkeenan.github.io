@@ -184,6 +184,46 @@ test('Source filter options include Shuttle, AmeriFlux, AmeriFlux-shuttle, and F
   assert.deepEqual(values, ['AmeriFlux', 'AmeriFlux-shuttle', 'FLUXNET2015', 'Shuttle']);
 });
 
+test('Coordinate lookup enriches JSON rows from the CSV snapshot without duplicating metadata', () => {
+  const csvRows = [
+    {
+      data_hub: 'AmeriFlux',
+      site_id: 'AR-CCg',
+      download_link: 'https://example.org/ar-ccg.zip',
+      location_lat: '-35.9244',
+      location_long: '-61.1855'
+    }
+  ];
+  const jsonRows = [
+    {
+      data_hub: 'AmeriFlux',
+      site_id: 'AR-CCg',
+      site_name: 'Carlos Casares grassland',
+      download_link: 'https://example.org/ar-ccg.zip'
+    },
+    {
+      data_hub: 'AmeriFlux',
+      site_id: 'BR-NoCoord',
+      site_name: 'No Coordinates',
+      download_link: 'https://example.org/br-nocoord.zip'
+    }
+  ];
+
+  const lookup = hooks.buildCoordinateLookup(csvRows);
+  const enriched = hooks.enrichRowsWithCoordinateLookup(jsonRows, lookup);
+
+  assert.deepEqual(lookup, {
+    'AmeriFlux|AR-CCg|https://example.org/ar-ccg.zip': {
+      location_lat: -35.9244,
+      location_long: -61.1855
+    }
+  });
+  assert.equal(enriched[0].location_lat, -35.9244);
+  assert.equal(enriched[0].location_long, -61.1855);
+  assert.equal(enriched[1].location_lat, undefined);
+  assert.equal(enriched[1].location_long, undefined);
+});
+
 test('Filename helper strips URL query strings', () => {
   const url = 'https://amfcdn.lbl.gov/path/AMF_AR-Bal_FLUXNET_FULLSET_2012-2013_3-7.zip?=username';
   assert.equal(hooks.stripUrlQueryForFilename(url), 'https://amfcdn.lbl.gov/path/AMF_AR-Bal_FLUXNET_FULLSET_2012-2013_3-7.zip');
