@@ -3,6 +3,8 @@
 
   var DEFAULT_JSON_URL = "assets/shuttle_snapshot.json";
   var DEFAULT_CSV_URL = "assets/shuttle_snapshot.csv";
+  var AMERIFLUX_SITE_INFO_URL = "assets/ameriflux_site_info.csv";
+  var FLUXNET2015_SITE_INFO_URL = "assets/siteinfo_fluxnet2015.csv";
   var DEFAULT_PAGE_SIZE = 10;
   var MAX_PAGE_BUTTONS = 7;
   var SEARCH_DEBOUNCE_MS = 180;
@@ -67,6 +69,54 @@
       .replace(/_+/g, "_")
       .replace(/^_+|_+$/g, "")
       .toLowerCase();
+  }
+
+  function normalizeSiteId(siteId) {
+    return String(siteId || "").trim().toUpperCase();
+  }
+
+  function firstDefinedString(raw, keys) {
+    var i;
+    if (!raw || typeof raw !== "object") {
+      return "";
+    }
+    for (i = 0; i < keys.length; i += 1) {
+      var value = raw[keys[i]];
+      if (value == null) {
+        continue;
+      }
+      value = String(value).trim();
+      if (value) {
+        return value;
+      }
+    }
+    return "";
+  }
+
+  function ameriFluxSiteInfoSiteId(raw) {
+    return normalizeSiteId(firstDefinedString(raw, ["site_id", "site", "site_code", "siteid"]));
+  }
+
+  function fluxnet2015SiteInfoSiteId(raw) {
+    return normalizeSiteId(firstDefinedString(raw, ["site_id", "mysitename", "site_code", "siteid", "site"]));
+  }
+
+  function siteInfoSiteName(raw) {
+    return firstDefinedString(raw, ["site_name", "site_title", "site_label", "name", "sitename"]);
+  }
+
+  function siteInfoCountry(raw) {
+    return firstDefinedString(raw, ["country", "country_name", "country_code"]);
+  }
+
+  function buildSiteInfoEntry(siteId, raw) {
+    return {
+      site_id: siteId,
+      site_name: siteInfoSiteName(raw),
+      country: siteInfoCountry(raw),
+      latitude: extractRawLatitude(raw),
+      longitude: extractRawLongitude(raw)
+    };
   }
 
   function parseIntOrNull(value) {
@@ -839,10 +889,14 @@
   function buildAmeriFluxApiRow(site, index, options) {
     var opts = options || {};
     var siteId = String(site && site.site_id || "").trim();
+    var siteName = String(site && site.site_name || "").trim();
+    var country = deriveCountry(siteId, site && site.country ? site.country : "");
     var firstYear = parseIntOrNull(site && site.first_year);
     var lastYear = parseIntOrNull(site && site.last_year);
     var years = yearRangeLabel(firstYear, lastYear);
     var keySuffix = years === "\u2014" ? "unknown" : years;
+    var latitude = parseCoordinate(site && site.latitude, -90, 90);
+    var longitude = parseCoordinate(site && site.longitude, -180, 180);
     var dataProduct = String(opts.dataProduct || AMERIFLUX_FLUXNET_PRODUCT).trim().toUpperCase();
     if (dataProduct !== FLUXNET2015_PRODUCT) {
       dataProduct = AMERIFLUX_FLUXNET_PRODUCT;
@@ -855,8 +909,8 @@
       _index: index,
       _selection_key: "ameriflux_api|" + dataProduct + "|" + siteId + "|" + keySuffix,
       site_id: siteId,
-      site_name: "",
-      country: deriveCountry(siteId, site && site.country ? site.country : ""),
+      site_name: siteName,
+      country: country,
       data_hub: AMERIFLUX_DATA_HUB,
       network: AMERIFLUX_SOURCE_ONLY,
       source_network: AMERIFLUX_SOURCE_ONLY,
@@ -866,8 +920,8 @@
       first_year: firstYear,
       last_year: lastYear,
       years: years,
-      latitude: null,
-      longitude: null,
+      latitude: latitude,
+      longitude: longitude,
       download_link: "",
       download_mode: "ameriflux_api",
       source_label: sourceLabel,
@@ -876,9 +930,16 @@
       publish_years: Array.isArray(site && site.publish_years) ? site.publish_years.slice() : []
     };
     row.is_icos = false;
-    row.has_coordinates = false;
+    row.has_coordinates = latitude != null && longitude != null;
     row.source_filter = sourceFilterValue(row);
-    row.search_text = (row.site_id + " " + row.network_display + " " + row.source_label + " " + row.source_filter).toLowerCase();
+    row.search_text = (
+      row.site_id + " " +
+      siteName + " " +
+      country + " " +
+      row.network_display + " " +
+      row.source_label + " " +
+      row.source_filter
+    ).toLowerCase();
     return row;
   }
 
@@ -1189,6 +1250,161 @@
       enriched.location_long = coords.location_long;
       return enriched;
     });
+  }
+
+  function buildAmeriFluxSiteInfoLookup(rawRows) {
+    var lookup = {};
+    (Array.isArray(rawRows) ? rawRows : []).forEach(function (raw) {
+      var siteId = ameriFluxSiteInfoSiteId(raw);
+      if (!siteId) {
+        return;
+      }
+      lookup[siteId] = buildSiteInfoEntry(siteId, raw);
+    });
+    return lookup;
+  }
+
+  function loadAmeriFluxSiteInfo(url) {
+    return fetchText(url).then(function (result) {
+      return {
+        lookup: buildAmeriFluxSiteInfoLookup(csvTextToObjects(result.text)),
+        source: "csv",
+        sourceUrl: url,
+        lastModified: result.lastModified || "",
+        warning: ""
+      };
+    }).catch(function (error) {
+      return {
+        lookup: {},
+        source: "csv",
+        sourceUrl: url,
+        lastModified: "",
+        warning: "AmeriFlux site metadata unavailable; API-only site map coverage may be incomplete.",
+        error: error
+      };
+    });
+  }
+
+  function enrichAmeriFluxSitesWithMetadata(sites, siteInfoLookup) {
+    return (Array.isArray(sites) ? sites : []).map(function (site) {
+      var siteId = normalizeSiteId(site && site.site_id);
+      var siteInfo = siteId && siteInfoLookup ? siteInfoLookup[siteId] : null;
+      var enriched = Object.assign({}, site);
+      var derivedCountry = deriveCountry(siteId, "");
+      if (!siteInfo) {
+        return enriched;
+      }
+      if (!String(enriched.site_name || "").trim() && siteInfo.site_name) {
+        enriched.site_name = siteInfo.site_name;
+      }
+      if ((!String(enriched.country || "").trim() || String(enriched.country || "").trim() === derivedCountry) && siteInfo.country) {
+        enriched.country = siteInfo.country;
+      }
+      if (parseCoordinate(enriched.latitude, -90, 90) == null && siteInfo.latitude != null) {
+        enriched.latitude = siteInfo.latitude;
+      }
+      if (parseCoordinate(enriched.longitude, -180, 180) == null && siteInfo.longitude != null) {
+        enriched.longitude = siteInfo.longitude;
+      }
+      return enriched;
+    });
+  }
+
+  function buildFluxnet2015SiteLookup(rawRows) {
+    var lookup = {};
+    (Array.isArray(rawRows) ? rawRows : []).forEach(function (raw) {
+      var siteId = fluxnet2015SiteInfoSiteId(raw);
+      if (!siteId) {
+        return;
+      }
+      lookup[siteId] = buildSiteInfoEntry(siteId, raw);
+    });
+    return lookup;
+  }
+
+  function loadFluxnet2015SiteInfo(url) {
+    return fetchText(url).then(function (result) {
+      return {
+        lookup: buildFluxnet2015SiteLookup(csvTextToObjects(result.text)),
+        source: "csv",
+        sourceUrl: url,
+        lastModified: result.lastModified || "",
+        warning: ""
+      };
+    }).catch(function (error) {
+      return {
+        lookup: {},
+        source: "csv",
+        sourceUrl: url,
+        lastModified: "",
+        warning: "FLUXNET2015 site metadata unavailable; FLUXNET2015 API-only map coverage may be incomplete.",
+        error: error
+      };
+    });
+  }
+
+  function enrichFluxnet2015SitesWithMetadata(sites, siteInfoLookup) {
+    return (Array.isArray(sites) ? sites : []).map(function (site) {
+      var siteId = normalizeSiteId(site && site.site_id);
+      var siteInfo = siteId && siteInfoLookup ? siteInfoLookup[siteId] : null;
+      var enriched = Object.assign({}, site);
+      var derivedCountry = deriveCountry(siteId, "");
+      if (!siteInfo) {
+        return enriched;
+      }
+      if (!String(enriched.site_name || "").trim() && siteInfo.site_name) {
+        enriched.site_name = siteInfo.site_name;
+      }
+      if ((!String(enriched.country || "").trim() || String(enriched.country || "").trim() === derivedCountry) && siteInfo.country) {
+        enriched.country = siteInfo.country;
+      }
+      if (parseCoordinate(enriched.latitude, -90, 90) == null && siteInfo.latitude != null) {
+        enriched.latitude = siteInfo.latitude;
+      }
+      if (parseCoordinate(enriched.longitude, -180, 180) == null && siteInfo.longitude != null) {
+        enriched.longitude = siteInfo.longitude;
+      }
+      return enriched;
+    });
+  }
+
+  function summarizeApiOnlyRowCoordinateCoverage(rows) {
+    var summary = {
+      amerifluxWithCoordinates: 0,
+      amerifluxWithoutCoordinates: 0,
+      fluxnet2015WithCoordinates: 0,
+      fluxnet2015WithoutCoordinates: 0,
+      fluxnet2015MissingSiteIds: []
+    };
+
+    (Array.isArray(rows) ? rows : []).forEach(function (row) {
+      var sourceLabel = String(row && row.source_label || "").trim();
+      var hasCoordinates = parseCoordinate(row && row.latitude, -90, 90) != null &&
+        parseCoordinate(row && row.longitude, -180, 180) != null;
+
+      if (sourceLabel === AMERIFLUX_SOURCE_ONLY) {
+        if (hasCoordinates) {
+          summary.amerifluxWithCoordinates += 1;
+        } else {
+          summary.amerifluxWithoutCoordinates += 1;
+        }
+        return;
+      }
+
+      if (sourceLabel === FLUXNET2015_SOURCE_ONLY) {
+        if (hasCoordinates) {
+          summary.fluxnet2015WithCoordinates += 1;
+        } else {
+          summary.fluxnet2015WithoutCoordinates += 1;
+          if (row && row.site_id) {
+            summary.fluxnet2015MissingSiteIds.push(String(row.site_id));
+          }
+        }
+      }
+    });
+
+    summary.fluxnet2015MissingSiteIds.sort();
+    return summary;
   }
 
   function normalizeRow(raw, index) {
@@ -1889,6 +2105,8 @@
     this.root = root;
     this.jsonUrl = root.getAttribute("data-json-src") || DEFAULT_JSON_URL;
     this.csvUrl = root.getAttribute("data-csv-src") || DEFAULT_CSV_URL;
+    this.ameriFluxSiteInfoUrl = root.getAttribute("data-ameriflux-site-info-src") || AMERIFLUX_SITE_INFO_URL;
+    this.fluxnet2015SiteInfoUrl = root.getAttribute("data-fluxnet2015-site-info-src") || FLUXNET2015_SITE_INFO_URL;
     this.pageSize = Math.max(1, parseInt(root.getAttribute("data-page-size") || String(DEFAULT_PAGE_SIZE), 10) || DEFAULT_PAGE_SIZE);
     var ameriIdentity = resolveAmeriFluxIdentityFromRoot(root);
     this.shuttleSource = new ShuttleSource(this.jsonUrl, this.csvUrl);
@@ -4016,11 +4234,21 @@
     this.trackExplorerLoadedOnce();
   };
 
-  Explorer.prototype.buildMergedSnapshotState = function (shuttleResult, ameriResult, fluxnet2015Result) {
+  Explorer.prototype.buildMergedSnapshotState = function (shuttleResult, ameriResult, fluxnet2015Result, ameriFluxSiteInfoResult, fluxnet2015SiteInfoResult) {
+    var ameriFluxSiteInfoLookup = ameriFluxSiteInfoResult && ameriFluxSiteInfoResult.lookup ? ameriFluxSiteInfoResult.lookup : {};
+    var fluxnet2015SiteInfoLookup = fluxnet2015SiteInfoResult && fluxnet2015SiteInfoResult.lookup ? fluxnet2015SiteInfoResult.lookup : {};
+    var enrichedAmeriFluxSites = enrichAmeriFluxSitesWithMetadata(
+      ameriResult && Array.isArray(ameriResult.sites) ? ameriResult.sites : [],
+      ameriFluxSiteInfoLookup
+    );
+    var enrichedFluxnet2015Sites = enrichFluxnet2015SitesWithMetadata(
+      fluxnet2015Result && Array.isArray(fluxnet2015Result.sites) ? fluxnet2015Result.sites : [],
+      fluxnet2015SiteInfoLookup
+    );
     var merge = mergeCatalogRows(
       shuttleResult && Array.isArray(shuttleResult.rows) ? shuttleResult.rows : [],
-      ameriResult && Array.isArray(ameriResult.sites) ? ameriResult.sites : [],
-      fluxnet2015Result && Array.isArray(fluxnet2015Result.sites) ? fluxnet2015Result.sites : []
+      enrichedAmeriFluxSites,
+      enrichedFluxnet2015Sites
     );
     return {
       rows: merge.rows,
@@ -4030,7 +4258,9 @@
       warning: combineWarnings(
         shuttleResult && shuttleResult.warning ? shuttleResult.warning : "",
         ameriResult && ameriResult.warning ? ameriResult.warning : "",
-        fluxnet2015Result && fluxnet2015Result.warning ? fluxnet2015Result.warning : ""
+        fluxnet2015Result && fluxnet2015Result.warning ? fluxnet2015Result.warning : "",
+        ameriFluxSiteInfoResult && ameriFluxSiteInfoResult.warning ? ameriFluxSiteInfoResult.warning : "",
+        fluxnet2015SiteInfoResult && fluxnet2015SiteInfoResult.warning ? fluxnet2015SiteInfoResult.warning : ""
       ),
       lastUpdatedLabel: formatLastUpdatedLabel(shuttleResult && shuttleResult.lastModified ? shuttleResult.lastModified : ""),
       amerifluxTotalSites: ameriResult && ameriResult.totalSites ? ameriResult.totalSites : 0,
@@ -4070,17 +4300,23 @@
     Promise.all([
       this.shuttleSource.list_sites(),
       this.ameriFluxSource.list_sites(),
-      this.fluxnet2015Source.list_sites()
+      this.fluxnet2015Source.list_sites(),
+      loadAmeriFluxSiteInfo(this.ameriFluxSiteInfoUrl),
+      loadFluxnet2015SiteInfo(this.fluxnet2015SiteInfoUrl)
     ])
       .then(function (results) {
         var shuttleResult = results[0] || {};
         var ameriResult = results[1] || {};
         var fluxnet2015Result = results[2] || {};
-        var snapshotState = self.buildMergedSnapshotState(shuttleResult, ameriResult, fluxnet2015Result);
+        var ameriFluxSiteInfoResult = results[3] || {};
+        var fluxnet2015SiteInfoResult = results[4] || {};
+        var snapshotState = self.buildMergedSnapshotState(shuttleResult, ameriResult, fluxnet2015Result, ameriFluxSiteInfoResult, fluxnet2015SiteInfoResult);
         var freshnessKey = [
           "shuttle:" + buildSnapshotFreshnessKey(shuttleResult),
           String(ameriResult.freshnessKey || "ameriflux:none"),
-          String(fluxnet2015Result.freshnessKey || "fluxnet2015:none")
+          String(fluxnet2015Result.freshnessKey || "fluxnet2015:none"),
+          "ameriflux-site-info:" + buildSnapshotFreshnessKey(ameriFluxSiteInfoResult),
+          "fluxnet2015-site-info:" + buildSnapshotFreshnessKey(fluxnet2015SiteInfoResult)
         ].join("|");
 
         self.applyLoadedSnapshotState(snapshotState);
@@ -4168,8 +4404,13 @@
     partitionRowsByBulkSource: partitionRowsByBulkSource,
     summarizeBulkSelection: summarizeBulkSelection,
     uniqueSourceFilterValues: uniqueSourceFilterValues,
+    summarizeApiOnlyRowCoordinateCoverage: summarizeApiOnlyRowCoordinateCoverage,
     buildCoordinateLookup: buildCoordinateLookup,
     enrichRowsWithCoordinateLookup: enrichRowsWithCoordinateLookup,
+    buildAmeriFluxSiteInfoLookup: buildAmeriFluxSiteInfoLookup,
+    enrichAmeriFluxSitesWithMetadata: enrichAmeriFluxSitesWithMetadata,
+    buildFluxnet2015SiteLookup: buildFluxnet2015SiteLookup,
+    enrichFluxnet2015SitesWithMetadata: enrichFluxnet2015SitesWithMetadata,
     createAmeriFluxSource: function (options) {
       return new AmeriFluxSource(options || {});
     }

@@ -224,6 +224,112 @@ test('Coordinate lookup enriches JSON rows from the CSV snapshot without duplica
   assert.equal(enriched[1].location_long, undefined);
 });
 
+test('AmeriFlux site info lookup enriches API availability rows by normalized SITE_ID', () => {
+  const rawSiteInfoRows = [
+    {
+      site_id: 'AR-BAL',
+      site_name: 'Balcarce BA',
+      country: 'Argentina',
+      location_lat: '-37.7596',
+      location_long: '-58.3024'
+    }
+  ];
+  const availabilitySites = [
+    {
+      site_id: 'AR-Bal',
+      publish_years: [2012, 2013],
+      first_year: 2012,
+      last_year: 2013,
+      country: 'AR'
+    },
+    {
+      site_id: 'BR-NoMeta',
+      publish_years: [2020],
+      first_year: 2020,
+      last_year: 2020,
+      country: 'BR'
+    }
+  ];
+
+  const lookup = hooks.buildAmeriFluxSiteInfoLookup(rawSiteInfoRows);
+  const enriched = hooks.enrichAmeriFluxSitesWithMetadata(availabilitySites, lookup);
+
+  assert.deepEqual(lookup['AR-BAL'], {
+    site_id: 'AR-BAL',
+    site_name: 'Balcarce BA',
+    country: 'Argentina',
+    latitude: -37.7596,
+    longitude: -58.3024
+  });
+  assert.equal(enriched[0].site_name, 'Balcarce BA');
+  assert.equal(enriched[0].country, 'Argentina');
+  assert.equal(enriched[0].latitude, -37.7596);
+  assert.equal(enriched[0].longitude, -58.3024);
+  assert.equal(enriched[1].site_name, undefined);
+  assert.equal(enriched[1].country, 'BR');
+  assert.equal(enriched[1].latitude, undefined);
+  assert.equal(enriched[1].longitude, undefined);
+});
+
+test('FLUXNET2015 site info lookup accepts mysitename/lon/lat columns and enriches FLUXNET2015 rows separately', () => {
+  const rawSiteInfoRows = [
+    {
+      mysitename: 'AR-SLu',
+      lon: '-66.4598',
+      lat: '-33.4648'
+    }
+  ];
+  const availabilitySites = [
+    {
+      site_id: 'AR-SLu',
+      publish_years: [2002, 2003],
+      first_year: 2002,
+      last_year: 2003,
+      country: 'AR'
+    },
+    {
+      site_id: 'ZZ-NoMeta',
+      publish_years: [2004],
+      first_year: 2004,
+      last_year: 2004,
+      country: 'ZZ'
+    }
+  ];
+
+  const lookup = hooks.buildFluxnet2015SiteLookup(rawSiteInfoRows);
+  const enriched = hooks.enrichFluxnet2015SitesWithMetadata(availabilitySites, lookup);
+
+  assert.deepEqual(lookup['AR-SLU'], {
+    site_id: 'AR-SLU',
+    site_name: '',
+    country: '',
+    latitude: -33.4648,
+    longitude: -66.4598
+  });
+  assert.equal(enriched[0].latitude, -33.4648);
+  assert.equal(enriched[0].longitude, -66.4598);
+  assert.equal(enriched[0].country, 'AR');
+  assert.equal(enriched[1].latitude, undefined);
+  assert.equal(enriched[1].longitude, undefined);
+});
+
+test('API-only coordinate coverage summary reports AmeriFlux and FLUXNET2015 counts separately', () => {
+  const summary = hooks.summarizeApiOnlyRowCoordinateCoverage([
+    { source_label: 'AmeriFlux', site_id: 'AMF-1', latitude: 10, longitude: 20 },
+    { source_label: 'AmeriFlux', site_id: 'AMF-2', latitude: null, longitude: null },
+    { source_label: 'FLUXNET2015', site_id: 'FLX-1', latitude: 30, longitude: 40 },
+    { source_label: 'FLUXNET2015', site_id: 'FLX-2', latitude: null, longitude: null }
+  ]);
+
+  assert.deepEqual(summary, {
+    amerifluxWithCoordinates: 1,
+    amerifluxWithoutCoordinates: 1,
+    fluxnet2015WithCoordinates: 1,
+    fluxnet2015WithoutCoordinates: 1,
+    fluxnet2015MissingSiteIds: ['FLX-2']
+  });
+});
+
 test('Filename helper strips URL query strings', () => {
   const url = 'https://amfcdn.lbl.gov/path/AMF_AR-Bal_FLUXNET_FULLSET_2012-2013_3-7.zip?=username';
   assert.equal(hooks.stripUrlQueryForFilename(url), 'https://amfcdn.lbl.gov/path/AMF_AR-Bal_FLUXNET_FULLSET_2012-2013_3-7.zip');
