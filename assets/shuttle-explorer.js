@@ -68,10 +68,17 @@
     SJ: "Svalbard and Jan Mayen",
     SN: "Senegal",
     UK: "United Kingdom",
-    US: "United States",
+    US: "USA",
     XK: "Kosovo",
     ZA: "South Africa",
     ZM: "Zambia"
+  };
+  var COUNTRY_NAME_ALIASES = {
+    "u s": "USA",
+    "u s a": "USA",
+    "usa": "USA",
+    "united states": "USA",
+    "united states of america": "USA"
   };
   var COUNTRY_DISPLAY_NAMES = null;
 
@@ -182,7 +189,11 @@
 
   function normalizeCountryName(value) {
     var raw = String(value || "").trim();
+    var aliasKey = raw.toLowerCase().replace(/\./g, "").replace(/[^a-z]+/g, " ").trim();
     var mapped = countryCodeToName(raw);
+    if (aliasKey && COUNTRY_NAME_ALIASES[aliasKey]) {
+      return COUNTRY_NAME_ALIASES[aliasKey];
+    }
     return mapped || raw;
   }
 

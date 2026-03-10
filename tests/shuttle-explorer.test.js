@@ -146,7 +146,9 @@ test('Coverage length helper counts inclusive years and returns null for incompl
 
 test('Country helpers map ISO-2 codes case-insensitively and preserve full names', () => {
   assert.equal(hooks.countryCodeToName(' ar '), 'Argentina');
-  assert.equal(hooks.normalizeCountryName('us'), 'United States');
+  assert.equal(hooks.normalizeCountryName('us'), 'USA');
+  assert.equal(hooks.normalizeCountryName('United States'), 'USA');
+  assert.equal(hooks.normalizeCountryName('United States of America'), 'USA');
   assert.equal(hooks.normalizeCountryName('Argentina'), 'Argentina');
   assert.equal(hooks.deriveCountry('CN-Du3', ''), 'China');
   assert.equal(hooks.deriveCountry('ZZ-Test', ''), 'ZZ');
