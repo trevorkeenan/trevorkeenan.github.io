@@ -113,6 +113,7 @@ test('Merge precedence is Shuttle > AmeriFlux > FLUXNET2015 with no duplicates',
   assert.equal(overlap.source_label, 'AmeriFlux-shuttle');
   assert.equal(overlap.download_mode, 'direct');
   assert.equal(overlap.download_link, 'https://data.fluxnet.org/shuttle/ar-bal.zip');
+  assert.equal(overlap.country, 'Argentina');
   assert.equal(overlap.network_display, 'AmeriFlux');
   assert.deepEqual(overlap.network_tokens, ['AmeriFlux']);
 
@@ -143,6 +144,14 @@ test('Coverage length helper counts inclusive years and returns null for incompl
   assert.equal(hooks.calculateCoverageLength(null, 2010), null);
 });
 
+test('Country helpers map ISO-2 codes case-insensitively and preserve full names', () => {
+  assert.equal(hooks.countryCodeToName(' ar '), 'Argentina');
+  assert.equal(hooks.normalizeCountryName('us'), 'United States');
+  assert.equal(hooks.normalizeCountryName('Argentina'), 'Argentina');
+  assert.equal(hooks.deriveCountry('CN-Du3', ''), 'China');
+  assert.equal(hooks.deriveCountry('ZZ-Test', ''), 'ZZ');
+});
+
 test('Bulk tools action helper only activates for multi-site selections', () => {
   assert.equal(hooks.shouldEnableBulkToolsActions(0), false);
   assert.equal(hooks.shouldEnableBulkToolsActions(1), false);
@@ -154,7 +163,7 @@ test('Bulk tools action helper only activates for multi-site selections', () => 
 test('Attribution text includes the contact sentence', () => {
   assert.match(
     hooks.buildAttributionText(),
-    /Contact TF Keenan \(trevorkeenan@berkeley\.edu\) with any questions\./
+    /Contact TF Keenan \(trevorkeenan@berkeley\.edu\) with any questions/
   );
 });
 
@@ -293,7 +302,7 @@ test('AmeriFlux site info lookup enriches API availability rows by normalized SI
   assert.equal(enriched[0].latitude, -37.7596);
   assert.equal(enriched[0].longitude, -58.3024);
   assert.equal(enriched[1].site_name, undefined);
-  assert.equal(enriched[1].country, 'BR');
+  assert.equal(enriched[1].country, 'Brazil');
   assert.equal(enriched[1].latitude, undefined);
   assert.equal(enriched[1].longitude, undefined);
 });
@@ -335,9 +344,10 @@ test('FLUXNET2015 site info lookup accepts mysitename/lon/lat columns and enrich
   });
   assert.equal(enriched[0].latitude, -33.4648);
   assert.equal(enriched[0].longitude, -66.4598);
-  assert.equal(enriched[0].country, 'AR');
+  assert.equal(enriched[0].country, 'Argentina');
   assert.equal(enriched[1].latitude, undefined);
   assert.equal(enriched[1].longitude, undefined);
+  assert.equal(enriched[1].country, 'ZZ');
 });
 
 test('API-only coordinate coverage summary reports AmeriFlux and FLUXNET2015 counts separately', () => {

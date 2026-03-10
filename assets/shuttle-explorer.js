@@ -32,6 +32,48 @@
   var AMERIFLUX_AVAILABILITY_CACHE_MAX_AGE_MS = 6 * 60 * 60 * 1000;
   var MAX_HTTP_RETRIES = 3;
   var RETRY_BASE_DELAY_MS = 500;
+  var COUNTRY_CODE_TO_NAME = {
+    AR: "Argentina",
+    AT: "Austria",
+    AU: "Australia",
+    BE: "Belgium",
+    BR: "Brazil",
+    CA: "Canada",
+    CG: "Republic of the Congo",
+    CH: "Switzerland",
+    CL: "Chile",
+    CN: "China",
+    CO: "Colombia",
+    CR: "Costa Rica",
+    CZ: "Czech Republic",
+    DE: "Germany",
+    DK: "Denmark",
+    ES: "Spain",
+    FI: "Finland",
+    FR: "France",
+    GF: "French Guiana",
+    GH: "Ghana",
+    GL: "Greenland",
+    IT: "Italy",
+    JP: "Japan",
+    MX: "Mexico",
+    MY: "Malaysia",
+    NL: "Netherlands",
+    PA: "Panama",
+    PE: "Peru",
+    PR: "Puerto Rico",
+    RU: "Russia",
+    SD: "Sudan",
+    SE: "Sweden",
+    SJ: "Svalbard and Jan Mayen",
+    SN: "Senegal",
+    UK: "United Kingdom",
+    US: "United States",
+    XK: "Kosovo",
+    ZA: "South Africa",
+    ZM: "Zambia"
+  };
+  var COUNTRY_DISPLAY_NAMES = null;
 
   var SORT_COLUMNS = [
     { key: "site_id", label: "Site ID", type: "string" },
@@ -109,11 +151,46 @@
     return firstDefinedString(raw, ["country", "country_name", "country_code"]);
   }
 
+  function countryCodeToName(code) {
+    var normalized = String(code || "").trim().toUpperCase();
+    var displayName;
+    if (!normalized || !/^[A-Z]{2}$/.test(normalized)) {
+      return "";
+    }
+    if (COUNTRY_CODE_TO_NAME[normalized]) {
+      return COUNTRY_CODE_TO_NAME[normalized];
+    }
+    if (COUNTRY_DISPLAY_NAMES == null && typeof Intl !== "undefined" && typeof Intl.DisplayNames === "function") {
+      try {
+        COUNTRY_DISPLAY_NAMES = new Intl.DisplayNames(["en"], { type: "region" });
+      } catch (e) {
+        COUNTRY_DISPLAY_NAMES = false;
+      }
+    }
+    if (COUNTRY_DISPLAY_NAMES && typeof COUNTRY_DISPLAY_NAMES.of === "function") {
+      try {
+        displayName = COUNTRY_DISPLAY_NAMES.of(normalized);
+      } catch (err) {
+        displayName = "";
+      }
+      if (displayName && displayName !== normalized && String(displayName).toLowerCase().indexOf("unknown") !== 0) {
+        return displayName;
+      }
+    }
+    return "";
+  }
+
+  function normalizeCountryName(value) {
+    var raw = String(value || "").trim();
+    var mapped = countryCodeToName(raw);
+    return mapped || raw;
+  }
+
   function buildSiteInfoEntry(siteId, raw) {
     return {
       site_id: siteId,
       site_name: siteInfoSiteName(raw),
-      country: siteInfoCountry(raw),
+      country: normalizeCountryName(siteInfoCountry(raw)),
       latitude: extractRawLatitude(raw),
       longitude: extractRawLongitude(raw)
     };
@@ -315,23 +392,27 @@
   }
 
   function deriveCountry(siteId, fallback) {
-    var fb = String(fallback || "").trim();
+    var fb = normalizeCountryName(fallback);
     if (fb) {
       return fb;
     }
     var s = String(siteId || "").trim();
+    var code = "";
     if (!s) {
       return "";
     }
     var idx = s.indexOf("-");
     if (idx > 0) {
-      return s.slice(0, idx).toUpperCase();
+      code = s.slice(0, idx).toUpperCase();
+    } else {
+      idx = s.indexOf("_");
+      if (idx > 0) {
+        code = s.slice(0, idx).toUpperCase();
+      } else {
+        code = s.slice(0, 2).toUpperCase();
+      }
     }
-    idx = s.indexOf("_");
-    if (idx > 0) {
-      return s.slice(0, idx).toUpperCase();
-    }
-    return s.slice(0, 2).toUpperCase();
+    return countryCodeToName(code) || code;
   }
 
   function isIcosRow(row) {
@@ -381,6 +462,7 @@
     if (!row || typeof row !== "object") {
       return row;
     }
+    row.country = deriveCountry(row.site_id, row.country);
     row.first_year = parseIntOrNull(row.first_year);
     row.last_year = parseIntOrNull(row.last_year);
     row.years = yearRangeLabel(row.first_year, row.last_year);
@@ -1328,6 +1410,7 @@
       var siteInfo = siteId && siteInfoLookup ? siteInfoLookup[siteId] : null;
       var enriched = Object.assign({}, site);
       var derivedCountry = deriveCountry(siteId, "");
+      enriched.country = deriveCountry(siteId, enriched.country);
       if (!siteInfo) {
         return enriched;
       }
@@ -1386,6 +1469,7 @@
       var siteInfo = siteId && siteInfoLookup ? siteInfoLookup[siteId] : null;
       var enriched = Object.assign({}, site);
       var derivedCountry = deriveCountry(siteId, "");
+      enriched.country = deriveCountry(siteId, enriched.country);
       if (!siteInfo) {
         return enriched;
       }
@@ -4450,6 +4534,9 @@
     parseAmeriFluxAvailabilityPayload: parseAmeriFluxAvailabilityPayload,
     mergeCatalogRows: mergeCatalogRows,
     mergeShuttleAndAmeriFluxRows: mergeShuttleAndAmeriFluxRows,
+    countryCodeToName: countryCodeToName,
+    normalizeCountryName: normalizeCountryName,
+    deriveCountry: deriveCountry,
     calculateCoverageLength: calculateCoverageLength,
     shouldEnableBulkToolsActions: shouldEnableBulkToolsActions,
     formatSelectedSiteCount: formatSelectedSiteCount,
