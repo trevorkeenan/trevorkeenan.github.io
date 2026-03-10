@@ -289,10 +289,12 @@ test('Download-all wrapper script can be generated for AmeriFlux API-only select
 
 test('Browser-facing explorer files do not include hardcoded AmeriFlux identity', () => {
   const explorerJs = fs.readFileSync(path.join(__dirname, '..', 'assets', 'shuttle-explorer.js'), 'utf8');
-  const dataHtml = fs.readFileSync(path.join(__dirname, '..', 'data.html'), 'utf8');
+  const explorerHtml = fs.readFileSync(path.join(__dirname, '..', 'fluxnet-explorer.html'), 'utf8');
+  const dataLandingHtml = fs.readFileSync(path.join(__dirname, '..', 'data.html'), 'utf8');
 
   assert.equal(explorerJs.includes('trevorkeenan@berkeley.edu'), false);
-  assert.equal(dataHtml.includes('trevorkeenan@berkeley.edu'), false);
-  assert.equal(dataHtml.includes('data-ameriflux-user-id='), false);
-  assert.equal(dataHtml.includes('data-ameriflux-user-email='), false);
+  assert.equal(explorerHtml.includes('trevorkeenan@berkeley.edu'), false);
+  assert.equal(explorerHtml.includes('data-ameriflux-user-id='), false);
+  assert.equal(explorerHtml.includes('data-ameriflux-user-email='), false);
+  assert.equal(dataLandingHtml.includes('trevorkeenan@berkeley.edu'), false);
 });

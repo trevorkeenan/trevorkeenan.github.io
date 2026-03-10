@@ -193,6 +193,10 @@
 	color: #a22f2f;
 }
 
+.data-page-primary-section {
+	margin-top: 0;
+}
+
 @media screen and (max-width: 980px) {
 	#data-viewer .data-layout {
 		grid-template-columns: 1fr;
@@ -405,4 +409,68 @@
 .fluxpulse-popout-status {
 	font-size: 0.9em;
 	line-height: 1.35;
+}
+
+.data-landing {
+	max-width: 1100px;
+	margin: 0 auto;
+}
+
+.data-landing-intro {
+	margin: 0 0 22px 0;
+}
+
+.data-landing-intro h2 {
+	margin: 0 0 8px 0;
+}
+
+.data-landing-intro p {
+	margin: 0;
+	font-size: 1em;
+	line-height: 1.5;
+	color: #33475b;
+}
+
+.data-landing-grid {
+	display: grid;
+	grid-template-columns: repeat(3, minmax(0, 1fr));
+	gap: 14px;
+}
+
+.data-resource-card {
+	display: flex;
+	flex-direction: column;
+	border: 1px solid #d5dbe3;
+	border-radius: 8px;
+	background: #ffffff;
+	padding: 16px;
+}
+
+.data-resource-card h3 {
+	margin: 0 0 8px 0;
+	font-size: 1.05em;
+}
+
+.data-resource-card p {
+	margin: 0;
+	font-size: 0.95em;
+	line-height: 1.5;
+	color: #33475b;
+}
+
+.data-resource-card p + p {
+	margin-top: 12px;
+}
+
+.data-resource-actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 10px;
+	margin-top: auto;
+}
+
+@media screen and (max-width: 980px) {
+	.data-landing-grid {
+		grid-template-columns: 1fr;
+	}
 }

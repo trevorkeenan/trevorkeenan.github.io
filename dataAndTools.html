@@ -3,6 +3,7 @@
 	<head>
 		<meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1" />
 		<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+		<meta name="description" content="Legacy compatibility page for the Keenan Group DATA/TOOLS section, pointing to the current landing page and dedicated resource pages." />
 		<!-- User defined head content such as meta tags and encoding options -->
 		
 <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
@@ -26,10 +27,12 @@
 		<link rel="stylesheet" type="text/css" media="screen" href="stylesheets/iPhoneHideHeaderImage.css" />
 		<script type="text/javascript" src="stylesheets/jquery.fancyzoom.js"></script>
 		<script type="text/javascript" src="stylesheets/jquery.cycle.min.js"></script>
+		<script type="text/javascript" src="assets/site-navigation.js" defer></script>
 		
 		<link rel="stylesheet" type="text/css" media="all" href="stylesheets/iPhone.css" />
 		
 		<link rel="stylesheet" type="text/css" media="screen" href="stylesheets/sidebar/hide.css" />
+		<link rel="stylesheet" type="text/css" media="screen" href="stylesheets/data.css" />
 		
 		<!-- User defined styles -->
 		
@@ -53,7 +56,7 @@
   gtag('config', 'G-DXJ7N8LZEX');
 </script>
 
-<title>Research, Keenan Group</title>
+<title>Data and Tools, Keenan Group</title>
 <link rel="icon" type="image/png" href="../images/me.png">
 <link rel="apple-touch-icon" type="image/png" href="../images/me.png">
 
@@ -110,8 +113,15 @@
 							</li>
 							</ul>
 						</li>				
+					<li><a href="currentProjects.html" rel="">current projects</a></li>
 					<li><a href="members.html" rel="">members</a></li>
-					<li><a href="data.html" rel="">data</a></li>
+					<li class="nav-data-tools"><a href="data.html" rel="" id="current" aria-current="page">data/tools</a>
+						<ul class="data-tools-submenu">
+						<li><a href="fluxnet-explorer.html" rel="">FLUXNET Data Explorer</a></li>
+						<li><a href="global-data-products.html" rel="">Global Data Products</a></li>
+						<li><a href="data-processing-tools.html" rel="">Data Processing Tools</a></li>
+						</ul>
+					</li>
 					<li><a href="publications.html" rel="">publications</a>
 						<ul>
         				<li><a href="publications.html#recent">- New results! </a></li>
@@ -120,8 +130,6 @@
 						</ul>
 					
 					</li>
-					<li><a href="currentProjects.html" rel="">current projects</a></li>
-					<li><a href="dataAndTools.html" rel="" id="current">data and tools</a>
 					<li><a href="journalClub.html" rel="">journal club</a></li>
 					<li><a href="join_us.html" rel="">join us</a></li>
 	
@@ -143,105 +151,30 @@
 				
 				
 				
-<div class="container">
-		<br/>	
-	
-	<section class="row">
- 	 <div class="col-md-12">
-    	<p>This page highlights publicly available datasets and software tools developed by our group to support ecosystem science and carbon cycle research. All products are free to use and open to collaboration.</p>
- 	 </div>
-	</section>
-	
-		<section class="row">
-			<h4 id="data">Data</h4>
-					<br />
-		</section>
-			<br/>
-	
-		<section class="row">
-			<div class="col-md-11">
-				<p> Text about the value of data and sections on data available
-				</p>
-			 </div>
-		</section>
-		<section class="row">
-		 	<div class="col-sm-6">
-		 		<h6><u>Publications</u></h6>
-		 		<br/>
-				 <div class="ml-1">
-				Szwarcman D, Roy S et al. [37 co-authors incl. <strong>Keenan TF</strong>] (2025)
-				Prithvi-EO-2.0: A versatile multi-temporal foundation model for earth observation applications.
-				<em>IEEE Transactions on Geoscience and Remote Sensing</em> (in press) <a href="https://arxiv.org/abs/2412.02732">here</a>.
-				<br/>
-				<strong>Kang Y</strong>, <strong>Gaber M</strong>, <strong>Bassiouni M</strong>, <strong>Xinchen Lu</strong>, <strong>Keenan TF</strong> (2025)
-				CEDAR-GPP: spatiotemporally upscaled estimates of gross primary productivity incorporating CO<sub>2</sub> fertilization.
-				<em>Earth System Science Data</em>, 17, 3009–3046 <a href="https://essd.copernicus.org/articles/17/3009/2025/">here</a>.
-				<br/>
-				<strong>Gaber M</strong>, <strong>Kang Y</strong>, Schurgers G, <strong>Keenan TF</strong> (2024)
-				Using automated machine learning for the upscaling of gross primary productivity.
-				<em>Biogeosciences</em>, 21, 2447–2472 <a href="https://bg.copernicus.org/articles/21/2447/2024/">here</a>.
-				<br/>
-				</div>
-			</div>
-			<div class="col-sm-6">
-				<div class="image-middle"><img class="imageStyle" alt="proxima" src="images/fields/veg_dynamics.jpg" width="400" height="256" /></div>
-			</div>
-		</section>		
-		
-	
-		<br/>	
-		
-		
-		<section class="row">
-			<h4 id="tools">Tools</h4>
-			<br />
-		</section>
-			<br/>
-	
-		<section class="row">
-			<div class="col-md-11">
-				<p>
-				
-				Text on the value of tools and software development
-				
-				</p>
-			</div>
-		</section>
-		
-		<section class="row">
-		 	<div class="col-sm-6">
-		 		<h6><u>Publications</u></h6>
-		 		<br/>
-				 <div class="ml-1">
-				<strong>Nguyen N</strong> et al, [13 co-authors incl. <strong>Green J, Bassiouni M, Keenan TF</strong>] (2025)
-				Widespread underestimation of rain-induced carbon losses across global drylands.
-				<em>Nature Geoscience</em> (in press)
-				<br/>
-				Szwarcman D, Roy S et al. [37 co-authors incl. <strong>Keenan TF</strong>] (2025)
-				Prithvi-EO-2.0: A versatile multi-temporal foundation model for earth observation applications.
-				<em>IEEE Transactions on Geoscience and Remote Sensing</em> (in press) <a href="https://arxiv.org/abs/2412.02732">here</a>.
-				<br/>
-				<strong>Keenan TF</strong> Migliavacca M, Papale D, Baldocchi D, Reichstein M, Torn M, Wutzler T. (2019)
-				Widespread inhibition of daytime ecosystem respiration. <em>Nature Ecology and Evolution</em>, 3, 407–415
-				<br/>
-				</div>
-			</div>
-			<div class="col-sm-6">
-				<div class="image-middle"><img class="imageStyle" alt="proxima" src="images/fields/flux_cycle3.png" width="400" height="256" /></div>
-			</div>
-		</section>		
-		
-		<br/>	
-	
-	
-		
-		
-		<br/>	
-		
-		
-		
-		
-</div>
+						<section class="data-landing" aria-labelledby="data-landing-legacy-heading">
+							<div class="data-landing-intro">
+								<h2 id="data-landing-legacy-heading">Data and Tools</h2>
+								<p>This legacy page now mirrors the updated data landing structure so existing links continue to resolve cleanly. Use the DATA/TOOLS menu above or jump directly to one of the dedicated resource pages below.</p>
+							</div>
+							<div class="data-landing-grid">
+								<article class="data-resource-card">
+									<h3>FLUXNET Data Explorer</h3>
+									<p>Explore and download a regularly refreshed snapshot of the official FLUXNET database, including hub-hosted and supplemental records searchable by site ID or site name.</p>
+									<p class="data-resource-actions"><a class="fluxpulse-btn fluxpulse-btn-primary" href="fluxnet-explorer.html">Open FLUXNET Data Explorer</a></p>
+								</article>
+								<article class="data-resource-card">
+									<h3>Global Data Products</h3>
+									<p>Browse interactive global carbon assimilation products from CEDAR-GPP, with monthly maps, animation controls, metadata, and citation links.</p>
+									<p class="data-resource-actions"><a class="fluxpulse-btn fluxpulse-btn-primary" href="global-data-products.html">Open Global Data Products</a></p>
+								</article>
+								<article class="data-resource-card">
+									<h3>Data Processing Tools</h3>
+									<p>Access FluxPulse and related processing workflows for exploring how updated eddy-covariance methods change interpreted ecosystem signals.</p>
+									<p class="data-resource-actions"><a class="fluxpulse-btn fluxpulse-btn-primary" href="data-processing-tools.html">Open Data Processing Tools</a></p>
+								</article>
+							</div>
+						</section>
+					<div class="clearer"></div>
 
 
 

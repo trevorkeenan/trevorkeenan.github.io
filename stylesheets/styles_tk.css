@@ -101,7 +101,13 @@ h1, h2, h3, h4, h5, h6 {margin: 0;padding: 0;line-height: 1.3em;padding-bottom: 
 
 
 #menu ul li.ddarrow a {}
-#menu ul li.ddarrow span {}
+#menu ul li.ddarrow span {display: none;}
+#menu ul li.has-submenu:after {content: ""; position: absolute; top: 100%; left: 0; width: 100%; height: 8px;}
+#menu ul li.has-submenu > .submenu-toggle {display: none;}
+#menu ul ul.data-tools-submenu {width: 16.5em;}
+#menu ul li.nav-data-tools > ul {left: 0;}
+#menu ul li ul.data-tools-submenu li {width: 16.5em;float: none;}
+#menu ul ul.data-tools-submenu a {white-space: normal;line-height: 1.35;padding-top: 6px;padding-bottom: 6px;}
 
 /* Drop Down Menu Items */
 /* First Level */
