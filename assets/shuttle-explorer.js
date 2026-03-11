@@ -13,10 +13,12 @@
   var SNAPSHOT_CACHE_STORAGE_PREFIX = "shuttle-explorer:snapshot-cache:v2";
   var AMERIFLUX_FLUXNET_AVAILABILITY_URL = "https://amfcdn.lbl.gov/api/v2/data_availability/AmeriFlux/FLUXNET/CCBY4.0";
   var FLUXNET2015_AVAILABILITY_URL = "https://amfcdn.lbl.gov/api/v2/data_availability/FLUXNET/FLUXNET2015/CCBY4.0";
-  var AMERIFLUX_DOWNLOAD_URL = "https://amfcdn.lbl.gov/api/v1/data_download";
+  var AMERIFLUX_V2_DOWNLOAD_URL = "https://amfcdn.lbl.gov/api/v2/data_download";
+  var AMERIFLUX_V1_DOWNLOAD_URL = "https://amfcdn.lbl.gov/api/v1/data_download";
   var AMERIFLUX_DEFAULT_VARIANT = "FULLSET";
   var AMERIFLUX_DEFAULT_POLICY = "CCBY4.0";
-  var AMERIFLUX_INTENDED_USE = "QED Lab FLUXNET Data Explorer";
+  var AMERIFLUX_V2_INTENDED_USE = "other_research";
+  var AMERIFLUX_V1_INTENDED_USE = "QED Lab FLUXNET Data Explorer";
   var AMERIFLUX_TEMPLATE_USER_ID = "YOUR_AMERIFLUX_USERNAME";
   var AMERIFLUX_TEMPLATE_USER_EMAIL = "YOUR_EMAIL";
   var AMERIFLUX_TRUSTED_RUNTIME_FLAG = "amerifluxTrustedRuntime";
@@ -556,24 +558,81 @@
       : (dataProduct === FLUXNET2015_PRODUCT ? "Preparing FLUXNET2015 command…" : "Preparing curl command…");
   }
 
-  function buildAmeriFluxCurlCommand(siteId, variant, policy, endpointUrl, dataProduct) {
-    var site = String(siteId || "").trim();
-    var product = String(dataProduct || AMERIFLUX_FLUXNET_PRODUCT).trim() || AMERIFLUX_FLUXNET_PRODUCT;
-    var payload = {
-      user_id: AMERIFLUX_TEMPLATE_USER_ID,
-      user_email: AMERIFLUX_TEMPLATE_USER_EMAIL,
+  function normalizeDownloadProduct(dataProduct) {
+    return String(dataProduct || "").trim().toUpperCase() === FLUXNET2015_PRODUCT
+      ? FLUXNET2015_PRODUCT
+      : AMERIFLUX_FLUXNET_PRODUCT;
+  }
+
+  // AmeriFlux currently supports FLUXNET downloads through v2, while FLUXNET2015
+  // remains on the legacy v1 download API.
+  function getDownloadEndpointForProduct(dataProduct) {
+    return normalizeDownloadProduct(dataProduct) === FLUXNET2015_PRODUCT
+      ? AMERIFLUX_V1_DOWNLOAD_URL
+      : AMERIFLUX_V2_DOWNLOAD_URL;
+  }
+
+  function buildAmeriFluxDownloadDescription(dataProduct, siteIds) {
+    var product = normalizeDownloadProduct(dataProduct);
+    var sites = Array.isArray(siteIds) ? siteIds.filter(Boolean) : [];
+    var siteLabel = sites.length ? sites.join(", ") : "SITE_ID_HERE";
+    return "Request " + product + " download for " + siteLabel + " via the Q.E.D. Lab FLUXNET Data Explorer for Keenan Group research workflows.";
+  }
+
+  function buildV2DownloadPayload(siteIds, variant, policy, identity, dataProduct) {
+    var sites = Array.isArray(siteIds) ? siteIds.filter(Boolean) : [];
+    var product = normalizeDownloadProduct(dataProduct);
+    return {
+      user_id: String(identity && identity.user_id || "").trim(),
+      user_email: String(identity && identity.user_email || "").trim(),
+      data_policy: String(policy || AMERIFLUX_DEFAULT_POLICY),
+      data_product: product,
+      data_variant: String(variant || AMERIFLUX_DEFAULT_VARIANT),
+      site_ids: sites,
+      intended_use: AMERIFLUX_V2_INTENDED_USE,
+      description: buildAmeriFluxDownloadDescription(product, sites)
+    };
+  }
+
+  function buildV1DownloadPayload(siteIds, variant, policy, identity, dataProduct) {
+    var sites = Array.isArray(siteIds) ? siteIds.filter(Boolean) : [];
+    var product = normalizeDownloadProduct(dataProduct);
+    return {
+      user_id: String(identity && identity.user_id || "").trim(),
+      user_email: String(identity && identity.user_email || "").trim(),
       data_product: product,
       data_variant: String(variant || AMERIFLUX_DEFAULT_VARIANT),
       data_policy: String(policy || AMERIFLUX_DEFAULT_POLICY),
-      site_ids: site ? [site] : ["SITE_ID_HERE"],
-      intended_use: AMERIFLUX_INTENDED_USE,
-      description: "Download " + product + " for " + (site || "SITE_ID_HERE"),
+      site_ids: sites,
+      intended_use: AMERIFLUX_V1_INTENDED_USE,
+      description: "Download " + product + " for " + sites.join(", "),
       agree_policy: true,
       is_test: false
     };
+  }
+
+  function buildDownloadPayloadForProduct(siteIds, variant, policy, identity, dataProduct) {
+    return normalizeDownloadProduct(dataProduct) === FLUXNET2015_PRODUCT
+      ? buildV1DownloadPayload(siteIds, variant, policy, identity, dataProduct)
+      : buildV2DownloadPayload(siteIds, variant, policy, identity, dataProduct);
+  }
+
+  function buildAmeriFluxCurlCommand(siteId, variant, policy, endpointUrl, dataProduct) {
+    var site = String(siteId || "").trim();
+    var product = normalizeDownloadProduct(dataProduct);
+    var payload = buildDownloadPayloadForProduct(
+      [site || "SITE_ID_HERE"],
+      variant,
+      policy,
+      {
+        user_id: AMERIFLUX_TEMPLATE_USER_ID,
+        user_email: AMERIFLUX_TEMPLATE_USER_EMAIL
+      },
+      product
+    );
     var payloadJson = JSON.stringify(payload, null, 2);
     return [
-      "curl -sS -X POST \"" + String(endpointUrl || AMERIFLUX_DOWNLOAD_URL) + "\" \\",
+      "curl -sS -X POST \"" + String(endpointUrl || getDownloadEndpointForProduct(product)) + "\" \\",
       "  -H \"Content-Type: application/json\" \\",
       "  -H \"accept: application/json\" \\",
       "  --data-binary '" + shellSingleQuote(payloadJson) + "' \\",
@@ -700,10 +759,12 @@
     var embeddedSites = buildAmeriFluxSelectedSitesText(entries).replace(/\n$/, "");
     var defaultUserId = shellDoubleQuote(String(opts.defaultUserId || AMERIFLUX_TEMPLATE_USER_ID));
     var defaultUserEmail = shellDoubleQuote(String(opts.defaultUserEmail || AMERIFLUX_TEMPLATE_USER_EMAIL));
-    var downloadUrl = shellDoubleQuote(String(opts.downloadUrl || AMERIFLUX_DOWNLOAD_URL));
+    var v2DownloadUrl = shellDoubleQuote(String(opts.v2DownloadUrl || AMERIFLUX_V2_DOWNLOAD_URL));
+    var v1DownloadUrl = shellDoubleQuote(String(opts.v1DownloadUrl || AMERIFLUX_V1_DOWNLOAD_URL));
     var variant = shellDoubleQuote(String(opts.variant || AMERIFLUX_DEFAULT_VARIANT));
     var policy = shellDoubleQuote(String(opts.policy || AMERIFLUX_DEFAULT_POLICY));
-    var intendedUse = shellDoubleQuote(String(opts.intendedUse || AMERIFLUX_INTENDED_USE));
+    var v2IntendedUse = shellDoubleQuote(String(opts.v2IntendedUse || AMERIFLUX_V2_INTENDED_USE));
+    var v1IntendedUse = shellDoubleQuote(String(opts.v1IntendedUse || AMERIFLUX_V1_INTENDED_USE));
 
     return [
       "#!/usr/bin/env bash",
@@ -714,6 +775,8 @@
       "LOGFILE=\"${3:-ameriflux_bulk_download.log}\"",
       "USER_ID=\"${AMERIFLUX_USER_ID:-" + defaultUserId + "}\"",
       "USER_EMAIL=\"${AMERIFLUX_USER_EMAIL:-" + defaultUserEmail + "}\"",
+      "V2_DOWNLOAD_URL=\"${AMERIFLUX_V2_DOWNLOAD_URL:-" + v2DownloadUrl + "}\"",
+      "V1_DOWNLOAD_URL=\"${AMERIFLUX_V1_DOWNLOAD_URL:-" + v1DownloadUrl + "}\"",
       "",
       "mkdir -p \"$OUTDIR\"",
       "cd \"$OUTDIR\"",
@@ -750,22 +813,37 @@
       "    SOURCE_LABEL=\"" + AMERIFLUX_SOURCE_ONLY + "\"",
       "  fi",
       "  echo \"Requesting ${DATA_PRODUCT} URLs for ${SITE_ID} (${SOURCE_LABEL})...\" | tee -a \"$LOGFILE\"",
-      "",
-      "  RESPONSE=$(curl -sS -X POST \"" + downloadUrl + "\" \\",
-      "    -H \"Content-Type: application/json\" \\",
-      "    -H \"accept: application/json\" \\",
-      "    --data-binary \"{",
+      "  REQUEST_URL=\"$V2_DOWNLOAD_URL\"",
+      "  REQUEST_BODY=\"{",
+      "      \\\"user_id\\\": \\\"${USER_ID}\\\",",
+      "      \\\"user_email\\\": \\\"${USER_EMAIL}\\\",",
+      "      \\\"data_policy\\\": \\\"" + policy + "\\\",",
+      "      \\\"data_product\\\": \\\"${DATA_PRODUCT}\\\",",
+      "      \\\"data_variant\\\": \\\"" + variant + "\\\",",
+      "      \\\"site_ids\\\": [\\\"${SITE_ID}\\\"],",
+      "      \\\"intended_use\\\": \\\"" + v2IntendedUse + "\\\",",
+      "      \\\"description\\\": \\\"Request ${DATA_PRODUCT} download for ${SITE_ID} via the Q.E.D. Lab FLUXNET Data Explorer for Keenan Group research workflows.\\\"",
+      "    }\"",
+      "  if [ \"$DATA_PRODUCT\" = \"" + FLUXNET2015_PRODUCT + "\" ]; then",
+      "    REQUEST_URL=\"$V1_DOWNLOAD_URL\"",
+      "    REQUEST_BODY=\"{",
       "      \\\"user_id\\\": \\\"${USER_ID}\\\",",
       "      \\\"user_email\\\": \\\"${USER_EMAIL}\\\",",
       "      \\\"data_product\\\": \\\"${DATA_PRODUCT}\\\",",
       "      \\\"data_variant\\\": \\\"" + variant + "\\\",",
       "      \\\"data_policy\\\": \\\"" + policy + "\\\",",
       "      \\\"site_ids\\\": [\\\"${SITE_ID}\\\"],",
-      "      \\\"intended_use\\\": \\\"" + intendedUse + "\\\",",
+      "      \\\"intended_use\\\": \\\"" + v1IntendedUse + "\\\",",
       "      \\\"description\\\": \\\"Download ${DATA_PRODUCT} for ${SITE_ID}\\\",",
       "      \\\"agree_policy\\\": true,",
       "      \\\"is_test\\\": false",
-      "    }\") || {",
+      "    }\"",
+      "  fi",
+      "",
+      "  RESPONSE=$(curl -sS -X POST \"$REQUEST_URL\" \\",
+      "    -H \"Content-Type: application/json\" \\",
+      "    -H \"accept: application/json\" \\",
+      "    --data-binary \"$REQUEST_BODY\") || {",
       "      echo \"Request failed for ${SITE_ID}; skipping.\" | tee -a \"$LOGFILE\"",
       "      continue",
       "    }",
@@ -1744,14 +1822,11 @@
   function AmeriFluxSource(options) {
     var opts = options || {};
     this.availabilityUrl = String(opts.availabilityUrl || AMERIFLUX_FLUXNET_AVAILABILITY_URL);
-    this.downloadUrl = String(opts.downloadUrl || AMERIFLUX_DOWNLOAD_URL);
     this.userId = String(opts.userId || "").trim();
     this.userEmail = String(opts.userEmail || "").trim();
     this.trustedRuntime = !!opts.trustedRuntime;
-    this.dataProduct = String(opts.dataProduct || AMERIFLUX_FLUXNET_PRODUCT).trim().toUpperCase();
-    if (this.dataProduct !== FLUXNET2015_PRODUCT) {
-      this.dataProduct = AMERIFLUX_FLUXNET_PRODUCT;
-    }
+    this.dataProduct = normalizeDownloadProduct(opts.dataProduct || AMERIFLUX_FLUXNET_PRODUCT);
+    this.downloadUrl = String(opts.downloadUrl || getDownloadEndpointForProduct(this.dataProduct));
     this.sourceLabel = String(opts.sourceLabel || "").trim() || (this.dataProduct === FLUXNET2015_PRODUCT ? FLUXNET2015_SOURCE_ONLY : AMERIFLUX_SOURCE_ONLY);
     this.availabilityCacheKey = String(opts.availabilityCacheKey || (this.dataProduct === FLUXNET2015_PRODUCT ? FLUXNET2015_AVAILABILITY_CACHE_KEY : AMERIFLUX_FLUXNET_AVAILABILITY_CACHE_KEY));
     this.freshnessNamespace = String(opts.freshnessNamespace || this.dataProduct.toLowerCase());
@@ -1832,19 +1907,7 @@
 
   AmeriFluxSource.prototype.buildDownloadPayload = function (siteIds, variant, policy, identityOverride) {
     var identity = identityOverride || this.getDownloadIdentity();
-    var sites = Array.isArray(siteIds) ? siteIds.filter(Boolean) : [];
-    return {
-      user_id: String(identity && identity.user_id || "").trim(),
-      user_email: String(identity && identity.user_email || "").trim(),
-      data_product: this.dataProduct,
-      data_variant: String(variant || AMERIFLUX_DEFAULT_VARIANT),
-      data_policy: String(policy || AMERIFLUX_DEFAULT_POLICY),
-      site_ids: sites,
-      intended_use: AMERIFLUX_INTENDED_USE,
-      description: "Download " + this.dataProduct + " for " + sites.join(", "),
-      agree_policy: true,
-      is_test: false
-    };
+    return buildDownloadPayloadForProduct(siteIds, variant, policy, identity, this.dataProduct);
   };
 
   AmeriFluxSource.prototype.getManualDownloadResult = function (siteId, variant, policy, reason) {
@@ -2186,7 +2249,7 @@
       "    <ul>",
       "      <li><strong>download_all_selected.sh</strong>: wrapper script that runs the Shuttle and AmeriFlux API bulk scripts in sequence when their generated scripts and selected-sites files are kept in the same directory.</li>",
       "      <li><strong>Shuttle script</strong>: uses direct Shuttle URLs and retries/resume support for Shuttle-backed rows only.</li>",
-      "      <li><strong>AmeriFlux API script</strong>: requests URLs dynamically per selected AmeriFlux FLUXNET or FLUXNET2015 site via POST <code>/api/v1/data_download</code>, then downloads each returned file.</li>",
+      "      <li><strong>AmeriFlux API script</strong>: requests URLs dynamically per selected AmeriFlux site, using <code>/api/v2/data_download</code> for FLUXNET and <code>/api/v1/data_download</code> for FLUXNET2015, then downloads each returned file.</li>",
       "      <li><strong>Show Shuttle CLI command</strong>: reveals a command template that uses <code>shuttle_selected_sites.txt</code> and your local snapshot file.</li>",
       "      <li><strong>Copy Shuttle CLI command</strong>: copies the Shuttle CLI helper command shown in the panel.</li>",
       "      <li><strong>shuttle_selected_sites.txt</strong>: one <code>site_id</code> per line for Shuttle CLI workflows.</li>",
@@ -2247,7 +2310,7 @@
     this.shuttleSource = new ShuttleSource(this.jsonUrl, this.csvUrl);
     this.ameriFluxSource = new AmeriFluxSource({
       availabilityUrl: AMERIFLUX_FLUXNET_AVAILABILITY_URL,
-      downloadUrl: AMERIFLUX_DOWNLOAD_URL,
+      downloadUrl: AMERIFLUX_V2_DOWNLOAD_URL,
       userId: ameriIdentity.userId,
       userEmail: ameriIdentity.userEmail,
       trustedRuntime: ameriIdentity.trustedRuntime,
@@ -2258,7 +2321,7 @@
     });
     this.fluxnet2015Source = new AmeriFluxSource({
       availabilityUrl: FLUXNET2015_AVAILABILITY_URL,
-      downloadUrl: AMERIFLUX_DOWNLOAD_URL,
+      downloadUrl: AMERIFLUX_V1_DOWNLOAD_URL,
       userId: ameriIdentity.userId,
       userEmail: ameriIdentity.userEmail,
       trustedRuntime: ameriIdentity.trustedRuntime,
@@ -3197,10 +3260,12 @@
     return buildAmeriFluxBulkScriptText(entries, {
       defaultUserId: defaultUserId,
       defaultUserEmail: defaultUserEmail,
-      downloadUrl: this.ameriFluxSource.downloadUrl,
+      v2DownloadUrl: AMERIFLUX_V2_DOWNLOAD_URL,
+      v1DownloadUrl: AMERIFLUX_V1_DOWNLOAD_URL,
       variant: AMERIFLUX_DEFAULT_VARIANT,
       policy: AMERIFLUX_DEFAULT_POLICY,
-      intendedUse: AMERIFLUX_INTENDED_USE
+      v2IntendedUse: AMERIFLUX_V2_INTENDED_USE,
+      v1IntendedUse: AMERIFLUX_V1_INTENDED_USE
     });
   };
 
@@ -4552,6 +4617,9 @@
     shouldEnableBulkToolsActions: shouldEnableBulkToolsActions,
     formatSelectedSiteCount: formatSelectedSiteCount,
     buildAttributionText: buildAttributionText,
+    getDownloadEndpointForProduct: getDownloadEndpointForProduct,
+    buildV2DownloadPayload: buildV2DownloadPayload,
+    buildV1DownloadPayload: buildV1DownloadPayload,
     stripUrlQueryForFilename: stripUrlQueryForFilename,
     filenameFromUrl: filenameFromUrl,
     buildAmeriFluxCurlCommand: buildAmeriFluxCurlCommand,

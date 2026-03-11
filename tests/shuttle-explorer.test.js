@@ -154,6 +154,40 @@ test('Country helpers map ISO-2 codes case-insensitively and preserve full names
   assert.equal(hooks.deriveCountry('ZZ-Test', ''), 'ZZ');
 });
 
+test('AmeriFlux download helpers route FLUXNET to v2 and FLUXNET2015 to v1', () => {
+  assert.equal(
+    hooks.getDownloadEndpointForProduct('FLUXNET'),
+    'https://amfcdn.lbl.gov/api/v2/data_download'
+  );
+  assert.equal(
+    hooks.getDownloadEndpointForProduct('FLUXNET2015'),
+    'https://amfcdn.lbl.gov/api/v1/data_download'
+  );
+
+  const v2Payload = hooks.buildV2DownloadPayload(
+    ['AR-Bal'],
+    'FULLSET',
+    'CCBY4.0',
+    { user_id: 'user', user_email: 'user@example.org' },
+    'FLUXNET'
+  );
+  assert.equal(v2Payload.intended_use, 'other_research');
+  assert.equal(v2Payload.description.includes('Q.E.D. Lab FLUXNET Data Explorer'), true);
+  assert.equal(Object.prototype.hasOwnProperty.call(v2Payload, 'agree_policy'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(v2Payload, 'is_test'), false);
+
+  const v1Payload = hooks.buildV1DownloadPayload(
+    ['CL-Old'],
+    'FULLSET',
+    'CCBY4.0',
+    { user_id: 'user', user_email: 'user@example.org' },
+    'FLUXNET2015'
+  );
+  assert.equal(v1Payload.intended_use, 'QED Lab FLUXNET Data Explorer');
+  assert.equal(v1Payload.agree_policy, true);
+  assert.equal(v1Payload.is_test, false);
+});
+
 test('Bulk tools action helper only activates for multi-site selections', () => {
   assert.equal(hooks.shouldEnableBulkToolsActions(0), false);
   assert.equal(hooks.shouldEnableBulkToolsActions(1), false);
@@ -390,20 +424,31 @@ test('AmeriFlux API download returns manual fallback when trusted credentials ar
   assert.equal(result.manual_download_required, true);
   assert.equal(result.site_id, 'AR-Bal');
   assert.equal(result.payload_template.data_product, 'FLUXNET2015');
+  assert.equal(result.payload_template.intended_use, 'QED Lab FLUXNET Data Explorer');
+  assert.equal(result.payload_template.agree_policy, true);
+  assert.equal(source.downloadUrl, 'https://amfcdn.lbl.gov/api/v1/data_download');
   assert.equal(Array.isArray(result.data_urls), true);
   assert.equal(result.data_urls.length, 0);
 });
 
-test('AmeriFlux curl command generator includes site ID, product, and cleaned filename logic', () => {
-  const command = hooks.buildAmeriFluxCurlCommand('AR-Bal', 'FULLSET', 'CCBY4.0', undefined, 'FLUXNET2015');
+test('AmeriFlux curl command generator uses product-specific endpoints and payloads', () => {
+  const fluxnetCommand = hooks.buildAmeriFluxCurlCommand('AR-Bal', 'FULLSET', 'CCBY4.0', undefined, 'FLUXNET');
+  const fluxnet2015Command = hooks.buildAmeriFluxCurlCommand('AR-Bal', 'FULLSET', 'CCBY4.0', undefined, 'FLUXNET2015');
 
-  assert.match(command, /"site_ids": \[\s*"AR-Bal"\s*\]/);
-  assert.match(command, /"description": "Download FLUXNET2015 for AR-Bal"/);
-  assert.match(command, /"data_product": "FLUXNET2015"/);
-  assert.match(command, /"intended_use": "QED Lab FLUXNET Data Explorer"/);
-  assert.equal(command.includes('clean_url="${url%%\\?*}"'), true);
-  assert.equal(command.includes('filename="$(basename "$clean_url")"'), true);
-  assert.equal(command.includes('curl -L "$url" -o "$filename"'), true);
+  assert.match(fluxnetCommand, /https:\/\/amfcdn\.lbl\.gov\/api\/v2\/data_download/);
+  assert.match(fluxnetCommand, /"site_ids": \[\s*"AR-Bal"\s*\]/);
+  assert.match(fluxnetCommand, /"intended_use": "other_research"/);
+  assert.match(fluxnetCommand, /Q\.E\.D\. Lab FLUXNET Data Explorer/);
+  assert.equal(fluxnetCommand.includes('"agree_policy"'), false);
+  assert.equal(fluxnetCommand.includes('"is_test"'), false);
+
+  assert.match(fluxnet2015Command, /https:\/\/amfcdn\.lbl\.gov\/api\/v1\/data_download/);
+  assert.match(fluxnet2015Command, /"description": "Download FLUXNET2015 for AR-Bal"/);
+  assert.match(fluxnet2015Command, /"data_product": "FLUXNET2015"/);
+  assert.match(fluxnet2015Command, /"intended_use": "QED Lab FLUXNET Data Explorer"/);
+  assert.equal(fluxnet2015Command.includes('clean_url="${url%%\\?*}"'), true);
+  assert.equal(fluxnet2015Command.includes('filename="$(basename "$clean_url")"'), true);
+  assert.equal(fluxnet2015Command.includes('curl -L "$url" -o "$filename"'), true);
 });
 
 test('AmeriFlux selected-sites export includes source label and data product', () => {
@@ -426,9 +471,13 @@ test('AmeriFlux bulk script generator supports mixed FLUXNET and FLUXNET2015 pro
   assert.equal(script.includes('# site_id\tdata_product\tsource_label'), true);
   assert.equal(script.includes('AR-Bal\tFLUXNET\tAmeriFlux'), true);
   assert.equal(script.includes('CL-Old\tFLUXNET2015\tFLUXNET2015'), true);
+  assert.equal(script.includes('V2_DOWNLOAD_URL="${AMERIFLUX_V2_DOWNLOAD_URL:-https://amfcdn.lbl.gov/api/v2/data_download}"'), true);
+  assert.equal(script.includes('V1_DOWNLOAD_URL="${AMERIFLUX_V1_DOWNLOAD_URL:-https://amfcdn.lbl.gov/api/v1/data_download}"'), true);
+  assert.equal(script.includes('if [ "$DATA_PRODUCT" = "FLUXNET2015" ]; then'), true);
   assert.equal(script.includes('\\"data_product\\": \\"${DATA_PRODUCT}\\"'), true);
   assert.equal(script.includes('\\"data_variant\\": \\"FULLSET\\"'), true);
   assert.equal(script.includes('\\"data_policy\\": \\"CCBY4.0\\"'), true);
+  assert.equal(script.includes('\\"intended_use\\": \\"other_research\\"'), true);
   assert.equal(script.includes('\\"intended_use\\": \\"QED Lab FLUXNET Data Explorer\\"'), true);
   assert.equal(script.includes('while IFS=$\'\\t\' read -r SITE_ID DATA_PRODUCT SOURCE_LABEL; do'), true);
   assert.equal(script.includes('clean_url="${url%%\\?*}"'), true);
