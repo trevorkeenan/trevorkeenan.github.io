@@ -83,6 +83,12 @@
     "united states of america": "USA"
   };
   var COUNTRY_DISPLAY_NAMES = null;
+  var NETWORK_TOKEN_DISPLAY_NAMES = {
+    CHF: "ChinaFlux",
+    EUF: "EuroFlux",
+    JPF: "JapanFlux",
+    KOF: "KoreaFlux"
+  };
 
   var SORT_COLUMNS = [
     { key: "site_id", label: "Site ID", type: "string" },
@@ -362,6 +368,35 @@
     return parts.length ? parts : [s];
   }
 
+  function normalizeNetworkToken(value) {
+    var token = String(value || "").trim();
+    var mapped;
+    if (!token) {
+      return "";
+    }
+    mapped = NETWORK_TOKEN_DISPLAY_NAMES[token.toUpperCase()];
+    return mapped || token;
+  }
+
+  function normalizeNetworkTokens(value) {
+    var seen = {};
+    var tokens = [];
+    splitNetworks(value).forEach(function (token) {
+      var normalized = normalizeNetworkToken(token);
+      var key = String(normalized || "").toLowerCase();
+      if (!normalized || seen[key]) {
+        return;
+      }
+      seen[key] = true;
+      tokens.push(normalized);
+    });
+    return tokens;
+  }
+
+  function normalizeNetworkDisplayValue(value) {
+    return normalizeNetworkTokens(value).join(";");
+  }
+
   function hasNetworkTag(value, expected) {
     var target = String(expected || "").trim().toLowerCase();
     if (!target) {
@@ -399,8 +434,8 @@
     ) {
       networkDisplay = AMERIFLUX_SOURCE_ONLY;
     }
-    row.network_display = networkDisplay;
-    row.network_tokens = splitNetworks(networkDisplay);
+    row.network_display = normalizeNetworkDisplayValue(networkDisplay);
+    row.network_tokens = normalizeNetworkTokens(networkDisplay);
     return row;
   }
 
@@ -606,8 +641,7 @@
       site_ids: sites,
       intended_use: AMERIFLUX_V1_INTENDED_USE,
       description: "Download " + product + " for " + sites.join(", "),
-      agree_policy: true,
-      is_test: false
+      agree_policy: true
     };
   }
 
@@ -835,8 +869,7 @@
       "      \\\"site_ids\\\": [\\\"${SITE_ID}\\\"],",
       "      \\\"intended_use\\\": \\\"" + v1IntendedUse + "\\\",",
       "      \\\"description\\\": \\\"Download ${DATA_PRODUCT} for ${SITE_ID}\\\",",
-      "      \\\"agree_policy\\\": true,",
-      "      \\\"is_test\\\": false",
+      "      \\\"agree_policy\\\": true",
       "    }\"",
       "  fi",
       "",
@@ -2938,7 +2971,7 @@
 
     L = window.L;
     this.map = L.map(this.bindings.mapCanvas, {
-      scrollWheelZoom: false,
+      scrollWheelZoom: true,
       worldCopyJump: true
     });
     this.map.setView([20, 0], 2);
@@ -4613,6 +4646,9 @@
     countryCodeToName: countryCodeToName,
     normalizeCountryName: normalizeCountryName,
     deriveCountry: deriveCountry,
+    normalizeNetworkToken: normalizeNetworkToken,
+    normalizeNetworkTokens: normalizeNetworkTokens,
+    normalizeNetworkDisplayValue: normalizeNetworkDisplayValue,
     calculateCoverageLength: calculateCoverageLength,
     shouldEnableBulkToolsActions: shouldEnableBulkToolsActions,
     formatSelectedSiteCount: formatSelectedSiteCount,

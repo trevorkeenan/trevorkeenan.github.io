@@ -154,6 +154,51 @@ test('Country helpers map ISO-2 codes case-insensitively and preserve full names
   assert.equal(hooks.deriveCountry('ZZ-Test', ''), 'ZZ');
 });
 
+test('Network helpers normalize selected short codes to display names and dedupe mixed tokens', () => {
+  assert.equal(hooks.normalizeNetworkToken('CHF'), 'ChinaFlux');
+  assert.equal(hooks.normalizeNetworkToken('euf'), 'EuroFlux');
+  assert.equal(hooks.normalizeNetworkToken('JPF'), 'JapanFlux');
+  assert.equal(hooks.normalizeNetworkToken('KOF'), 'KoreaFlux');
+  assert.equal(hooks.normalizeNetworkToken('AmeriFlux'), 'AmeriFlux');
+  assert.equal(hooks.normalizeNetworkToken('FLX'), 'FLX');
+  assert.deepEqual(
+    hooks.normalizeNetworkTokens('CHF;ChinaFlux;AmeriFlux;KOF'),
+    ['ChinaFlux', 'AmeriFlux', 'KoreaFlux']
+  );
+  assert.equal(
+    hooks.normalizeNetworkDisplayValue('CHF;ChinaFlux;EUF'),
+    'ChinaFlux;EuroFlux'
+  );
+});
+
+test('Merged Shuttle rows expose normalized network display names for filter tokens', () => {
+  const merged = hooks.mergeCatalogRows([
+    {
+      site_id: 'CN-Test',
+      site_name: 'China Test',
+      country: 'CN',
+      data_hub: 'TERN',
+      network: 'CHF;JPF',
+      source_network: '',
+      network_display: 'CHF;JPF',
+      network_tokens: ['CHF', 'JPF'],
+      vegetation_type: '',
+      first_year: 2010,
+      last_year: 2011,
+      years: '2010-2011',
+      download_link: 'https://example.org/cn-test.zip',
+      download_mode: 'direct',
+      _selection_key: 'TERN|CN-Test|1',
+      _index: 0,
+      source_label: '',
+      source_reason: ''
+    }
+  ], [], []);
+
+  assert.equal(merged.rows[0].network_display, 'ChinaFlux;JapanFlux');
+  assert.deepEqual(merged.rows[0].network_tokens, ['ChinaFlux', 'JapanFlux']);
+});
+
 test('AmeriFlux download helpers route FLUXNET to v2 and FLUXNET2015 to v1', () => {
   assert.equal(
     hooks.getDownloadEndpointForProduct('FLUXNET'),
@@ -185,7 +230,7 @@ test('AmeriFlux download helpers route FLUXNET to v2 and FLUXNET2015 to v1', () 
   );
   assert.equal(v1Payload.intended_use, 'QED Lab FLUXNET Data Explorer');
   assert.equal(v1Payload.agree_policy, true);
-  assert.equal(v1Payload.is_test, false);
+  assert.equal(Object.prototype.hasOwnProperty.call(v1Payload, 'is_test'), false);
 });
 
 test('Bulk tools action helper only activates for multi-site selections', () => {
@@ -446,6 +491,7 @@ test('AmeriFlux curl command generator uses product-specific endpoints and paylo
   assert.match(fluxnet2015Command, /"description": "Download FLUXNET2015 for AR-Bal"/);
   assert.match(fluxnet2015Command, /"data_product": "FLUXNET2015"/);
   assert.match(fluxnet2015Command, /"intended_use": "QED Lab FLUXNET Data Explorer"/);
+  assert.equal(fluxnet2015Command.includes('"is_test"'), false);
   assert.equal(fluxnet2015Command.includes('clean_url="${url%%\\?*}"'), true);
   assert.equal(fluxnet2015Command.includes('filename="$(basename "$clean_url")"'), true);
   assert.equal(fluxnet2015Command.includes('curl -L "$url" -o "$filename"'), true);
@@ -479,6 +525,7 @@ test('AmeriFlux bulk script generator supports mixed FLUXNET and FLUXNET2015 pro
   assert.equal(script.includes('\\"data_policy\\": \\"CCBY4.0\\"'), true);
   assert.equal(script.includes('\\"intended_use\\": \\"other_research\\"'), true);
   assert.equal(script.includes('\\"intended_use\\": \\"QED Lab FLUXNET Data Explorer\\"'), true);
+  assert.equal(script.includes('\\"is_test\\": false'), false);
   assert.equal(script.includes('while IFS=$\'\\t\' read -r SITE_ID DATA_PRODUCT SOURCE_LABEL; do'), true);
   assert.equal(script.includes('clean_url="${url%%\\?*}"'), true);
   assert.equal(script.includes('filename="$(basename "$clean_url")"'), true);
