@@ -155,18 +155,18 @@ test('Country helpers map ISO-2 codes case-insensitively and preserve full names
 });
 
 test('Network helpers normalize selected short codes to display names and dedupe mixed tokens', () => {
-  assert.equal(hooks.normalizeNetworkToken('CHF'), 'ChinaFlux');
+  assert.equal(hooks.normalizeNetworkToken('CNF'), 'ChinaFlux');
   assert.equal(hooks.normalizeNetworkToken('euf'), 'EuroFlux');
   assert.equal(hooks.normalizeNetworkToken('JPF'), 'JapanFlux');
   assert.equal(hooks.normalizeNetworkToken('KOF'), 'KoreaFlux');
   assert.equal(hooks.normalizeNetworkToken('AmeriFlux'), 'AmeriFlux');
   assert.equal(hooks.normalizeNetworkToken('FLX'), 'FLX');
   assert.deepEqual(
-    hooks.normalizeNetworkTokens('CHF;ChinaFlux;AmeriFlux;KOF'),
+    hooks.normalizeNetworkTokens('CNF;ChinaFlux;AmeriFlux;KOF'),
     ['ChinaFlux', 'AmeriFlux', 'KoreaFlux']
   );
   assert.equal(
-    hooks.normalizeNetworkDisplayValue('CHF;ChinaFlux;EUF'),
+    hooks.normalizeNetworkDisplayValue('CNF;ChinaFlux;EUF'),
     'ChinaFlux;EuroFlux'
   );
 });
@@ -178,10 +178,10 @@ test('Merged Shuttle rows expose normalized network display names for filter tok
       site_name: 'China Test',
       country: 'CN',
       data_hub: 'TERN',
-      network: 'CHF;JPF',
+      network: 'CNF;JPF',
       source_network: '',
-      network_display: 'CHF;JPF',
-      network_tokens: ['CHF', 'JPF'],
+      network_display: 'CNF;JPF',
+      network_tokens: ['CNF', 'JPF'],
       vegetation_type: '',
       first_year: 2010,
       last_year: 2011,

@@ -84,7 +84,7 @@
   };
   var COUNTRY_DISPLAY_NAMES = null;
   var NETWORK_TOKEN_DISPLAY_NAMES = {
-    CHF: "ChinaFlux",
+    CNF: "ChinaFlux",
     EUF: "EuroFlux",
     JPF: "JapanFlux",
     KOF: "KoreaFlux"
