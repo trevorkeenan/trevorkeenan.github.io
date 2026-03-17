@@ -88,9 +88,13 @@ jobs:
           TARGET_SNAPSHOT_CSV: assets/shuttle_snapshot.csv
           TARGET_SNAPSHOT_JSON: assets/shuttle_snapshot.json
         run: |
+          SNAPSHOT_UPDATED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          SNAPSHOT_UPDATED_DATE="${SNAPSHOT_UPDATED_AT%%T*}"
           python .github/scripts/shuttle_snapshot_csv_to_json.py \
             --input "${TARGET_SNAPSHOT_CSV}" \
-            --output "${TARGET_SNAPSHOT_JSON}"
+            --output "${TARGET_SNAPSHOT_JSON}" \
+            --snapshot-updated-at "${SNAPSHOT_UPDATED_AT}" \
+            --snapshot-updated-date "${SNAPSHOT_UPDATED_DATE}"
 
       - name: Commit and push snapshot files if changed
         env:

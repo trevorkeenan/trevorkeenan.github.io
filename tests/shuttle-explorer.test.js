@@ -241,10 +241,36 @@ test('Bulk tools action helper only activates for multi-site selections', () => 
   assert.equal(hooks.formatSelectedSiteCount(3), '3 selected sites');
 });
 
-test('Attribution text includes the contact sentence', () => {
+test('Snapshot updated date helper prefers committed metadata fields and falls back cleanly', () => {
+  assert.equal(
+    hooks.extractSnapshotUpdatedDate({
+      snapshot_updated_date: '2026-03-11',
+      snapshot_updated_at: '2026-03-12T08:15:00Z'
+    }),
+    '2026-03-11'
+  );
+  assert.equal(
+    hooks.extractSnapshotUpdatedDate({
+      snapshot_updated_at: '2026-03-12T08:15:00Z'
+    }),
+    '2026-03-12'
+  );
+  assert.equal(hooks.extractSnapshotUpdatedDate({}), '');
+  assert.equal(hooks.snapshotUpdatedDateDisplayText(''), 'unavailable');
+});
+
+test('Attribution text includes the contact sentence and uses the shared snapshot date source', () => {
   assert.match(
-    hooks.buildAttributionText(),
+    hooks.buildAttributionText('2026-03-11'),
     /Contact TF Keenan \(trevorkeenan@berkeley\.edu\) with any questions/
+  );
+  assert.match(
+    hooks.buildAttributionText('2026-03-11'),
+    /Available data is updated as of: 2026-03-11\./
+  );
+  assert.match(
+    hooks.buildAttributionText(''),
+    /Available data is updated as of: unavailable\./
   );
 });
 
@@ -579,4 +605,13 @@ test('Browser-facing explorer markup does not include hardcoded AmeriFlux identi
   assert.equal(explorerHtml.includes('data-ameriflux-user-id='), false);
   assert.equal(explorerHtml.includes('data-ameriflux-user-email='), false);
   assert.equal(dataLandingHtml.includes('trevorkeenan@berkeley.edu'), false);
+});
+
+test('Explorer page and runtime do not hardcode stale last-updated dates', () => {
+  const explorerJs = fs.readFileSync(path.join(__dirname, '..', 'assets', 'shuttle-explorer.js'), 'utf8');
+  const explorerHtml = fs.readFileSync(path.join(__dirname, '..', 'fluxnet-explorer.html'), 'utf8');
+
+  assert.equal(/last updated:\s*202\d-\d{2}-\d{2}/.test(explorerJs), false);
+  assert.equal(/last updated:\s*202\d-\d{2}-\d{2}/.test(explorerHtml), false);
+  assert.equal(/Available data is updated as of:\s*202\d-\d{2}-\d{2}/.test(explorerJs), false);
 });

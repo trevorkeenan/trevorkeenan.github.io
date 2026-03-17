@@ -8,6 +8,7 @@ import csv
 import hashlib
 import json
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -24,6 +25,16 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--input", required=True, help="Input CSV path (e.g. assets/shuttle_snapshot.csv)")
     parser.add_argument("--output", required=True, help="Output JSON path (e.g. assets/shuttle_snapshot.json)")
+    parser.add_argument(
+        "--snapshot-updated-at",
+        default="",
+        help="Snapshot refresh timestamp in ISO-8601 form (e.g. 2026-03-11T06:04:47Z)",
+    )
+    parser.add_argument(
+        "--snapshot-updated-date",
+        default="",
+        help="Snapshot refresh date in YYYY-MM-DD form",
+    )
     return parser.parse_args()
 
 
@@ -55,6 +66,66 @@ def maybe_int(value: str) -> Optional[int]:
         except ValueError:
             return None
     return None
+
+
+def load_existing_meta(output_path: Path) -> Dict[str, object]:
+    if not output_path.exists():
+        return {}
+    try:
+        payload = json.loads(output_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    meta = payload.get("meta")
+    if isinstance(meta, dict):
+        return meta
+    return {}
+
+
+def normalize_snapshot_updated_at(value: str) -> str:
+    raw = (value or "").strip()
+    if not raw:
+        return ""
+    normalized = raw.replace("Z", "+00:00")
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError:
+        return ""
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def normalize_snapshot_updated_date(value: str, fallback_at: str = "") -> str:
+    raw = (value or "").strip()
+    if raw and re.fullmatch(r"\d{4}-\d{2}-\d{2}", raw):
+        return raw
+    fallback = normalize_snapshot_updated_at(fallback_at)
+    if fallback:
+        return fallback.split("T", 1)[0]
+    return ""
+
+
+def choose_snapshot_updated_fields(
+    existing_meta: Dict[str, object],
+    version_value: str,
+    requested_updated_at: str,
+    requested_updated_date: str,
+) -> tuple[str, str]:
+    existing_version = str(existing_meta.get("version") or "").strip()
+    existing_updated_at = normalize_snapshot_updated_at(str(existing_meta.get("snapshot_updated_at") or ""))
+    existing_updated_date = normalize_snapshot_updated_date(
+        str(existing_meta.get("snapshot_updated_date") or ""),
+        existing_updated_at,
+    )
+
+    if existing_version == version_value and existing_updated_at and existing_updated_date:
+        return existing_updated_at, existing_updated_date
+
+    updated_at = normalize_snapshot_updated_at(requested_updated_at)
+    if not updated_at:
+        updated_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    updated_date = normalize_snapshot_updated_date(requested_updated_date, updated_at)
+    return updated_at, updated_date
 
 
 def normalize_row(raw_row: Dict[str, str], header_map: Dict[str, str]) -> Dict[str, str]:
@@ -131,10 +202,20 @@ def main() -> None:
     data_payload = {"columns": columns, "rows": payload_rows}
     canonical_data_json = json.dumps(data_payload, ensure_ascii=True, separators=(",", ":"))
     version_hash = hashlib.sha256(canonical_data_json.encode("utf-8")).hexdigest()
+    version_value = f"sha256:{version_hash}"
+    existing_meta = load_existing_meta(output_path)
+    snapshot_updated_at, snapshot_updated_date = choose_snapshot_updated_fields(
+        existing_meta,
+        version_value,
+        args.snapshot_updated_at,
+        args.snapshot_updated_date,
+    )
     payload = {
         "meta": {
             "schema_version": 1,
-            "version": f"sha256:{version_hash}",
+            "version": version_value,
+            "snapshot_updated_at": snapshot_updated_at,
+            "snapshot_updated_date": snapshot_updated_date,
         },
         "columns": columns,
         "rows": payload_rows,
