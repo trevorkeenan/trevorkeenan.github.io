@@ -705,6 +705,26 @@ test('Browser-facing explorer markup does not include hardcoded AmeriFlux identi
   assert.equal(explorerJs.includes('value="trevorkeenan@berkeley.edu"'), false);
 });
 
+test('Bulk tools layout keeps Shuttle and AmeriFlux action buttons in the intended order', () => {
+  const explorerJs = fs.readFileSync(path.join(__dirname, '..', 'assets', 'shuttle-explorer.js'), 'utf8');
+  const shuttleRowStart = explorerJs.indexOf('data-role=\\"show-cli-command\\">Show Shuttle CLI command</button>"');
+  const shuttleCopyCommand = explorerJs.indexOf('data-role=\\"copy-command\\">Copy Shuttle CLI command</button>"');
+  const shuttleCopyLinks = explorerJs.indexOf('data-role=\\"copy-links\\">Copy Shuttle links</button>"');
+  const ameriDownloadScript = explorerJs.indexOf('data-role=\\"download-ameriflux-script\\">Download download_ameriflux_selected.sh</button>"');
+  const ameriSecondRowStart = explorerJs.indexOf('"    <div class=\\"shuttle-explorer__bulk-actions\\">",', ameriDownloadScript);
+  const ameriCopyScript = explorerJs.indexOf('data-role=\\"copy-ameriflux-script\\">Copy AmeriFlux API shell script</button>"');
+  const ameriSitesFile = explorerJs.indexOf('data-role=\\"download-ameriflux-sites-file\\">Download ameriflux_selected_sites.txt</button>"');
+
+  assert.equal(shuttleRowStart > -1, true);
+  assert.equal(shuttleCopyCommand > shuttleRowStart, true);
+  assert.equal(shuttleCopyLinks > shuttleCopyCommand, true);
+
+  assert.equal(ameriDownloadScript > -1, true);
+  assert.equal(ameriSecondRowStart > ameriDownloadScript, true);
+  assert.equal(ameriCopyScript > ameriSecondRowStart, true);
+  assert.equal(ameriSitesFile > ameriCopyScript, true);
+});
+
 test('Explorer page and runtime do not hardcode stale last-updated dates', () => {
   const explorerJs = fs.readFileSync(path.join(__dirname, '..', 'assets', 'shuttle-explorer.js'), 'utf8');
   const explorerHtml = fs.readFileSync(path.join(__dirname, '..', 'fluxnet-explorer.html'), 'utf8');
