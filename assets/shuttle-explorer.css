@@ -493,6 +493,12 @@
   line-height: 1.25;
 }
 
+.shuttle-explorer__source-badge--icos {
+  background: #eef7f8;
+  border: 1px solid #b7d9dc;
+  color: #245761;
+}
+
 .shuttle-explorer__source-badge--ameriflux {
   background: #edf7f0;
   border: 1px solid #b6dcc2;

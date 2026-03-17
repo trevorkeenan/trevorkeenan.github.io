@@ -43,7 +43,7 @@ test('FLUXNET2015 availability payload uses the same filtering rules', () => {
   assert.match(parsed.freshnessKey, /^fluxnet2015:/);
 });
 
-test('Merge precedence is Shuttle > AmeriFlux > FLUXNET2015 with no duplicates', () => {
+test('Merge precedence is Shuttle > ICOS > AmeriFlux > FLUXNET2015 with no duplicates', () => {
   const shuttleRows = [
     {
       site_id: 'AR-Bal',
@@ -87,27 +87,81 @@ test('Merge precedence is Shuttle > AmeriFlux > FLUXNET2015 with no duplicates',
     }
   ];
 
+  const icosRows = [
+    {
+      site_id: 'AR-Bal',
+      site_name: 'Arroyo ICOS',
+      country: 'AR',
+      data_hub: 'ICOS',
+      network: 'FLX',
+      source_network: 'FLX',
+      network_display: 'FLX',
+      network_tokens: ['FLX'],
+      vegetation_type: '',
+      first_year: 2012,
+      last_year: 2014,
+      years: '2012-2014',
+      download_link: 'https://data.icos-cp.eu/licence_accept?ids=%5B%22obj-ar-bal%22%5D&fileName=FLX_AR-Bal_FLUXNET2015_FULLSET_2012-2014_beta-3.zip',
+      download_mode: 'direct',
+      source_label: 'ICOS',
+      source_reason: 'Available directly from the ICOS Carbon Portal FLUXNET archive.',
+      source_origin: 'icos_direct',
+      object_id: 'obj-ar-bal',
+      file_name: 'FLX_AR-Bal_FLUXNET2015_FULLSET_2012-2014_beta-3.zip',
+      direct_download_url: 'https://data.icos-cp.eu/licence_accept?ids=%5B%22obj-ar-bal%22%5D&fileName=FLX_AR-Bal_FLUXNET2015_FULLSET_2012-2014_beta-3.zip'
+    },
+    {
+      site_id: 'BE-Bra',
+      site_name: 'Brasschaat',
+      country: 'BE',
+      data_hub: 'ICOS',
+      network: 'FLX',
+      source_network: 'FLX',
+      network_display: 'FLX',
+      network_tokens: ['FLX'],
+      vegetation_type: '',
+      first_year: 1996,
+      last_year: 2020,
+      years: '1996-2020',
+      download_link: 'https://data.icos-cp.eu/licence_accept?ids=%5B%225BCT4nKCoGaYQh77DW6OW7gs%22%5D&fileName=FLX_BE-Bra_FLUXNET2015_FULLSET_1996-2020_beta-3.zip',
+      download_mode: 'direct',
+      source_label: 'ICOS',
+      source_reason: 'Available directly from the ICOS Carbon Portal FLUXNET archive.',
+      source_origin: 'icos_direct',
+      object_id: '5BCT4nKCoGaYQh77DW6OW7gs',
+      file_name: 'FLX_BE-Bra_FLUXNET2015_FULLSET_1996-2020_beta-3.zip',
+      direct_download_url: 'https://data.icos-cp.eu/licence_accept?ids=%5B%225BCT4nKCoGaYQh77DW6OW7gs%22%5D&fileName=FLX_BE-Bra_FLUXNET2015_FULLSET_1996-2020_beta-3.zip'
+    }
+  ];
+
   const ameriSites = [
     { site_id: 'AR-Bal', publish_years: [2012, 2013], first_year: 2012, last_year: 2013 },
+    { site_id: 'BE-Bra', publish_years: [1996, 2020], first_year: 1996, last_year: 2020 },
     { site_id: 'BR-New', publish_years: [2019], first_year: 2019, last_year: 2019 }
   ];
 
   const fluxnet2015Sites = [
     { site_id: 'AR-Bal', publish_years: [2012], first_year: 2012, last_year: 2012 },
+    { site_id: 'BE-Bra', publish_years: [1996, 2020], first_year: 1996, last_year: 2020 },
     { site_id: 'BR-New', publish_years: [2019], first_year: 2019, last_year: 2019 },
     { site_id: 'CL-Old', publish_years: [2005], first_year: 2005, last_year: 2005 }
   ];
 
-  const merged = hooks.mergeCatalogRows(shuttleRows, ameriSites, fluxnet2015Sites);
+  const merged = hooks.mergeCatalogRows(shuttleRows, icosRows, ameriSites, fluxnet2015Sites);
   const overlap = merged.rows.find((row) => row.site_id === 'AR-Bal');
+  const icosOnly = merged.rows.find((row) => row.site_id === 'BE-Bra');
   const ameriOnly = merged.rows.find((row) => row.site_id === 'BR-New');
   const fluxnet2015Only = merged.rows.find((row) => row.site_id === 'CL-Old');
   const shuttleAmeriFlux = merged.rows.find((row) => row.site_id === 'US-Var');
 
+  assert.equal(merged.icosDirectTotalSites, 2);
+  assert.equal(merged.icosDirectSuppressedByShuttle, 1);
+  assert.equal(merged.icosDirectOnlySites, 1);
   assert.equal(merged.amerifluxOverlapSites, 1);
   assert.equal(merged.amerifluxOnlySites, 1);
   assert.equal(merged.fluxnet2015OnlySites, 1);
   assert.equal(merged.rows.filter((row) => row.site_id === 'AR-Bal').length, 1);
+  assert.equal(merged.rows.filter((row) => row.site_id === 'BE-Bra').length, 1);
   assert.equal(merged.rows.filter((row) => row.site_id === 'BR-New').length, 1);
 
   assert.equal(overlap.source_label, 'AmeriFlux-shuttle');
@@ -122,6 +176,16 @@ test('Merge precedence is Shuttle > AmeriFlux > FLUXNET2015 with no duplicates',
   assert.equal(ameriOnly.data_hub, 'AmeriFlux');
   assert.equal(ameriOnly.api_data_product, 'FLUXNET');
   assert.equal(ameriOnly.length_years, 1);
+
+  assert.equal(icosOnly.source_label, 'ICOS');
+  assert.equal(icosOnly.download_mode, 'direct');
+  assert.equal(icosOnly.data_hub, 'ICOS');
+  assert.equal(icosOnly.download_link.includes('licence_accept'), true);
+  assert.equal(icosOnly.object_id, '5BCT4nKCoGaYQh77DW6OW7gs');
+  assert.equal(icosOnly.file_name, 'FLX_BE-Bra_FLUXNET2015_FULLSET_1996-2020_beta-3.zip');
+  assert.equal(icosOnly.source_priority, 300);
+  assert.equal(icosOnly.is_icos, true);
+  assert.equal(icosOnly.country, 'Belgium');
 
   assert.equal(fluxnet2015Only.source_label, 'FLUXNET2015');
   assert.equal(fluxnet2015Only.download_mode, 'ameriflux_api');

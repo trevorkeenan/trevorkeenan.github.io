@@ -1,36 +1,47 @@
 # trevorkeenan.github.io
 
-## FLUXNET Shuttle snapshot automation
+## FLUXNET explorer snapshot automation
 
-This repo includes a GitHub Actions workflow at `.github/workflows/update-shuttle-snapshot.yml` that refreshes committed FLUXNET Shuttle metadata artifacts daily (UTC) and on manual dispatch.
+This repo includes a GitHub Actions workflow at `.github/workflows/update-shuttle-snapshot.yml` that refreshes committed FLUXNET explorer metadata artifacts daily (UTC) and on manual dispatch.
 
-- Output files: `assets/shuttle_snapshot.csv` and `assets/shuttle_snapshot.json`
+- Output files:
+  - `assets/shuttle_snapshot.csv`
+  - `assets/shuttle_snapshot.json`
+  - `assets/icos_direct_fluxnet.csv`
+  - `assets/icos_direct_fluxnet.json`
 - Source: `fluxnet/shuttle` installed from GitHub during the workflow run
+- ICOS direct source: `scripts/refresh_icos_direct_fluxnet.py` discovers ICOS FLUXNET zip datasets via DataCite and resolves them against the official ICOS Carbon Portal metadata JSON endpoint
 - JSON format: compact browser payload with normalized `snake_case` column names (`{"columns":[...],"rows":[...]}`), keeping key discovery/download fields
-- Safety behavior: the workflow only stages/commits the generated snapshot files, and it refuses to overwrite the CSV snapshot if `listall()` returns zero rows
+- Safety behavior: the workflow only stages/commits the generated snapshot files, and it refuses to overwrite the Shuttle CSV snapshot if `listall()` returns zero rows
 
 This supports a no-backend GitHub Pages setup where the site reads stable snapshot paths directly.
 
-## AmeriFlux source integration
+## Source integration
 
-The explorer now merges three effective source layers:
+The explorer now merges four effective source layers:
 
 - FLUXNET Shuttle snapshot rows (`assets/shuttle_snapshot.json` / `assets/shuttle_snapshot.csv`)
+- ICOS-direct FLUXNET discovery snapshot (`assets/icos_direct_fluxnet.json` / `assets/icos_direct_fluxnet.csv`)
 - AmeriFlux FLUXNET API availability (`https://amfcdn.lbl.gov/api/v2/data_availability/AmeriFlux/FLUXNET/CCBY4.0`)
 - AmeriFlux FLUXNET2015 API availability (`https://amfcdn.lbl.gov/api/v2/data_availability/FLUXNET/FLUXNET2015/CCBY4.0`)
 
 Canonical precedence is:
 
 - Shuttle
+- ICOS-direct
 - AmeriFlux FLUXNET
 - FLUXNET2015
 
 Merge behavior:
 
 - If a site exists in Shuttle and AmeriFlux FLUXNET, Shuttle is canonical and the row is labeled `AmeriFlux-shuttle`.
+- If a site exists in Shuttle and ICOS-direct, Shuttle is canonical and the ICOS-direct row is suppressed.
+- If a site is missing from Shuttle but present in ICOS-direct, the ICOS-direct row is canonical and both AmeriFlux FLUXNET / FLUXNET2015 fallbacks are suppressed.
 - If a site exists only in AmeriFlux FLUXNET, it is shown as `AmeriFlux`.
 - `FLUXNET2015` is used only as a fallback for sites missing from both Shuttle and AmeriFlux FLUXNET.
-- If a site exists in both AmeriFlux FLUXNET and FLUXNET2015, only the AmeriFlux FLUXNET row is kept.
+- If a site exists in both AmeriFlux FLUXNET and FLUXNET2015, only the AmeriFlux FLUXNET row is kept when Shuttle and ICOS-direct are both absent.
+
+The ICOS-direct snapshot is discovered from ICOS Carbon Portal metadata rather than HTML scraping. The ICOS per-row UX remains a direct `licence_accept` link with the existing button text `Accept ICOS license and download`.
 
 AmeriFlux availability is cached in browser localStorage with separate keys for AmeriFlux FLUXNET and FLUXNET2015 availability refreshes, so the app does not call those endpoints on every page load.
 
@@ -93,3 +104,5 @@ AmeriFlux API bulk script behavior:
 
 - Unit tests (Node built-in test runner): `node --test tests/shuttle-explorer.test.js`
 - AmeriFlux smoke check (counts; optional AR-Bal download URL if credentials are set): `python3 scripts/ameriflux_api_smoke.py`
+- Refresh the cached ICOS-direct snapshot locally:
+  `python3 scripts/refresh_icos_direct_fluxnet.py --shuttle-csv assets/shuttle_snapshot.csv --output-csv assets/icos_direct_fluxnet.csv --output-json assets/icos_direct_fluxnet.json`

@@ -3,14 +3,16 @@
 
   var DEFAULT_JSON_URL = "assets/shuttle_snapshot.json";
   var DEFAULT_CSV_URL = "assets/shuttle_snapshot.csv";
+  var DEFAULT_ICOS_DIRECT_JSON_URL = "assets/icos_direct_fluxnet.json";
+  var DEFAULT_ICOS_DIRECT_CSV_URL = "assets/icos_direct_fluxnet.csv";
   var AMERIFLUX_SITE_INFO_URL = "assets/ameriflux_site_info.csv";
   var FLUXNET2015_SITE_INFO_URL = "assets/siteinfo_fluxnet2015.csv";
   var DEFAULT_PAGE_SIZE = 10;
   var MAX_PAGE_BUTTONS = 7;
   var SEARCH_DEBOUNCE_MS = 180;
   var STYLE_ID = "shuttle-explorer-inline-styles";
-  var SNAPSHOT_CACHE_SCHEMA_VERSION = 3;
-  var SNAPSHOT_CACHE_STORAGE_PREFIX = "shuttle-explorer:snapshot-cache:v3";
+  var SNAPSHOT_CACHE_SCHEMA_VERSION = 4;
+  var SNAPSHOT_CACHE_STORAGE_PREFIX = "shuttle-explorer:snapshot-cache:v4";
   var AMERIFLUX_FLUXNET_AVAILABILITY_URL = "https://amfcdn.lbl.gov/api/v2/data_availability/AmeriFlux/FLUXNET/CCBY4.0";
   var FLUXNET2015_AVAILABILITY_URL = "https://amfcdn.lbl.gov/api/v2/data_availability/FLUXNET/FLUXNET2015/CCBY4.0";
   var AMERIFLUX_V2_DOWNLOAD_URL = "https://amfcdn.lbl.gov/api/v2/data_download";
@@ -25,10 +27,18 @@
   var AMERIFLUX_BULK_FALLBACK_USER_EMAIL = "trevorkeenan@berkeley.edu";
   var AMERIFLUX_BULK_IDENTITY_STORAGE_KEY = "shuttle-explorer:ameriflux-bulk-identity:v1";
   var AMERIFLUX_TRUSTED_RUNTIME_FLAG = "amerifluxTrustedRuntime";
+  var ICOS_DIRECT_SOURCE_ONLY = "ICOS";
   var AMERIFLUX_SOURCE_ONLY = "AmeriFlux";
   var FLUXNET2015_SOURCE_ONLY = "FLUXNET2015";
   var AMERIFLUX_SHUTTLE = "AmeriFlux-shuttle";
   var SHUTTLE_SOURCE = "Shuttle";
+  var SHUTTLE_SOURCE_ORIGIN = "shuttle";
+  var ICOS_DIRECT_SOURCE_ORIGIN = "icos_direct";
+  var AMERIFLUX_API_SOURCE_ORIGIN = "ameriflux_api";
+  var SHUTTLE_SOURCE_PRIORITY = 400;
+  var ICOS_DIRECT_SOURCE_PRIORITY = 300;
+  var AMERIFLUX_SOURCE_PRIORITY = 200;
+  var FLUXNET2015_SOURCE_PRIORITY = 100;
   var AMERIFLUX_FLUXNET_PRODUCT = "FLUXNET";
   var FLUXNET2015_PRODUCT = "FLUXNET2015";
   var AMERIFLUX_DATA_HUB = "AmeriFlux";
@@ -546,6 +556,47 @@
     return hub === "icos" || network.indexOf("icos") !== -1 || /data\.icos-cp\.eu\/licence_accept/.test(url);
   }
 
+  function resolveSourceOrigin(row) {
+    var explicit = String(row && row.source_origin || "").trim();
+    if (explicit) {
+      return explicit;
+    }
+    if (String(row && row.download_mode || "").trim() === "ameriflux_api") {
+      return AMERIFLUX_API_SOURCE_ORIGIN;
+    }
+    if (String(row && row.source_label || "").trim() === ICOS_DIRECT_SOURCE_ONLY) {
+      return ICOS_DIRECT_SOURCE_ORIGIN;
+    }
+    return SHUTTLE_SOURCE_ORIGIN;
+  }
+
+  function resolveSourcePriority(row) {
+    var explicit = parseIntOrNull(row && row.source_priority);
+    var sourceLabel;
+    var dataProduct;
+    var sourceOrigin;
+    if (explicit != null) {
+      return explicit;
+    }
+    sourceLabel = String(row && row.source_label || "").trim();
+    dataProduct = String(row && row.api_data_product || "").trim().toUpperCase();
+    sourceOrigin = resolveSourceOrigin(row);
+    if (sourceOrigin === ICOS_DIRECT_SOURCE_ORIGIN || sourceLabel === ICOS_DIRECT_SOURCE_ONLY) {
+      return ICOS_DIRECT_SOURCE_PRIORITY;
+    }
+    if (dataProduct === FLUXNET2015_PRODUCT || sourceLabel === FLUXNET2015_SOURCE_ONLY) {
+      return FLUXNET2015_SOURCE_PRIORITY;
+    }
+    if (sourceOrigin === AMERIFLUX_API_SOURCE_ORIGIN || sourceLabel === AMERIFLUX_SOURCE_ONLY) {
+      return AMERIFLUX_SOURCE_PRIORITY;
+    }
+    return SHUTTLE_SOURCE_PRIORITY;
+  }
+
+  function isShuttleCatalogRow(row) {
+    return resolveSourceOrigin(row) === SHUTTLE_SOURCE_ORIGIN && String(row && row.download_mode || "").trim() !== "ameriflux_api";
+  }
+
   function yearRangeLabel(firstYear, lastYear) {
     if (firstYear && lastYear) {
       return String(firstYear) + "-" + String(lastYear);
@@ -592,6 +643,8 @@
     row.years = yearRangeLabel(row.first_year, row.last_year);
     row.length_years = calculateCoverageLength(row.first_year, row.last_year);
     normalizeNetworkDisplay(row);
+    row.source_origin = resolveSourceOrigin(row);
+    row.source_priority = resolveSourcePriority(row);
     row.source_filter = sourceFilterValue(row);
     row.is_icos = isIcosRow(row);
     row.has_coordinates = parseCoordinate(row.latitude, -90, 90) != null &&
@@ -1279,24 +1332,36 @@
       download_mode: "ameriflux_api",
       source_label: sourceLabel,
       source_reason: sourceReason,
+      source_origin: AMERIFLUX_API_SOURCE_ORIGIN,
       api_data_product: dataProduct,
       publish_years: Array.isArray(site && site.publish_years) ? site.publish_years.slice() : []
     };
     return finalizeRowComputedState(row);
   }
 
-  function mergeCatalogRows(shuttleRows, ameriFluxSites, fluxnet2015Sites) {
+  function mergeCatalogRows(shuttleRows, icosDirectRows, ameriFluxSites, fluxnet2015Sites) {
+    if (arguments.length < 4) {
+      fluxnet2015Sites = ameriFluxSites;
+      ameriFluxSites = icosDirectRows;
+      icosDirectRows = [];
+    }
     var mergedRows = (Array.isArray(shuttleRows) ? shuttleRows : []).map(function (row) {
+      return Object.assign({}, row);
+    });
+    var icosSites = (Array.isArray(icosDirectRows) ? icosDirectRows : []).map(function (row) {
       return Object.assign({}, row);
     });
     var ameriSites = Array.isArray(ameriFluxSites) ? ameriFluxSites : [];
     var fluxnet2015 = Array.isArray(fluxnet2015Sites) ? fluxnet2015Sites : [];
     var shuttleBySite = {};
     var canonicalSiteIds = {};
+    var icosSuppressedByShuttle = 0;
+    var icosDirectOnlySites = 0;
     var overlapSites = 0;
     var ameriOnlySites = 0;
     var fluxnet2015OnlySites = 0;
 
+    // Keep precedence centralized here: Shuttle > ICOS-direct > AmeriFlux FLUXNET > FLUXNET2015.
     mergedRows.forEach(function (row) {
       var siteId = String(row && row.site_id || "").trim();
       if (!siteId) {
@@ -1314,9 +1379,50 @@
       if (!row.source_reason) {
         row.source_reason = "";
       }
+      if (!row.source_origin) {
+        row.source_origin = SHUTTLE_SOURCE_ORIGIN;
+      }
+      row.source_priority = resolveSourcePriority(row);
       row.source_filter = sourceFilterValue(row);
       canonicalSiteIds[siteId] = true;
       shuttleBySite[siteId].push(row);
+    });
+
+    icosSites.forEach(function (row) {
+      var siteId = String(row && row.site_id || "").trim();
+      if (!siteId) {
+        return;
+      }
+      if (shuttleBySite[siteId] && shuttleBySite[siteId].length) {
+        icosSuppressedByShuttle += 1;
+        return;
+      }
+      if (canonicalSiteIds[siteId]) {
+        return;
+      }
+      if (!row.data_hub) {
+        row.data_hub = ICOS_DIRECT_SOURCE_ONLY;
+      }
+      if (!row.download_mode) {
+        row.download_mode = "direct";
+      }
+      if (!row.download_link && row.direct_download_url) {
+        row.download_link = row.direct_download_url;
+      }
+      if (!row.source_label) {
+        row.source_label = ICOS_DIRECT_SOURCE_ONLY;
+      }
+      if (!row.source_reason) {
+        row.source_reason = "Available directly from the ICOS Carbon Portal FLUXNET archive.";
+      }
+      if (!row.source_origin) {
+        row.source_origin = ICOS_DIRECT_SOURCE_ORIGIN;
+      }
+      row.source_priority = resolveSourcePriority(row);
+      row.source_filter = sourceFilterValue(row);
+      canonicalSiteIds[siteId] = true;
+      icosDirectOnlySites += 1;
+      mergedRows.push(row);
     });
 
     ameriSites.forEach(function (site) {
@@ -1332,6 +1438,9 @@
           row.source_reason = "Available in both Shuttle and AmeriFlux; Shuttle is preferred when both exist.";
           row.source_filter = sourceFilterValue(row);
         });
+        return;
+      }
+      if (canonicalSiteIds[siteId]) {
         return;
       }
       ameriOnlySites += 1;
@@ -1368,6 +1477,9 @@
 
     return {
       rows: mergedRows,
+      icosDirectTotalSites: icosSites.length,
+      icosDirectSuppressedByShuttle: icosSuppressedByShuttle,
+      icosDirectOnlySites: icosDirectOnlySites,
       amerifluxTotalSites: ameriSites.length,
       amerifluxSitesWithYears: ameriSites.length,
       amerifluxOverlapSites: overlapSites,
@@ -1379,7 +1491,7 @@
   }
 
   function mergeShuttleAndAmeriFluxRows(shuttleRows, ameriFluxSites) {
-    return mergeCatalogRows(shuttleRows, ameriFluxSites, []);
+    return mergeCatalogRows(shuttleRows, [], ameriFluxSites, []);
   }
 
   function parseCsv(text) {
@@ -1750,9 +1862,21 @@
     var country = deriveCountry(siteId, raw.country || raw.country_code || "");
     var firstYear = parseIntOrNull(raw.first_year || raw.year_start || "");
     var lastYear = parseIntOrNull(raw.last_year || raw.year_end || "");
-    var downloadLink = String(raw.download_link || raw.url || "").trim();
+    var directDownloadUrl = String(raw.direct_download_url || raw.download_link || raw.url || "").trim();
+    var downloadLink = directDownloadUrl;
     var latitude = extractRawLatitude(raw);
     var longitude = extractRawLongitude(raw);
+    var downloadMode = String(raw.download_mode || "").trim() || "direct";
+    var sourceLabel = String(raw.source_label || raw.source || "").trim();
+    var sourceReason = String(raw.source_reason || "").trim();
+    var apiDataProduct = String(raw.api_data_product || "").trim();
+    var sourceOrigin = String(raw.source_origin || raw.catalog_source || "").trim() || SHUTTLE_SOURCE_ORIGIN;
+    var sourcePriority = parseIntOrNull(raw.source_priority);
+    var objectId = String(raw.object_id || "").trim();
+    var fileName = String(raw.file_name || raw.filename || "").trim();
+    var metadataUrl = String(raw.metadata_url || "").trim();
+    var accessUrl = String(raw.access_url || "").trim();
+    var citation = String(raw.citation || "").trim();
 
     if (!siteId || !hub || !downloadLink) {
       return null;
@@ -1777,10 +1901,18 @@
       latitude: latitude,
       longitude: longitude,
       download_link: downloadLink,
-      download_mode: "direct",
-      source_label: "",
-      source_reason: "",
-      api_data_product: ""
+      download_mode: downloadMode,
+      source_label: sourceLabel,
+      source_reason: sourceReason,
+      source_origin: sourceOrigin,
+      source_priority: sourcePriority,
+      api_data_product: apiDataProduct,
+      object_id: objectId,
+      file_name: fileName,
+      direct_download_url: directDownloadUrl,
+      metadata_url: metadataUrl,
+      access_url: accessUrl,
+      citation: citation
     };
     return finalizeRowComputedState(row);
   }
@@ -2223,6 +2355,9 @@
   }
 
   function sourceBadgeClass(sourceLabel) {
+    if (sourceLabel === ICOS_DIRECT_SOURCE_ONLY) {
+      return "shuttle-explorer__source-badge--icos";
+    }
     if (sourceLabel === AMERIFLUX_SOURCE_ONLY) {
       return "shuttle-explorer__source-badge--ameriflux";
     }
@@ -2297,6 +2432,7 @@
       ".shuttle-explorer__table th,.shuttle-explorer__table td{padding:8px 10px;border-bottom:1px solid #edf1f5;vertical-align:top;text-align:left;}",
       ".shuttle-explorer__table thead th{position:sticky;top:0;background:#f8fafc;z-index:1;}",
       ".shuttle-explorer__source-badge{display:inline-flex;align-items:center;padding:2px 8px;border-radius:999px;font-size:.86em;font-weight:600;line-height:1.25;}",
+      ".shuttle-explorer__source-badge--icos{background:#eef7f8;border:1px solid #b7d9dc;color:#245761;}",
       ".shuttle-explorer__source-badge--ameriflux{background:#edf7f0;border:1px solid #b6dcc2;color:#1f6c3f;}",
       ".shuttle-explorer__source-badge--fluxnet2015{background:#fff4e5;border:1px solid #ebc47d;color:#8a5600;}",
       ".shuttle-explorer__source-badge--ameriflux-shuttle{background:#eef3fa;border:1px solid #b8c9e4;color:#2a4f7a;}",
@@ -2330,7 +2466,7 @@
     root.innerHTML = [
       "<div class=\"shuttle-explorer__header\">",
       "  <h2>FLUXNET Data Explorer</h2>",
-      "  <p class=\"shuttle-explorer__muted\">Explore and download a regularly refreshed snapshot of the official FLUXNET database (last updated: <span data-role=\"widget-last-updated-inline\">unavailable</span>), with observations from the various regional networks fully processed to the FLUXNET standard through the OneFlux pipeline. Search by site ID or site name, then open hub-hosted download links directly from the table. This explorer supplements sites available through the FLUXNET Shuttle with additional FLUXNET sites that are hosted elsewhere (e.g., on AmeriFlux.lbl.gov), to provide the maximum amount of FLUXNET data possible.</p>",
+      "  <p class=\"shuttle-explorer__muted\">Explore and download a regularly refreshed snapshot of the official FLUXNET database (last updated: <span data-role=\"widget-last-updated-inline\">unavailable</span>), with observations from the various regional networks fully processed to the FLUXNET standard through the OneFlux pipeline. Search by site ID or site name, then open hub-hosted download links directly from the table. This explorer supplements sites available through the FLUXNET Shuttle with additional FLUXNET sites that are hosted elsewhere (for example via direct ICOS Carbon Portal discovery and AmeriFlux availability APIs), to provide the maximum amount of FLUXNET data possible.</p>",
       "  <p class=\"shuttle-explorer__muted\">Data are provided by site teams from around the world, processed by one of three processing hubs (AmeriFlux (<a href=\"https://ameriflux.lbl.gov/\" target=\"_blank\" rel=\"noopener\">https://ameriflux.lbl.gov/</a>), ICOS (<a href=\"https://www.icos-etc.eu/icos/\" target=\"_blank\" rel=\"noopener\">https://www.icos-etc.eu/icos/</a>) or TERN (<a href=\"https://www.tern.org.au/\" target=\"_blank\" rel=\"noopener\">https://www.tern.org.au/</a>), and served via the FLUXNET Shuttle (<a href=\"https://data.fluxnet.org/\" target=\"_blank\" rel=\"noopener\">https://data.fluxnet.org/</a>).</p>",
       "</div>",
       "<p class=\"shuttle-explorer__status is-loading\" data-role=\"status\" role=\"status\" aria-live=\"polite\">Loading snapshot…</p>",
@@ -2401,7 +2537,7 @@
       "      <h4 id=\"ameriflux-bulk-source-heading\">Bulk download for site data available elsewhere</h4>",
       "      <p class=\"shuttle-explorer__tiny\" data-role=\"ameriflux-selection-count\">0 sites available elsewhere selected</p>",
       "    </div>",
-      "    <p class=\"shuttle-explorer__tiny\">Applies to sites that are not available via the Shuttle but are available elsewhere (e.g., via regional network hubs). This includes AmeriFlux API-backed AmeriFlux FLUXNET and FLUXNET2015 sites.</p>",
+      "    <p class=\"shuttle-explorer__tiny\">Applies to sites that are not available via the Shuttle but are available elsewhere (for example via direct ICOS Carbon Portal discovery or AmeriFlux APIs). This includes ICOS-direct rows, AmeriFlux FLUXNET rows, and FLUXNET2015 fallback rows.</p>",
       "    <p class=\"shuttle-explorer__tiny\">Optional: enter your own AmeriFlux username and email. If left blank, the generated script will use default values.</p>",
       "    <div class=\"shuttle-explorer__bulk-identity-grid\">",
       "      <div class=\"shuttle-explorer__field\">",
@@ -2481,11 +2617,14 @@
     this.root = root;
     this.jsonUrl = root.getAttribute("data-json-src") || DEFAULT_JSON_URL;
     this.csvUrl = root.getAttribute("data-csv-src") || DEFAULT_CSV_URL;
+    this.icosDirectJsonUrl = root.getAttribute("data-icos-direct-json-src") || DEFAULT_ICOS_DIRECT_JSON_URL;
+    this.icosDirectCsvUrl = root.getAttribute("data-icos-direct-csv-src") || DEFAULT_ICOS_DIRECT_CSV_URL;
     this.ameriFluxSiteInfoUrl = root.getAttribute("data-ameriflux-site-info-src") || AMERIFLUX_SITE_INFO_URL;
     this.fluxnet2015SiteInfoUrl = root.getAttribute("data-fluxnet2015-site-info-src") || FLUXNET2015_SITE_INFO_URL;
     this.pageSize = Math.max(1, parseInt(root.getAttribute("data-page-size") || String(DEFAULT_PAGE_SIZE), 10) || DEFAULT_PAGE_SIZE);
     var ameriIdentity = resolveAmeriFluxIdentityFromRoot(root);
     this.shuttleSource = new ShuttleSource(this.jsonUrl, this.csvUrl);
+    this.icosDirectSource = new ShuttleSource(this.icosDirectJsonUrl, this.icosDirectCsvUrl);
     this.ameriFluxSource = new AmeriFluxSource({
       availabilityUrl: AMERIFLUX_FLUXNET_AVAILABILITY_URL,
       downloadUrl: AMERIFLUX_V2_DOWNLOAD_URL,
@@ -3491,6 +3630,10 @@
     return partitionRowsByBulkSource(rows).shuttleRows;
   };
 
+  Explorer.prototype.getShuttleCliRows = function (rows) {
+    return (rows || []).filter(isShuttleCatalogRow);
+  };
+
   Explorer.prototype.getAmeriFluxRows = function (rows) {
     return partitionRowsByBulkSource(rows).ameriFluxRows;
   };
@@ -3942,14 +4085,14 @@
   };
 
   Explorer.prototype.buildShuttleCommandText = function (rows) {
-    var shuttleRows = this.getShuttleRows(rows);
+    var shuttleRows = this.getShuttleCliRows(rows);
     var duplicateSiteIds = this.getDuplicateSelectedSiteIds(shuttleRows);
     var skipped = (rows || []).length - shuttleRows.length;
     if (!shuttleRows.length) {
       return [
-        "# No Shuttle rows are selected.",
-        "# Otherwise-available rows require the AmeriFlux API bulk shell script.",
-        "# Use the generated download_ameriflux_selected.sh output for those sites."
+        "# No Shuttle snapshot rows are selected.",
+        "# ICOS-direct rows are available through direct links / download_shuttle_selected.sh,",
+        "# but they are not present in shuttle_snapshot.csv for Shuttle CLI site-id downloads."
       ].join("\n");
     }
     var lines = [
@@ -4059,9 +4202,9 @@
     if (!rows) {
       return;
     }
-    var shuttleRows = this.getShuttleRows(rows);
+    var shuttleRows = this.getShuttleCliRows(rows);
     if (!shuttleRows.length) {
-      this.setBulkStatus("No Shuttle-backed rows are selected. Use ameriflux_selected_sites.txt for Otherwise-available rows.");
+      this.setBulkStatus("No Shuttle snapshot rows are selected. ICOS-direct rows can still use download_shuttle_selected.sh or per-row direct links.");
       return;
     }
     this.downloadTextFile("shuttle_selected_sites.txt", this.buildSelectedSitesText(shuttleRows), "text/plain;charset=utf-8");
@@ -4208,7 +4351,7 @@
     if (!rows) {
       return;
     }
-    var shuttleRows = this.getShuttleRows(rows);
+    var shuttleRows = this.getShuttleCliRows(rows);
     if (!shuttleRows.length) {
       this.setBulkStatus("No Shuttle-backed rows are selected for a Shuttle CLI command.");
       return;
@@ -4226,6 +4369,7 @@
     var selectionSummary = this.getBulkSelectionSummary(selectedRows);
     var allSelectedDisabled = !selectionSummary.showAllSelectedActions;
     var shuttleDisabled = !selectionSummary.shuttleCount;
+    var shuttleCliDisabled = !this.getShuttleCliRows(selectedRows).length;
     var ameriFluxDisabled = !selectionSummary.ameriFluxCount;
     var wasHidden;
 
@@ -4299,7 +4443,7 @@
     });
 
     if (b.showCliCommand) {
-      b.showCliCommand.disabled = !allowBulkActions || shuttleDisabled;
+      b.showCliCommand.disabled = !allowBulkActions || shuttleCliDisabled;
       b.showCliCommand.textContent = this.state.cliPanelVisible ? "Hide Shuttle CLI command" : "Show Shuttle CLI command";
     }
 
@@ -4309,10 +4453,10 @@
     }
 
     if (b.cliPanel) {
-      b.cliPanel.classList.toggle("shuttle-explorer__hidden", !(allowBulkActions && this.state.cliPanelVisible && !shuttleDisabled));
+      b.cliPanel.classList.toggle("shuttle-explorer__hidden", !(allowBulkActions && this.state.cliPanelVisible && !shuttleCliDisabled));
     }
 
-    if (b.cliCommand && selectionSummary.shuttleCount) {
+    if (b.cliCommand && !shuttleCliDisabled) {
       b.cliCommand.textContent = this.buildShuttleCommandText(selectedRows);
     } else if (b.cliCommand) {
       b.cliCommand.textContent = "";
@@ -4766,7 +4910,7 @@
     this.trackExplorerLoadedOnce();
   };
 
-  Explorer.prototype.buildMergedSnapshotState = function (shuttleResult, ameriResult, fluxnet2015Result, ameriFluxSiteInfoResult, fluxnet2015SiteInfoResult) {
+  Explorer.prototype.buildMergedSnapshotState = function (shuttleResult, icosDirectResult, ameriResult, fluxnet2015Result, ameriFluxSiteInfoResult, fluxnet2015SiteInfoResult) {
     var ameriFluxSiteInfoLookup = ameriFluxSiteInfoResult && ameriFluxSiteInfoResult.lookup ? ameriFluxSiteInfoResult.lookup : {};
     var fluxnet2015SiteInfoLookup = fluxnet2015SiteInfoResult && fluxnet2015SiteInfoResult.lookup ? fluxnet2015SiteInfoResult.lookup : {};
     var enrichedAmeriFluxSites = enrichAmeriFluxSitesWithMetadata(
@@ -4779,16 +4923,18 @@
     );
     var merge = mergeCatalogRows(
       shuttleResult && Array.isArray(shuttleResult.rows) ? shuttleResult.rows : [],
+      icosDirectResult && Array.isArray(icosDirectResult.rows) ? icosDirectResult.rows : [],
       enrichedAmeriFluxSites,
       enrichedFluxnet2015Sites
     );
     return {
       rows: merge.rows,
       droppedRows: shuttleResult && shuttleResult.droppedRows ? shuttleResult.droppedRows : 0,
-      source: "Shuttle + AmeriFlux + FLUXNET2015",
+      source: "Shuttle + ICOS + AmeriFlux + FLUXNET2015",
       sourceUrl: shuttleResult && shuttleResult.sourceUrl ? shuttleResult.sourceUrl : this.jsonUrl,
       warning: combineWarnings(
         shuttleResult && shuttleResult.warning ? shuttleResult.warning : "",
+        icosDirectResult && icosDirectResult.warning ? icosDirectResult.warning : "",
         ameriResult && ameriResult.warning ? ameriResult.warning : "",
         fluxnet2015Result && fluxnet2015Result.warning ? fluxnet2015Result.warning : "",
         ameriFluxSiteInfoResult && ameriFluxSiteInfoResult.warning ? ameriFluxSiteInfoResult.warning : "",
@@ -4831,6 +4977,7 @@
 
     Promise.all([
       this.shuttleSource.list_sites(),
+      this.icosDirectSource.list_sites(),
       this.ameriFluxSource.list_sites(),
       this.fluxnet2015Source.list_sites(),
       loadAmeriFluxSiteInfo(this.ameriFluxSiteInfoUrl),
@@ -4838,13 +4985,15 @@
     ])
       .then(function (results) {
         var shuttleResult = results[0] || {};
-        var ameriResult = results[1] || {};
-        var fluxnet2015Result = results[2] || {};
-        var ameriFluxSiteInfoResult = results[3] || {};
-        var fluxnet2015SiteInfoResult = results[4] || {};
-        var snapshotState = self.buildMergedSnapshotState(shuttleResult, ameriResult, fluxnet2015Result, ameriFluxSiteInfoResult, fluxnet2015SiteInfoResult);
+        var icosDirectResult = results[1] || {};
+        var ameriResult = results[2] || {};
+        var fluxnet2015Result = results[3] || {};
+        var ameriFluxSiteInfoResult = results[4] || {};
+        var fluxnet2015SiteInfoResult = results[5] || {};
+        var snapshotState = self.buildMergedSnapshotState(shuttleResult, icosDirectResult, ameriResult, fluxnet2015Result, ameriFluxSiteInfoResult, fluxnet2015SiteInfoResult);
         var freshnessKey = [
           "shuttle:" + buildSnapshotFreshnessKey(shuttleResult),
+          "icos-direct:" + buildSnapshotFreshnessKey(icosDirectResult),
           String(ameriResult.freshnessKey || "ameriflux:none"),
           String(fluxnet2015Result.freshnessKey || "fluxnet2015:none"),
           "ameriflux-site-info:" + buildSnapshotFreshnessKey(ameriFluxSiteInfoResult),
