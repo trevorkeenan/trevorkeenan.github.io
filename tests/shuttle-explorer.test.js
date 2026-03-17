@@ -241,6 +241,39 @@ test('Bulk tools action helper only activates for multi-site selections', () => 
   assert.equal(hooks.formatSelectedSiteCount(3), '3 selected sites');
 });
 
+test('Table clipboard export includes visible headers, preserves row order, and normalizes cell text', () => {
+  const text = hooks.buildTableClipboardText([
+    {
+      site_id: 'AR-Bal',
+      site_name: 'Balcarce\nBA',
+      country: 'Argentina',
+      data_hub: 'AmeriFlux',
+      vegetation_type: 'Grassland  ',
+      years: '2012-2013',
+      length_years: 2
+    },
+    {
+      site_id: 'US-Blank',
+      site_name: '',
+      country: 'USA',
+      data_hub: 'Shuttle',
+      vegetation_type: null,
+      years: '2010-2010',
+      length_years: 1
+    }
+  ]);
+
+  assert.equal(
+    text,
+    [
+      'Site ID\tSite Name\tCountry\tHub\tVeg Type\tYears\tLength',
+      'AR-Bal\tBalcarce BA\tArgentina\tAmeriFlux\tGrassland\t2012-2013\t2',
+      'US-Blank\t—\tUSA\tShuttle\t—\t2010-2010\t1',
+      ''
+    ].join('\n')
+  );
+});
+
 test('AmeriFlux bulk identity helper prefers explicit input values and otherwise falls back to defaults', () => {
   assert.deepEqual(
     hooks.resolveAmeriFluxBulkIdentity('', ''),

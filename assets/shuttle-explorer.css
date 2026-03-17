@@ -539,6 +539,41 @@
   font-size: 0.9em;
 }
 
+.shuttle-explorer__table-copy-btn {
+  display: inline-flex;
+  max-width: 11rem;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #2f5374;
+  font: inherit;
+  font-weight: 600;
+  line-height: 1.25;
+  text-align: left;
+  cursor: pointer;
+  white-space: normal;
+}
+
+.shuttle-explorer__table-copy-btn:hover,
+.shuttle-explorer__table-copy-btn:focus {
+  text-decoration: underline;
+}
+
+.shuttle-explorer__table-copy-btn:focus {
+  outline: 2px solid #2f5374;
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.shuttle-explorer__table-copy-btn.is-success {
+  color: #25673a;
+}
+
+.shuttle-explorer__table-copy-btn.is-error {
+  color: #a22f2f;
+}
+
 .shuttle-explorer__muted {
   color: #607184;
 }

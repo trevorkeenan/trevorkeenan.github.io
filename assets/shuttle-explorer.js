@@ -37,6 +37,10 @@
   var AMERIFLUX_AVAILABILITY_CACHE_MAX_AGE_MS = 6 * 60 * 60 * 1000;
   var MAX_HTTP_RETRIES = 3;
   var RETRY_BASE_DELAY_MS = 500;
+  var COPY_TABLE_BUTTON_LABEL = "Copy table to clipboard";
+  var COPY_TABLE_SUCCESS_LABEL = "Copied!";
+  var COPY_TABLE_FAILURE_LABEL = "Copy failed";
+  var COPY_TABLE_FEEDBACK_MS = 1800;
   var COUNTRY_CODE_TO_NAME = {
     AR: "Argentina",
     AT: "Austria",
@@ -2174,6 +2178,37 @@
     return count + " selected " + (count === 1 ? "site" : "sites");
   }
 
+  function normalizeClipboardCellText(value) {
+    return String(value == null ? "" : value).replace(/\s+/g, " ").trim();
+  }
+
+  function tableClipboardCellValue(row, columnKey) {
+    var value;
+    if (!row || !columnKey) {
+      return "\u2014";
+    }
+    if (columnKey === "length_years") {
+      return row.length_years == null ? "\u2014" : String(row.length_years);
+    }
+    value = normalizeClipboardCellText(row[columnKey]);
+    return value || "\u2014";
+  }
+
+  function buildTableClipboardText(rows) {
+    var visibleRows = Array.isArray(rows) ? rows : [];
+    var lines = [
+      SORT_COLUMNS.map(function (column) {
+        return normalizeClipboardCellText(column.label);
+      }).join("\t")
+    ];
+    visibleRows.forEach(function (row) {
+      lines.push(SORT_COLUMNS.map(function (column) {
+        return tableClipboardCellValue(row, column.key);
+      }).join("\t"));
+    });
+    return lines.join("\n") + "\n";
+  }
+
   function sourceBadgeClass(sourceLabel) {
     if (sourceLabel === AMERIFLUX_SOURCE_ONLY) {
       return "shuttle-explorer__source-badge--ameriflux";
@@ -2255,6 +2290,11 @@
       ".shuttle-explorer__site-badge{margin-top:4px;}",
       ".shuttle-explorer__sort{display:inline-flex;align-items:center;gap:4px;border:0;background:transparent;padding:0;margin:0;color:inherit;font:inherit;cursor:pointer;}",
       ".shuttle-explorer__sort-indicator{color:#6b7a89;font-size:.9em;}",
+      ".shuttle-explorer__table-copy-btn{display:inline-flex;max-width:11rem;padding:0;margin:0;border:0;background:transparent;color:#2f5374;font:inherit;font-weight:600;line-height:1.25;text-align:left;cursor:pointer;white-space:normal;}",
+      ".shuttle-explorer__table-copy-btn:hover,.shuttle-explorer__table-copy-btn:focus{text-decoration:underline;}",
+      ".shuttle-explorer__table-copy-btn:focus{outline:2px solid #2f5374;outline-offset:2px;border-radius:4px;}",
+      ".shuttle-explorer__table-copy-btn.is-success{color:#25673a;}",
+      ".shuttle-explorer__table-copy-btn.is-error{color:#a22f2f;}",
       ".shuttle-explorer__muted{color:#607184;}",
       ".shuttle-explorer__header p + p{margin-top:12px;}",
       ".shuttle-explorer__pagination{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:10px 0 0;}",
@@ -2349,7 +2389,7 @@
       "      <p class=\"shuttle-explorer__tiny\" data-role=\"ameriflux-selection-count\">0 sites available elsewhere selected</p>",
       "    </div>",
       "    <p class=\"shuttle-explorer__tiny\">Applies to sites that are not available via the Shuttle but are available elsewhere (e.g., via regional network hubs). This includes AmeriFlux API-backed AmeriFlux FLUXNET and FLUXNET2015 sites.</p>",
-      "    <p class=\"shuttle-explorer__tiny\">Optional: enter your own AmeriFlux username and email. If left blank, the generated script will use default contact values.</p>",
+      "    <p class=\"shuttle-explorer__tiny\">Optional: enter your own AmeriFlux username and email. If left blank, the generated script will use default values.</p>",
       "    <div class=\"shuttle-explorer__bulk-identity-grid\">",
       "      <div class=\"shuttle-explorer__field\">",
       "        <label>AmeriFlux username (optional)</label>",
@@ -2802,10 +2842,14 @@
     if (b.theadRow) {
       b.theadRow.addEventListener("click", function (event) {
         var target = event.target;
-        while (target && target !== b.theadRow && !(target.tagName === "BUTTON" && target.hasAttribute("data-sort-key"))) {
+        while (target && target !== b.theadRow && !(target.tagName === "BUTTON" && (target.hasAttribute("data-sort-key") || target.getAttribute("data-role") === "copy-table-button"))) {
           target = target.parentNode;
         }
         if (!target || target === b.theadRow) {
+          return;
+        }
+        if (target.getAttribute("data-role") === "copy-table-button") {
+          self.handleCopyTable();
           return;
         }
         var key = target.getAttribute("data-sort-key");
@@ -2861,6 +2905,7 @@
         self.copyAttribution();
       });
     }
+
   };
 
   Explorer.prototype.setAttributionText = function (text) {
@@ -3312,18 +3357,40 @@
       this.setBulkStatus("Nothing to copy.");
       return;
     }
+    this.copyPlainText(
+      value,
+      function () {
+        self.setBulkStatus(successMessage || "Copied.");
+      },
+      function () {
+        self.setBulkStatus("Copy failed. Try downloading the file instead.");
+      }
+    );
+  };
+
+  Explorer.prototype.copyPlainText = function (text, onSuccess, onFailure) {
+    var value = String(text || "");
+    var self = this;
+    if (!value) {
+      if (typeof onFailure === "function") {
+        onFailure();
+      }
+      return;
+    }
     if (navigator.clipboard && navigator.clipboard.writeText) {
       navigator.clipboard.writeText(value).then(function () {
-        self.setBulkStatus(successMessage || "Copied.");
+        if (typeof onSuccess === "function") {
+          onSuccess();
+        }
       }).catch(function () {
-        self.fallbackCopyText(value, successMessage);
+        self.fallbackCopyText(value, onSuccess, onFailure);
       });
       return;
     }
-    this.fallbackCopyText(value, successMessage);
+    this.fallbackCopyText(value, onSuccess, onFailure);
   };
 
-  Explorer.prototype.fallbackCopyText = function (text, successMessage) {
+  Explorer.prototype.fallbackCopyText = function (text, onSuccess, onFailure) {
     var ta = document.createElement("textarea");
     ta.value = String(text || "");
     ta.style.position = "fixed";
@@ -3333,11 +3400,67 @@
     ta.select();
     try {
       document.execCommand("copy");
-      this.setBulkStatus(successMessage || "Copied.");
+      if (typeof onSuccess === "function") {
+        onSuccess();
+      }
     } catch (err) {
-      this.setBulkStatus("Copy failed. Try downloading the file instead.");
+      if (typeof onFailure === "function") {
+        onFailure(err);
+      }
     }
     document.body.removeChild(ta);
+  };
+
+  Explorer.prototype.getTableCopyButton = function () {
+    return bySelector(this.bindings.theadRow, "[data-role='copy-table-button']");
+  };
+
+  Explorer.prototype.resetTableCopyButtonLabel = function () {
+    var button = this.getTableCopyButton();
+    if (!button) {
+      return;
+    }
+    button.textContent = COPY_TABLE_BUTTON_LABEL;
+    button.setAttribute("aria-label", COPY_TABLE_BUTTON_LABEL);
+    button.classList.remove("is-success");
+    button.classList.remove("is-error");
+    if (this._tableCopyFeedbackTimer) {
+      window.clearTimeout(this._tableCopyFeedbackTimer);
+      this._tableCopyFeedbackTimer = null;
+    }
+  };
+
+  Explorer.prototype.setTableCopyFeedback = function (label, stateClass) {
+    var self = this;
+    var button = this.getTableCopyButton();
+    if (!button) {
+      return;
+    }
+    if (this._tableCopyFeedbackTimer) {
+      window.clearTimeout(this._tableCopyFeedbackTimer);
+      this._tableCopyFeedbackTimer = null;
+    }
+    button.textContent = label;
+    button.setAttribute("aria-label", label);
+    button.classList.toggle("is-success", stateClass === "success");
+    button.classList.toggle("is-error", stateClass === "error");
+    this._tableCopyFeedbackTimer = window.setTimeout(function () {
+      self.resetTableCopyButtonLabel();
+    }, COPY_TABLE_FEEDBACK_MS);
+  };
+
+  Explorer.prototype.handleCopyTable = function () {
+    var self = this;
+    var text = buildTableClipboardText(this.getDisplayedRows());
+    this.copyPlainText(
+      text,
+      function () {
+        self.setTableCopyFeedback(COPY_TABLE_SUCCESS_LABEL, "success");
+      },
+      function () {
+        self.setTableCopyFeedback(COPY_TABLE_FAILURE_LABEL, "error");
+      }
+    );
   };
 
   Explorer.prototype.getSelectedRowsOrWarn = function () {
@@ -4203,7 +4326,13 @@
 
     var downloadTh = document.createElement("th");
     downloadTh.scope = "col";
-    downloadTh.textContent = "Download";
+    var copyButton = document.createElement("button");
+    copyButton.type = "button";
+    copyButton.className = "shuttle-explorer__table-copy-btn";
+    copyButton.setAttribute("data-role", "copy-table-button");
+    copyButton.setAttribute("aria-label", COPY_TABLE_BUTTON_LABEL);
+    copyButton.textContent = COPY_TABLE_BUTTON_LABEL;
+    downloadTh.appendChild(copyButton);
     row.appendChild(downloadTh);
 
     row.addEventListener("mouseover", function () {
@@ -4389,12 +4518,16 @@
     }
   };
 
+  Explorer.prototype.getDisplayedRows = function () {
+    return Array.isArray(this.state.filteredRows) ? this.state.filteredRows : [];
+  };
+
   Explorer.prototype.renderRows = function () {
     var tbody = this.bindings.tbody;
     if (!tbody) {
       return;
     }
-    var rows = this.state.filteredRows;
+    var rows = this.getDisplayedRows();
     var pageRows = rows;
     var selectedKeys = this.state.selectedKeys || {};
     var canAmeriFluxDownload = this.ameriFluxSource.canDownload();
@@ -4793,6 +4926,7 @@
     buildAmeriFluxSelectedSitesText: buildAmeriFluxSelectedSitesText,
     buildAmeriFluxBulkScriptText: buildAmeriFluxBulkScriptText,
     buildDownloadAllSelectedScriptText: buildDownloadAllSelectedScriptText,
+    buildTableClipboardText: buildTableClipboardText,
     partitionRowsByBulkSource: partitionRowsByBulkSource,
     summarizeBulkSelection: summarizeBulkSelection,
     uniqueSourceFilterValues: uniqueSourceFilterValues,
