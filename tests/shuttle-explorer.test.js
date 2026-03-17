@@ -241,6 +241,27 @@ test('Bulk tools action helper only activates for multi-site selections', () => 
   assert.equal(hooks.formatSelectedSiteCount(3), '3 selected sites');
 });
 
+test('AmeriFlux bulk identity helper prefers explicit input values and otherwise falls back to defaults', () => {
+  assert.deepEqual(
+    hooks.resolveAmeriFluxBulkIdentity('', ''),
+    {
+      enteredUserId: '',
+      enteredUserEmail: '',
+      user_id: 'trevorkeenan',
+      user_email: 'trevorkeenan@berkeley.edu'
+    }
+  );
+  assert.deepEqual(
+    hooks.resolveAmeriFluxBulkIdentity(' custom-user ', ' custom@example.org '),
+    {
+      enteredUserId: 'custom-user',
+      enteredUserEmail: 'custom@example.org',
+      user_id: 'custom-user',
+      user_email: 'custom@example.org'
+    }
+  );
+});
+
 test('Snapshot updated date helper prefers committed metadata fields and falls back cleanly', () => {
   assert.equal(
     hooks.extractSnapshotUpdatedDate({
@@ -538,11 +559,16 @@ test('AmeriFlux bulk script generator supports mixed FLUXNET and FLUXNET2015 pro
   const script = hooks.buildAmeriFluxBulkScriptText([
     { site_id: 'AR-Bal', data_product: 'FLUXNET', source_label: 'AmeriFlux' },
     { site_id: 'CL-Old', data_product: 'FLUXNET2015', source_label: 'FLUXNET2015' }
-  ]);
+  ], {
+    defaultUserId: 'custom-user',
+    defaultUserEmail: 'custom@example.org'
+  });
 
   assert.equal(script.includes('# site_id\tdata_product\tsource_label'), true);
   assert.equal(script.includes('AR-Bal\tFLUXNET\tAmeriFlux'), true);
   assert.equal(script.includes('CL-Old\tFLUXNET2015\tFLUXNET2015'), true);
+  assert.equal(script.includes('USER_ID="${AMERIFLUX_USER_ID:-custom-user}"'), true);
+  assert.equal(script.includes('USER_EMAIL="${AMERIFLUX_USER_EMAIL:-custom@example.org}"'), true);
   assert.equal(script.includes('V2_DOWNLOAD_URL="${AMERIFLUX_V2_DOWNLOAD_URL:-https://amfcdn.lbl.gov/api/v2/data_download}"'), true);
   assert.equal(script.includes('V1_DOWNLOAD_URL="${AMERIFLUX_V1_DOWNLOAD_URL:-https://amfcdn.lbl.gov/api/v1/data_download}"'), true);
   assert.equal(script.includes('if [ "$DATA_PRODUCT" = "FLUXNET2015" ]; then'), true);
@@ -555,6 +581,15 @@ test('AmeriFlux bulk script generator supports mixed FLUXNET and FLUXNET2015 pro
   assert.equal(script.includes('while IFS=$\'\\t\' read -r SITE_ID DATA_PRODUCT SOURCE_LABEL; do'), true);
   assert.equal(script.includes('clean_url="${url%%\\?*}"'), true);
   assert.equal(script.includes('filename="$(basename "$clean_url")"'), true);
+});
+
+test('AmeriFlux bulk script generator uses internal fallback contact values when no input is provided', () => {
+  const script = hooks.buildAmeriFluxBulkScriptText([
+    { site_id: 'AR-Bal', data_product: 'FLUXNET', source_label: 'AmeriFlux' }
+  ]);
+
+  assert.equal(script.includes('USER_ID="${AMERIFLUX_USER_ID:-trevorkeenan}"'), true);
+  assert.equal(script.includes('USER_EMAIL="${AMERIFLUX_USER_EMAIL:-trevorkeenan@berkeley.edu}"'), true);
 });
 
 test('Download-all wrapper script delegates to both child scripts when both source partitions exist', () => {
@@ -605,6 +640,8 @@ test('Browser-facing explorer markup does not include hardcoded AmeriFlux identi
   assert.equal(explorerHtml.includes('data-ameriflux-user-id='), false);
   assert.equal(explorerHtml.includes('data-ameriflux-user-email='), false);
   assert.equal(dataLandingHtml.includes('trevorkeenan@berkeley.edu'), false);
+  assert.equal(explorerJs.includes('value="trevorkeenan"'), false);
+  assert.equal(explorerJs.includes('value="trevorkeenan@berkeley.edu"'), false);
 });
 
 test('Explorer page and runtime do not hardcode stale last-updated dates', () => {

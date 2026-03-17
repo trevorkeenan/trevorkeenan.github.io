@@ -21,6 +21,9 @@
   var AMERIFLUX_V1_INTENDED_USE = "QED Lab FLUXNET Data Explorer";
   var AMERIFLUX_TEMPLATE_USER_ID = "YOUR_AMERIFLUX_USERNAME";
   var AMERIFLUX_TEMPLATE_USER_EMAIL = "YOUR_EMAIL";
+  var AMERIFLUX_BULK_FALLBACK_USER_ID = "trevorkeenan";
+  var AMERIFLUX_BULK_FALLBACK_USER_EMAIL = "trevorkeenan@berkeley.edu";
+  var AMERIFLUX_BULK_IDENTITY_STORAGE_KEY = "shuttle-explorer:ameriflux-bulk-identity:v1";
   var AMERIFLUX_TRUSTED_RUNTIME_FLAG = "amerifluxTrustedRuntime";
   var AMERIFLUX_SOURCE_ONLY = "AmeriFlux";
   var FLUXNET2015_SOURCE_ONLY = "FLUXNET2015";
@@ -279,6 +282,62 @@
       return window.localStorage || null;
     } catch (e) {
       return null;
+    }
+  }
+
+  function normalizeOptionalInputValue(value) {
+    return String(value == null ? "" : value).trim();
+  }
+
+  function resolveAmeriFluxBulkIdentity(userIdInput, userEmailInput) {
+    var enteredUserId = normalizeOptionalInputValue(userIdInput);
+    var enteredUserEmail = normalizeOptionalInputValue(userEmailInput);
+    return {
+      enteredUserId: enteredUserId,
+      enteredUserEmail: enteredUserEmail,
+      user_id: enteredUserId || AMERIFLUX_BULK_FALLBACK_USER_ID,
+      user_email: enteredUserEmail || AMERIFLUX_BULK_FALLBACK_USER_EMAIL
+    };
+  }
+
+  function readAmeriFluxBulkIdentityPreferences() {
+    var storage = getLocalStorageSafe();
+    var stored;
+    if (!storage) {
+      return { userId: "", userEmail: "" };
+    }
+    try {
+      stored = safeJsonParse(storage.getItem(AMERIFLUX_BULK_IDENTITY_STORAGE_KEY));
+    } catch (e) {
+      stored = null;
+    }
+    if (!stored || typeof stored !== "object" || Array.isArray(stored)) {
+      return { userId: "", userEmail: "" };
+    }
+    return {
+      userId: normalizeOptionalInputValue(stored.userId),
+      userEmail: normalizeOptionalInputValue(stored.userEmail)
+    };
+  }
+
+  function writeAmeriFluxBulkIdentityPreferences(userIdInput, userEmailInput) {
+    var storage = getLocalStorageSafe();
+    var userId = normalizeOptionalInputValue(userIdInput);
+    var userEmail = normalizeOptionalInputValue(userEmailInput);
+    if (!storage) {
+      return;
+    }
+    try {
+      if (!userId && !userEmail) {
+        storage.removeItem(AMERIFLUX_BULK_IDENTITY_STORAGE_KEY);
+        return;
+      }
+      storage.setItem(AMERIFLUX_BULK_IDENTITY_STORAGE_KEY, JSON.stringify({
+        userId: userId,
+        userEmail: userEmail
+      }));
+    } catch (e) {
+      return;
     }
   }
 
@@ -804,8 +863,8 @@
     var opts = options || {};
     var entries = normalizeAmeriFluxBulkEntries(siteEntries);
     var embeddedSites = buildAmeriFluxSelectedSitesText(entries).replace(/\n$/, "");
-    var defaultUserId = shellDoubleQuote(String(opts.defaultUserId || AMERIFLUX_TEMPLATE_USER_ID));
-    var defaultUserEmail = shellDoubleQuote(String(opts.defaultUserEmail || AMERIFLUX_TEMPLATE_USER_EMAIL));
+    var defaultUserId = shellDoubleQuote(String(opts.defaultUserId || AMERIFLUX_BULK_FALLBACK_USER_ID));
+    var defaultUserEmail = shellDoubleQuote(String(opts.defaultUserEmail || AMERIFLUX_BULK_FALLBACK_USER_EMAIL));
     var v2DownloadUrl = shellDoubleQuote(String(opts.v2DownloadUrl || AMERIFLUX_V2_DOWNLOAD_URL));
     var v1DownloadUrl = shellDoubleQuote(String(opts.v1DownloadUrl || AMERIFLUX_V1_DOWNLOAD_URL));
     var variant = shellDoubleQuote(String(opts.variant || AMERIFLUX_DEFAULT_VARIANT));
@@ -2174,6 +2233,7 @@
       ".shuttle-explorer__bulk-header{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin:0 0 8px;}",
       ".shuttle-explorer__bulk-actions{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0 0;}",
       ".shuttle-explorer__bulk-source{margin:10px 0 0;padding:10px;border:1px solid #dce3eb;border-radius:8px;background:#ffffff;}",
+      ".shuttle-explorer__bulk-identity-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:8px 0 0;}",
       ".shuttle-explorer__bulk-source h4{margin:0;font-size:.95em;}",
       ".shuttle-explorer__bulk-guide{margin:10px 0 0;}",
       ".shuttle-explorer__cli-panel{margin:10px 0 0;padding:10px;border:1px solid #dce3eb;border-radius:8px;background:#ffffff;}",
@@ -2207,7 +2267,7 @@
       ".shuttle-explorer__attribution textarea{width:100%;padding:8px;border:1px solid #b7c1ce;border-radius:6px;font:inherit;line-height:1.35;resize:none;overflow:hidden;background:#fdfefe;}",
       ".shuttle-explorer__attribution-row{display:flex;justify-content:space-between;align-items:center;gap:10px;margin:8px 0 0;}",
       ".shuttle-explorer__tiny{font-size:.82em;color:#556779;}",
-      "@media (max-width: 860px){.shuttle-explorer__controls{grid-template-columns:1fr;}.shuttle-explorer__row{flex-direction:column;align-items:flex-start;}}"
+      "@media (max-width: 860px){.shuttle-explorer__controls{grid-template-columns:1fr;}.shuttle-explorer__row{flex-direction:column;align-items:flex-start;}.shuttle-explorer__bulk-identity-grid{grid-template-columns:1fr;}}"
     ].join("");
     document.head.appendChild(style);
   }
@@ -2289,6 +2349,17 @@
       "      <p class=\"shuttle-explorer__tiny\" data-role=\"ameriflux-selection-count\">0 sites available elsewhere selected</p>",
       "    </div>",
       "    <p class=\"shuttle-explorer__tiny\">Applies to sites that are not available via the Shuttle but are available elsewhere (e.g., via regional network hubs). This includes AmeriFlux API-backed AmeriFlux FLUXNET and FLUXNET2015 sites.</p>",
+      "    <p class=\"shuttle-explorer__tiny\">Optional: enter your own AmeriFlux username and email. If left blank, the generated script will use default contact values.</p>",
+      "    <div class=\"shuttle-explorer__bulk-identity-grid\">",
+      "      <div class=\"shuttle-explorer__field\">",
+      "        <label>AmeriFlux username (optional)</label>",
+      "        <input type=\"text\" autocomplete=\"username\" data-role=\"ameriflux-bulk-user-id\" />",
+      "      </div>",
+      "      <div class=\"shuttle-explorer__field\">",
+      "        <label>AmeriFlux email (optional)</label>",
+      "        <input type=\"email\" autocomplete=\"email\" data-role=\"ameriflux-bulk-user-email\" />",
+      "      </div>",
+      "    </div>",
       "    <div class=\"shuttle-explorer__bulk-actions\">",
       "      <button type=\"button\" class=\"shuttle-explorer__btn shuttle-explorer__btn--small\" data-role=\"download-ameriflux-sites-file\">Download ameriflux_selected_sites.txt</button>",
       "      <button type=\"button\" class=\"shuttle-explorer__btn shuttle-explorer__btn--small\" data-role=\"download-ameriflux-script\">Download download_ameriflux_selected.sh</button>",
@@ -2351,6 +2422,7 @@
   }
 
   function Explorer(root) {
+    var savedAmeriFluxBulkIdentity = readAmeriFluxBulkIdentityPreferences();
     this.root = root;
     this.jsonUrl = root.getAttribute("data-json-src") || DEFAULT_JSON_URL;
     this.csvUrl = root.getAttribute("data-csv-src") || DEFAULT_CSV_URL;
@@ -2406,6 +2478,8 @@
       sortKey: "data_hub",
       sortDir: "asc",
       page: 1,
+      ameriFluxBulkUserIdInput: savedAmeriFluxBulkIdentity.userId,
+      ameriFluxBulkUserEmailInput: savedAmeriFluxBulkIdentity.userEmail,
       amerifluxTotalSites: 0,
       amerifluxSitesWithYears: 0,
       amerifluxOverlapSites: 0,
@@ -2417,6 +2491,7 @@
 
     createLayout(root);
     this.bindings = this.getBindings();
+    this.syncAmeriFluxBulkIdentityInputs();
     this.bindEvents();
     this.renderTableHeader();
     this.setAttributionText(buildAttributionText(""));
@@ -2447,6 +2522,8 @@
       shuttleSelectionCount: bySelector(this.root, "[data-role='shuttle-selection-count']"),
       ameriFluxBulkSection: bySelector(this.root, "[data-role='ameriflux-bulk-section']"),
       ameriFluxSelectionCount: bySelector(this.root, "[data-role='ameriflux-selection-count']"),
+      ameriFluxBulkUserId: bySelector(this.root, "[data-role='ameriflux-bulk-user-id']"),
+      ameriFluxBulkUserEmail: bySelector(this.root, "[data-role='ameriflux-bulk-user-email']"),
       selectFiltered: bySelector(this.root, "[data-role='select-filtered']"),
       selectAllSites: bySelector(this.root, "[data-role='select-all-sites']"),
       clearSelection: bySelector(this.root, "[data-role='clear-selection']"),
@@ -2635,6 +2712,23 @@
       });
     }
 
+    function handleAmeriFluxBulkIdentityInput() {
+      self.state.ameriFluxBulkUserIdInput = String(b.ameriFluxBulkUserId && b.ameriFluxBulkUserId.value || "");
+      self.state.ameriFluxBulkUserEmailInput = String(b.ameriFluxBulkUserEmail && b.ameriFluxBulkUserEmail.value || "");
+      writeAmeriFluxBulkIdentityPreferences(self.state.ameriFluxBulkUserIdInput, self.state.ameriFluxBulkUserEmailInput);
+      self.renderBulkPanel();
+    }
+
+    if (b.ameriFluxBulkUserId) {
+      b.ameriFluxBulkUserId.addEventListener("input", handleAmeriFluxBulkIdentityInput);
+      b.ameriFluxBulkUserId.addEventListener("change", handleAmeriFluxBulkIdentityInput);
+    }
+
+    if (b.ameriFluxBulkUserEmail) {
+      b.ameriFluxBulkUserEmail.addEventListener("input", handleAmeriFluxBulkIdentityInput);
+      b.ameriFluxBulkUserEmail.addEventListener("change", handleAmeriFluxBulkIdentityInput);
+    }
+
     if (b.downloadAmeriFluxScript) {
       b.downloadAmeriFluxScript.addEventListener("click", function () {
         self.handleDownloadAmeriFluxScript();
@@ -2775,6 +2869,15 @@
       textarea.value = text;
       textarea.style.height = "auto";
       textarea.style.height = textarea.scrollHeight + "px";
+    }
+  };
+
+  Explorer.prototype.syncAmeriFluxBulkIdentityInputs = function () {
+    if (this.bindings.ameriFluxBulkUserId) {
+      this.bindings.ameriFluxBulkUserId.value = String(this.state.ameriFluxBulkUserIdInput || "");
+    }
+    if (this.bindings.ameriFluxBulkUserEmail) {
+      this.bindings.ameriFluxBulkUserEmail.value = String(this.state.ameriFluxBulkUserEmailInput || "");
     }
   };
 
@@ -3304,14 +3407,19 @@
     return buildAmeriFluxSelectedSitesText(this.getAmeriFluxBulkEntries(rows));
   };
 
+  Explorer.prototype.getAmeriFluxBulkIdentity = function () {
+    return resolveAmeriFluxBulkIdentity(
+      this.state.ameriFluxBulkUserIdInput,
+      this.state.ameriFluxBulkUserEmailInput
+    );
+  };
+
   Explorer.prototype.buildAmeriFluxBulkScript = function (rows) {
     var entries = this.getAmeriFluxBulkEntries(rows);
-    var identity = this.ameriFluxSource.getDownloadIdentity();
-    var defaultUserId = identity.enabled ? identity.user_id : AMERIFLUX_TEMPLATE_USER_ID;
-    var defaultUserEmail = identity.enabled ? identity.user_email : AMERIFLUX_TEMPLATE_USER_EMAIL;
+    var identity = this.getAmeriFluxBulkIdentity();
     return buildAmeriFluxBulkScriptText(entries, {
-      defaultUserId: defaultUserId,
-      defaultUserEmail: defaultUserEmail,
+      defaultUserId: identity.user_id,
+      defaultUserEmail: identity.user_email,
       v2DownloadUrl: AMERIFLUX_V2_DOWNLOAD_URL,
       v1DownloadUrl: AMERIFLUX_V1_DOWNLOAD_URL,
       variant: AMERIFLUX_DEFAULT_VARIANT,
@@ -4671,6 +4779,7 @@
     calculateCoverageLength: calculateCoverageLength,
     shouldEnableBulkToolsActions: shouldEnableBulkToolsActions,
     formatSelectedSiteCount: formatSelectedSiteCount,
+    resolveAmeriFluxBulkIdentity: resolveAmeriFluxBulkIdentity,
     normalizeSnapshotUpdatedDate: normalizeSnapshotUpdatedDate,
     extractSnapshotUpdatedDate: extractSnapshotUpdatedDate,
     snapshotUpdatedDateDisplayText: snapshotUpdatedDateDisplayText,

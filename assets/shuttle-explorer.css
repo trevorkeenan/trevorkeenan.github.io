@@ -230,6 +230,13 @@
   margin: 0;
 }
 
+.shuttle-explorer__bulk-identity-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin: 8px 0 0 0;
+}
+
 .shuttle-explorer__bulk-warning {
   margin: 0 0 8px 0;
   padding: 8px 10px;
@@ -686,6 +693,10 @@
   .shuttle-explorer__bulk-actions .shuttle-explorer__btn {
     flex: 1 1 auto;
     text-align: center;
+  }
+
+  .shuttle-explorer__bulk-identity-grid {
+    grid-template-columns: 1fr;
   }
 
   .shuttle-explorer__bulk-guide {
