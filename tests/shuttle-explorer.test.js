@@ -633,9 +633,9 @@ test('Download-all wrapper script delegates to both child scripts when both sour
 
   assert.equal(script.includes('# Shuttle is preferred for overlap sites (AmeriFlux-shuttle).'), true);
   assert.equal(script.includes('# AmeriFlux API-backed sites (AmeriFlux and FLUXNET2015) are downloaded via the AmeriFlux API.'), true);
-  assert.equal(script.includes('if [ -f "./shuttle_selected_sites.txt" ] && [ -s "./shuttle_selected_sites.txt" ]; then'), true);
+  assert.equal(script.includes('if [ -f "./download_shuttle_selected.sh" ]; then'), true);
   assert.equal(script.includes('bash "./download_shuttle_selected.sh" || {'), true);
-  assert.equal(script.includes('if [ -f "./ameriflux_selected_sites.txt" ] && [ -s "./ameriflux_selected_sites.txt" ]; then'), true);
+  assert.equal(script.includes('if [ -f "./download_ameriflux_selected.sh" ]; then'), true);
   assert.equal(script.includes('bash "./download_ameriflux_selected.sh" || {'), true);
   assert.equal(script.includes('echo "Bulk download complete."'), true);
 });
@@ -660,6 +660,34 @@ test('Download-all wrapper script can be generated for AmeriFlux API-only select
   assert.equal(script.includes('echo "No Shuttle-backed selected sites to download."'), true);
   assert.equal(script.includes('bash "./download_shuttle_selected.sh" || {'), false);
   assert.equal(script.includes('bash "./download_ameriflux_selected.sh" || {'), true);
+});
+
+test('Download-all bundle helper returns the wrapper and both child scripts', () => {
+  const files = hooks.buildDownloadAllSelectedFileBundle({
+    wrapperText: 'wrapper-script',
+    ameriFluxText: 'ameriflux-script',
+    shuttleText: 'shuttle-script'
+  });
+
+  assert.deepEqual(
+    files.map((file) => file.filename),
+    [
+      'download_all_selected.sh',
+      'download_ameriflux_selected.sh',
+      'download_shuttle_selected.sh'
+    ]
+  );
+  assert.deepEqual(
+    files.map((file) => file.mimeType),
+    [
+      'text/x-shellscript;charset=utf-8',
+      'text/x-shellscript;charset=utf-8',
+      'text/x-shellscript;charset=utf-8'
+    ]
+  );
+  assert.equal(files[0].text, 'wrapper-script');
+  assert.equal(files[1].text, 'ameriflux-script');
+  assert.equal(files[2].text, 'shuttle-script');
 });
 
 test('Browser-facing explorer markup does not include hardcoded AmeriFlux identity attributes', () => {

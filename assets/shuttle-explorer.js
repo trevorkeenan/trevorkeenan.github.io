@@ -980,9 +980,7 @@
     var opts = options || {};
     var includeShuttle = opts.includeShuttle !== false;
     var includeAmeriFlux = opts.includeAmeriFlux !== false;
-    var shuttleSitesFile = String(opts.shuttleSitesFile || "./shuttle_selected_sites.txt");
     var shuttleScript = String(opts.shuttleScript || "./download_shuttle_selected.sh");
-    var ameriFluxSitesFile = String(opts.ameriFluxSitesFile || "./ameriflux_selected_sites.txt");
     var ameriFluxScript = String(opts.ameriFluxScript || "./download_ameriflux_selected.sh");
     var lines = [
       "#!/usr/bin/env bash",
@@ -1001,18 +999,15 @@
     if (includeShuttle) {
       lines.push(
         "",
-        "if [ -f \"" + shuttleSitesFile + "\" ] && [ -s \"" + shuttleSitesFile + "\" ]; then",
-        "  if [ ! -f \"" + shuttleScript + "\" ]; then",
-        "    echo \"Expected " + shuttleScript + " but it was not found.\" >&2",
-        "    exit 1",
-        "  fi",
+        "if [ -f \"" + shuttleScript + "\" ]; then",
         "  echo \"Running Shuttle bulk download...\"",
         "  bash \"" + shuttleScript + "\" || {",
         "    echo \"Shuttle bulk download failed.\" >&2",
         "    exit 1",
         "  }",
         "else",
-        "  echo \"No Shuttle-backed selected sites to download.\"",
+        "  echo \"Expected " + shuttleScript + " but it was not found.\" >&2",
+        "  exit 1",
         "fi"
       );
     } else {
@@ -1022,18 +1017,15 @@
     if (includeAmeriFlux) {
       lines.push(
         "",
-        "if [ -f \"" + ameriFluxSitesFile + "\" ] && [ -s \"" + ameriFluxSitesFile + "\" ]; then",
-        "  if [ ! -f \"" + ameriFluxScript + "\" ]; then",
-        "    echo \"Expected " + ameriFluxScript + " but it was not found.\" >&2",
-        "    exit 1",
-        "  fi",
+        "if [ -f \"" + ameriFluxScript + "\" ]; then",
         "  echo \"Running AmeriFlux bulk download...\"",
         "  bash \"" + ameriFluxScript + "\" || {",
         "    echo \"AmeriFlux bulk download failed.\" >&2",
         "    exit 1",
         "  }",
         "else",
-        "  echo \"No AmeriFlux API-backed selected sites to download.\"",
+        "  echo \"Expected " + ameriFluxScript + " but it was not found.\" >&2",
+        "  exit 1",
         "fi"
       );
     } else {
@@ -1042,6 +1034,27 @@
 
     lines.push("", "echo \"Bulk download complete.\"");
     return lines.join("\n");
+  }
+
+  function buildDownloadAllSelectedFileBundle(options) {
+    var opts = options || {};
+    return [
+      {
+        filename: "download_all_selected.sh",
+        mimeType: "text/x-shellscript;charset=utf-8",
+        text: String(opts.wrapperText || "")
+      },
+      {
+        filename: "download_ameriflux_selected.sh",
+        mimeType: "text/x-shellscript;charset=utf-8",
+        text: String(opts.ameriFluxText || "")
+      },
+      {
+        filename: "download_shuttle_selected.sh",
+        mimeType: "text/x-shellscript;charset=utf-8",
+        text: String(opts.shuttleText || "")
+      }
+    ];
   }
 
   function delayMs(ms) {
@@ -2360,7 +2373,7 @@
       "  </summary>",
       "  <div class=\"shuttle-explorer__bulk-body\">",
       "  <div class=\"shuttle-explorer__bulk-actions shuttle-explorer__hidden\" data-role=\"all-selected-actions\">",
-      "    <button type=\"button\" class=\"shuttle-explorer__btn shuttle-explorer__btn--small\" data-role=\"download-all-selected-script\">Download all selected script</button>",
+      "    <button type=\"button\" class=\"shuttle-explorer__btn shuttle-explorer__btn--small\" data-role=\"download-all-selected-script\">Download all selected scripts</button>",
       "    <button type=\"button\" class=\"shuttle-explorer__btn shuttle-explorer__btn--small\" data-role=\"copy-all-selected-script\">Copy download all selected script</button>",
       "  </div>",
       "  <section class=\"shuttle-explorer__bulk-source shuttle-explorer__hidden\" data-role=\"shuttle-bulk-section\" aria-labelledby=\"shuttle-bulk-source-heading\">",
@@ -2409,7 +2422,7 @@
       "  <details class=\"shuttle-explorer__bulk-guide\">",
       "    <summary>How to use these bulk tools</summary>",
       "    <ul>",
-      "      <li><strong>download_all_selected.sh</strong>: wrapper script that runs the Shuttle and AmeriFlux API bulk scripts in sequence when their generated scripts and selected-sites files are kept in the same directory.</li>",
+      "      <li><strong>download_all_selected.sh</strong>: wrapper script that runs the Shuttle and AmeriFlux API bulk scripts in sequence when the three generated scripts are kept in the same directory.</li>",
       "      <li><strong>Shuttle script</strong>: uses direct Shuttle URLs and retries/resume support for Shuttle-backed rows only.</li>",
       "      <li><strong>AmeriFlux API script</strong>: requests URLs dynamically per selected AmeriFlux site, using <code>/api/v2/data_download</code> for FLUXNET and <code>/api/v1/data_download</code> for FLUXNET2015, then downloads each returned file.</li>",
       "      <li><strong>Show Shuttle CLI command</strong>: reveals a command template that uses <code>shuttle_selected_sites.txt</code> and your local snapshot file.</li>",
@@ -3557,10 +3570,17 @@
     return buildDownloadAllSelectedScriptText({
       includeShuttle: selectionSummary.shuttleCount > 0,
       includeAmeriFlux: selectionSummary.ameriFluxCount > 0,
-      shuttleSitesFile: "./shuttle_selected_sites.txt",
       shuttleScript: "./download_shuttle_selected.sh",
-      ameriFluxSitesFile: "./ameriflux_selected_sites.txt",
       ameriFluxScript: "./download_ameriflux_selected.sh"
+    });
+  };
+
+  Explorer.prototype.buildDownloadAllSelectedFiles = function (rows) {
+    var selectedRows = Array.isArray(rows) ? rows : [];
+    return buildDownloadAllSelectedFileBundle({
+      wrapperText: this.buildDownloadAllSelectedScript(selectedRows),
+      ameriFluxText: this.buildAmeriFluxBulkScript(this.getAmeriFluxRows(selectedRows)),
+      shuttleText: this.buildCurlScript(this.getShuttleRows(selectedRows))
     });
   };
 
@@ -3968,8 +3988,10 @@
     if (!rows) {
       return;
     }
-    this.downloadTextFile("download_all_selected.sh", this.buildDownloadAllSelectedScript(rows), "text/x-shellscript;charset=utf-8");
-    this.setBulkStatus("Downloaded download_all_selected.sh wrapper script. Keep it with the generated source-specific scripts and selected-sites files.");
+    this.buildDownloadAllSelectedFiles(rows).forEach(function (file) {
+      this.downloadTextFile(file.filename, file.text, file.mimeType);
+    }, this);
+    this.setBulkStatus("Downloaded download_all_selected.sh, download_ameriflux_selected.sh, and download_shuttle_selected.sh.");
     gaEvent("fx_download_all_script_download", { count: rows.length });
   };
 
@@ -3978,7 +4000,7 @@
     if (!rows) {
       return;
     }
-    this.copyText(this.buildDownloadAllSelectedScript(rows), "Copied download_all_selected.sh wrapper script. Keep it with the generated source-specific scripts and selected-sites files.");
+    this.copyText(this.buildDownloadAllSelectedScript(rows), "Copied download_all_selected.sh wrapper script. Keep it with the generated source-specific scripts.");
     gaEvent("fx_download_all_script_copy", { count: rows.length });
   };
 
@@ -4926,6 +4948,7 @@
     buildAmeriFluxSelectedSitesText: buildAmeriFluxSelectedSitesText,
     buildAmeriFluxBulkScriptText: buildAmeriFluxBulkScriptText,
     buildDownloadAllSelectedScriptText: buildDownloadAllSelectedScriptText,
+    buildDownloadAllSelectedFileBundle: buildDownloadAllSelectedFileBundle,
     buildTableClipboardText: buildTableClipboardText,
     partitionRowsByBulkSource: partitionRowsByBulkSource,
     summarizeBulkSelection: summarizeBulkSelection,
