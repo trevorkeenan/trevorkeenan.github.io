@@ -15,22 +15,52 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 from urllib.error import HTTPError, URLError
-from urllib.parse import quote, urlencode, urlparse
+from urllib.parse import quote
 from urllib.request import Request, urlopen
 
-DATACITE_API_URL = "https://api.datacite.org/dois"
-DATACITE_QUERY = 'publisher:"ICOS Carbon Portal" AND types.resourceType:"FLUXNET zip archive"'
-ICOS_SOURCE = "ICOS"
-ICOS_SOURCE_ORIGIN = "icos_direct"
-ICOS_SOURCE_PRIORITY = 300
+SPARQL_ENDPOINT = "https://meta.icos-cp.eu/sparql"
+OBJECT_METADATA_BASE_URL = "https://meta.icos-cp.eu/objects/"
 PROJECT_FLUXNET = "http://meta.icos-cp.eu/resources/projects/FLUXNET"
 ARCHIVE_SPEC_URI = "http://meta.icos-cp.eu/resources/cpmeta/miscFluxnetArchiveProduct"
 PRODUCT_SPEC_URI = "http://meta.icos-cp.eu/resources/cpmeta/miscFluxnetProduct"
-TARGET_METADATA_HOST = "meta.icos-cp.eu"
-DEFAULT_PAGE_SIZE = 100
+ICOS_SOURCE = "ICOS"
+ICOS_SOURCE_ORIGIN = "icos_direct"
+ICOS_SOURCE_PRIORITY = 300
 DEFAULT_TIMEOUT_SECONDS = 60
 DEFAULT_RETRIES = 5
 DEFAULT_RETRY_DELAY_SECONDS = 2.0
+
+# Regression list from the missing-site report. This is validation-only, not discovery input.
+EXPECTED_REGRESSION_SITE_IDS: Sequence[str] = (
+    "AT-Neu",
+    "IT-Lav",
+    "IE-CaN",
+    "IE-CaC",
+    "CH-Oe2",
+    "IT-BCi",
+    "ES-LJu",
+    "CH-Cha",
+    "FR-Aur",
+    "DE-Hte",
+    "DE-SfS",
+    "SE-St1",
+    "DE-SfN",
+    "CH-Frk",
+    "SE-Ros",
+    "IT-MtM",
+    "IT-MtP",
+    "SE-Lnn",
+    "ES-Pdu",
+    "DE-Dgw",
+    "JP-Ozm",
+    "ES-Abr",
+    "IE-Gwr",
+    "RU-Fy3",
+    "DE-Hdn",
+    "IE-Cra",
+    "IT-Bsn",
+    "EE-Pts",
+)
 
 OUTPUT_COLUMNS: Sequence[str] = (
     "site_id",
@@ -67,7 +97,36 @@ OUTPUT_COLUMNS: Sequence[str] = (
 YEAR_RANGE_RE = re.compile(r"_(\d{4})-(\d{4})(?:[_\.]|$)")
 CURRENT_VERSION_RE = re.compile(r"_v(\d+(?:\.\d+)*)_r(\d+)", re.IGNORECASE)
 BETA_VERSION_RE = re.compile(r"_beta[-_]?(\d+)", re.IGNORECASE)
+RELEASE_VERSION_RE = re.compile(r"_(\d{4})_(\d+)-(\d+)(?:\.|_|$)", re.IGNORECASE)
 RESOLUTION_PRODUCT_RE = re.compile(r"_(HH|HR|DD|WW|MM|YY|NRT)_", re.IGNORECASE)
+
+# Query ICOS directly rather than a DOI proxy. DataCite only covers a DOI-backed subset and misses
+# valid ICOS FLUXNET2015 rows such as AT-Neu, so discovery must start from the ICOS metadata source.
+SPARQL_PREFIXES = """
+prefix cpmeta: <http://meta.icos-cp.eu/ontologies/cpmeta/>
+prefix prov: <http://www.w3.org/ns/prov#>
+prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+"""
+
+SPARQL_DISCOVERY_QUERY = f"""
+{SPARQL_PREFIXES}
+select ?obj ?name ?spec ?project ?stationId
+where {{
+  ?obj cpmeta:hasObjectSpec ?spec ;
+       cpmeta:hasName ?name ;
+       cpmeta:wasAcquiredBy ?acq .
+  ?spec cpmeta:hasAssociatedProject ?project .
+  ?acq prov:wasAssociatedWith ?station .
+  ?station cpmeta:hasStationId ?stationId .
+
+  FILTER(?project = <{PROJECT_FLUXNET}>)
+  FILTER(?spec IN (<{ARCHIVE_SPEC_URI}>, <{PRODUCT_SPEC_URI}>))
+  FILTER(STRSTARTS(STR(?name), "FLX_"))
+  FILTER(CONTAINS(STR(?name), "FLUXNET"))
+  FILTER(STRENDS(LCASE(STR(?name)), ".zip"))
+}}
+order by ?stationId ?name ?obj
+"""
 
 
 def parse_args() -> argparse.Namespace:
@@ -77,13 +136,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--shuttle-csv",
         default="",
-        help="Optional FLUXNET Shuttle CSV used only for overlap/suppression counts.",
-    )
-    parser.add_argument(
-        "--page-size",
-        type=int,
-        default=DEFAULT_PAGE_SIZE,
-        help=f"DataCite page size (default: {DEFAULT_PAGE_SIZE}).",
+        help="Optional FLUXNET Shuttle CSV used for overlap/suppression diagnostics.",
     )
     parser.add_argument(
         "--timeout",
@@ -95,7 +148,7 @@ def parse_args() -> argparse.Namespace:
         "--retries",
         type=int,
         default=DEFAULT_RETRIES,
-        help=f"Maximum retries per request (default: {DEFAULT_RETRIES}).",
+        help=f"Maximum SPARQL retries per request (default: {DEFAULT_RETRIES}).",
     )
     parser.add_argument(
         "--retry-delay",
@@ -122,6 +175,14 @@ def first_present(mapping: Dict[str, Any], *keys: str) -> str:
         if value not in (None, ""):
             return str(value).strip()
     return ""
+
+
+def binding_value(binding: Dict[str, Any], key: str) -> str:
+    value = binding.get(key)
+    if not isinstance(value, dict):
+        return ""
+    raw = value.get("value")
+    return str(raw).strip() if raw not in (None, "") else ""
 
 
 def maybe_float(value: Any) -> Optional[float]:
@@ -225,24 +286,38 @@ def build_direct_download_url(object_id: str, file_name: str) -> str:
     return f"https://data.icos-cp.eu/licence_accept?ids={encoded_ids}&fileName={encoded_file_name}"
 
 
+def extract_object_id(metadata_url: str) -> str:
+    raw = (metadata_url or "").strip().rstrip("/")
+    if not raw:
+        return ""
+    return raw.rsplit("/", 1)[-1]
+
+
 def is_resolution_product(file_name: str) -> bool:
     upper = (file_name or "").upper()
     return upper.endswith(".CSV.ZIP") or bool(RESOLUTION_PRODUCT_RE.search(upper))
 
 
-def is_canonical_archive_candidate(candidate: Dict[str, Any]) -> bool:
+def is_preferred_archive_candidate(candidate: Dict[str, Any]) -> bool:
     file_name = str(candidate.get("file_name") or "")
     upper = file_name.upper()
-    if is_resolution_product(file_name):
-        return False
     if candidate.get("object_spec") == ARCHIVE_SPEC_URI:
         return True
+    if is_resolution_product(file_name):
+        return False
     if "FULLSET" in upper:
         return True
     return "_FLUXNET_" in upper
 
 
 def parse_version_rank(file_name: str) -> Tuple[int, Tuple[int, ...], int]:
+    release = RELEASE_VERSION_RE.search(file_name or "")
+    if release:
+        return (
+            3,
+            (int(release.group(1)), int(release.group(2)), int(release.group(3))),
+            0,
+        )
     current = CURRENT_VERSION_RE.search(file_name or "")
     if current:
         return (
@@ -276,7 +351,7 @@ def canonical_name_bonus(candidate: Dict[str, Any]) -> Tuple[int, int]:
 
 def compare_candidates(left: Dict[str, Any], right: Dict[str, Any]) -> int:
     ranked_pairs = (
-        (1 if is_canonical_archive_candidate(left) else 0, 1 if is_canonical_archive_candidate(right) else 0),
+        (1 if is_preferred_archive_candidate(left) else 0, 1 if is_preferred_archive_candidate(right) else 0),
         (parse_version_rank(str(left.get("file_name") or "")), parse_version_rank(str(right.get("file_name") or ""))),
         (coverage_rank(left), coverage_rank(right)),
         (canonical_name_bonus(left), canonical_name_bonus(right)),
@@ -301,10 +376,7 @@ def choose_best_candidate(candidates: Sequence[Dict[str, Any]]) -> Optional[Dict
     if not candidates:
         return None
     ordered = sorted(candidates, key=functools.cmp_to_key(compare_candidates))
-    best = ordered[0]
-    if not is_canonical_archive_candidate(best):
-        return None
-    return best
+    return ordered[0]
 
 
 def load_shuttle_site_ids(path: str) -> set[str]:
@@ -320,7 +392,7 @@ def load_shuttle_site_ids(path: str) -> set[str]:
         }
 
 
-def dedupe_candidates(candidates: Iterable[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], int]:
+def dedupe_candidates(candidates: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
     grouped: Dict[str, List[Dict[str, Any]]] = {}
     for candidate in candidates:
         site_id = str(candidate.get("site_id") or "").strip()
@@ -329,15 +401,11 @@ def dedupe_candidates(candidates: Iterable[Dict[str, Any]]) -> Tuple[List[Dict[s
         grouped.setdefault(site_id, []).append(candidate)
 
     chosen: List[Dict[str, Any]] = []
-    skipped_noncanonical = 0
     for site_id in sorted(grouped):
         best = choose_best_candidate(grouped[site_id])
-        if best is None:
-            skipped_noncanonical += 1
-            continue
-        chosen.append(best)
-
-    return chosen, skipped_noncanonical
+        if best is not None:
+            chosen.append(best)
+    return chosen
 
 
 def normalize_csv_value(value: Any) -> str:
@@ -392,222 +460,320 @@ def write_json(
     return version_hash
 
 
-def fetch_json(
-    url: str,
-    timeout: int,
-    retries: int,
-    retry_delay: float,
-    *,
-    accept: str = "application/json",
-    label: str = "",
-) -> Dict[str, Any]:
+def sparql_post(query: str, timeout: int, retries: int, retry_delay: float, label: str = "") -> Dict[str, Any]:
+    body = query.encode("utf-8")
     last_error: Optional[Exception] = None
     for attempt in range(1, max(1, retries) + 1):
         try:
             request = Request(
-                url,
+                SPARQL_ENDPOINT,
+                data=body,
                 headers={
-                    "Accept": accept,
+                    "Accept": "application/json",
+                    "Content-Type": "text/plain",
                     "User-Agent": "trevorkeenan.github.io/fluxnet-explorer-icos-refresh",
                 },
-                method="GET",
+                method="POST",
             )
             with urlopen(request, timeout=timeout) as response:
                 return json.loads(response.read().decode("utf-8"))
-        except (HTTPError, URLError, TimeoutError, json.JSONDecodeError) as err:
+        except HTTPError as err:
+            detail = err.read().decode("utf-8", "replace")
+            last_error = RuntimeError(f"HTTP {err.code}: {detail}")
+            if attempt >= retries:
+                break
+            delay = min(30.0, retry_delay * (2 ** (attempt - 1)))
+            if "per-minute query quota" in detail.lower():
+                delay = max(65.0, delay)
+            time.sleep(delay)
+        except (URLError, TimeoutError, json.JSONDecodeError) as err:
             last_error = err
             if attempt >= retries:
                 break
             time.sleep(min(30.0, retry_delay * (2 ** (attempt - 1))))
     detail = f" ({label})" if label else ""
-    raise RuntimeError(f"Request failed after {retries} attempt(s){detail}: {last_error}")
+    raise RuntimeError(f"ICOS SPARQL request failed after {retries} attempt(s){detail}: {last_error}")
 
 
-def fetch_datacite_object_urls(page_size: int, timeout: int, retries: int, retry_delay: float) -> Tuple[List[str], int]:
-    object_urls: List[str] = []
-    seen: set[str] = set()
-    page_number = 1
-    total_matches = 0
-    while True:
-        params = urlencode(
-            {
-                "query": DATACITE_QUERY,
-                "page[size]": page_size,
-                "page[number]": page_number,
-            }
-        )
-        payload = fetch_json(
-            f"{DATACITE_API_URL}?{params}",
-            timeout,
-            retries,
-            retry_delay,
-            label=f"datacite-page-{page_number}",
-        )
-        if page_number == 1:
-            total_matches = int(payload.get("meta", {}).get("total") or 0)
-        rows = payload.get("data", [])
-        if not rows:
-            break
-        print(f"DataCite page {page_number}: {len(rows)} dataset(s)", flush=True)
-        for row in rows:
-            attributes = row.get("attributes", {})
-            metadata_url = str(attributes.get("url") or "").strip()
-            parsed = urlparse(metadata_url)
-            if not metadata_url or parsed.netloc != TARGET_METADATA_HOST or not parsed.path.startswith("/objects/"):
-                continue
-            if metadata_url not in seen:
-                seen.add(metadata_url)
-                object_urls.append(metadata_url)
-        page_number += 1
-    return sorted(object_urls), total_matches
-
-
-def extract_object_id(metadata_url: str) -> str:
-    raw = (metadata_url or "").strip().rstrip("/")
-    if not raw:
-        return ""
-    return raw.rsplit("/", 1)[-1]
-
-
-def filter_target_metadata(metadata: Dict[str, Any]) -> bool:
-    specification = metadata.get("specification", {})
-    project_uri = first_present(specification.get("project", {}).get("self", {}), "uri")
-    spec_uri = first_present(specification.get("self", {}), "uri")
-    file_name = first_present(metadata, "fileName")
-    upper = file_name.upper()
-    if project_uri != PROJECT_FLUXNET:
-        return False
-    if spec_uri not in {ARCHIVE_SPEC_URI, PRODUCT_SPEC_URI}:
-        return False
-    if not upper.startswith("FLX_"):
-        return False
-    if "FLUXNET" not in upper or not upper.endswith(".ZIP"):
-        return False
-    return True
-
-
-def extract_station_place(site_id: str, coverage_geo: Dict[str, Any]) -> Dict[str, Any]:
-    for feature in coverage_geo.get("features", []):
-        if not isinstance(feature, dict):
-            continue
-        if str(feature.get("name") or "").strip() == site_id:
-            return feature
-    return {}
-
-
-def build_candidate(metadata_url: str, metadata: Dict[str, Any]) -> Dict[str, Any]:
-    specific_info = metadata.get("specificInfo", {})
-    acquisition = specific_info.get("acquisition", {})
-    station = acquisition.get("station", {})
-    interval = acquisition.get("interval", {})
-    location = station.get("location", {})
-    station_specific = station.get("specificInfo", {})
-    vegetation = first_present(station_specific.get("ecosystemType", {}), "label")
-    site_id = first_present(station, "id")
-    coverage_geo = metadata.get("coverageGeo", {})
-    station_place = extract_station_place(site_id, coverage_geo)
-    country = first_present(station, "countryCode")
-    if not country:
-        country = first_present(station_place.get("containedInPlace", {}), "identifier", "name")
-    file_name = first_present(metadata, "fileName")
+def build_candidate(binding: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    metadata_url = binding_value(binding, "obj")
     object_id = extract_object_id(metadata_url)
-    coverage_start = first_present(interval, "start")
-    coverage_end = first_present(interval, "stop")
-    first_year, last_year = parse_year_range(file_name, coverage_start, coverage_end)
+    file_name = binding_value(binding, "name")
+    site_id = binding_value(binding, "stationId")
+    if not metadata_url or not object_id or not file_name or not site_id:
+        return None
+
+    first_year, last_year = parse_year_range(file_name, "", "")
     network = parse_network_prefix(file_name, site_id)
-    direct_download_url = build_direct_download_url(object_id, file_name) if object_id and file_name else ""
-    references = metadata.get("references", {})
-    specification = metadata.get("specification", {})
+    direct_download_url = build_direct_download_url(object_id, file_name)
 
     return {
         "site_id": site_id,
-        "site_name": first_present(station.get("org", {}), "name") or first_present(location, "label") or site_id,
-        "country": country,
+        "site_name": site_id,
+        "country": "",
         "data_hub": ICOS_SOURCE,
         "network": network,
         "source_network": network,
-        "vegetation_type": vegetation,
+        "vegetation_type": "",
         "first_year": first_year,
         "last_year": last_year,
-        "latitude": maybe_float(location.get("lat")),
-        "longitude": maybe_float(location.get("lon")),
+        "latitude": None,
+        "longitude": None,
         "download_link": direct_download_url,
         "download_mode": "direct",
         "source": ICOS_SOURCE,
         "source_label": ICOS_SOURCE,
-        "source_reason": "Discovered directly from ICOS Carbon Portal FLUXNET metadata.",
+        "source_reason": (
+            "Discovered directly from ICOS Carbon Portal FLUXNET metadata. "
+            "Rows are selected per site before object metadata hydration."
+        ),
         "source_priority": ICOS_SOURCE_PRIORITY,
         "source_origin": ICOS_SOURCE_ORIGIN,
         "object_id": object_id,
         "file_name": file_name,
         "direct_download_url": direct_download_url,
         "metadata_url": metadata_url,
-        "access_url": first_present(metadata, "accessUrl"),
-        "object_spec": first_present(specification.get("self", {}), "uri"),
-        "project": first_present(specification.get("project", {}).get("self", {}), "uri"),
-        "coverage_start": coverage_start,
-        "coverage_end": coverage_end,
-        "production_end": first_present(metadata.get("submission", {}), "stop", "start"),
-        "citation": first_present(references, "citationString"),
+        "access_url": f"https://data.icos-cp.eu/objects/{object_id}",
+        "object_spec": binding_value(binding, "spec"),
+        "project": binding_value(binding, "project"),
+        "coverage_start": "",
+        "coverage_end": "",
+        "production_end": "",
+        "citation": "",
     }
 
 
-def fetch_candidates(page_size: int, timeout: int, retries: int, retry_delay: float) -> Tuple[List[Dict[str, Any]], int, int]:
-    object_urls, datacite_total_matches = fetch_datacite_object_urls(page_size, timeout, retries, retry_delay)
-    candidates: List[Dict[str, Any]] = []
-    for index, metadata_url in enumerate(object_urls, start=1):
-        if index == 1 or index % 25 == 0 or index == len(object_urls):
-            print(f"Fetching ICOS metadata {index}/{len(object_urls)}: {metadata_url}", flush=True)
-        metadata = fetch_json(
-            metadata_url,
-            timeout,
-            retries,
-            retry_delay,
-            accept="application/json",
-            label=f"icos-object-{extract_object_id(metadata_url)}",
-        )
-        if not filter_target_metadata(metadata):
-            continue
-        candidate = build_candidate(metadata_url, metadata)
-        if candidate.get("site_id"):
-            candidates.append(candidate)
+def first_present_nested(mapping: Any, *path: str) -> str:
+    current = mapping
+    for key in path:
+        if not isinstance(current, dict):
+            return ""
+        current = current.get(key)
+    if current in (None, ""):
+        return ""
+    return str(current).strip()
+
+
+def load_object_metadata(object_id: str, timeout: int, retries: int, retry_delay: float) -> Dict[str, Any]:
+    url = f"{OBJECT_METADATA_BASE_URL}{object_id}"
+    last_error: Optional[Exception] = None
+    for attempt in range(1, max(1, retries) + 1):
+        try:
+            request = Request(
+                url,
+                headers={
+                    "Accept": "application/json",
+                    "User-Agent": "trevorkeenan.github.io/fluxnet-explorer-icos-refresh",
+                },
+                method="GET",
+            )
+            with urlopen(request, timeout=timeout) as response:
+                return json.loads(response.read().decode("utf-8"))
+        except HTTPError as err:
+            detail = err.read().decode("utf-8", "replace")
+            last_error = RuntimeError(f"HTTP {err.code}: {detail}")
+            if attempt >= retries:
+                break
+            time.sleep(min(30.0, retry_delay * (2 ** (attempt - 1))))
+        except (URLError, TimeoutError, json.JSONDecodeError) as err:
+            last_error = err
+            if attempt >= retries:
+                break
+            time.sleep(min(30.0, retry_delay * (2 ** (attempt - 1))))
+    raise RuntimeError(f"ICOS object metadata request failed after {retries} attempt(s) ({object_id}): {last_error}")
+
+
+def hydrate_candidate_from_metadata(
+    candidate: Dict[str, Any],
+    timeout: int,
+    retries: int,
+    retry_delay: float,
+) -> Dict[str, Any]:
+    object_id = str(candidate.get("object_id") or "").strip()
+    metadata = load_object_metadata(object_id, timeout, retries, retry_delay)
+    acquisition = metadata.get("specificInfo", {}).get("acquisition", {})
+    station = acquisition.get("station", {})
+    station_location = station.get("location", {})
+    station_org = station.get("org", {})
+    station_specific = station.get("specificInfo", {})
+    ecosystem = station_specific.get("ecosystemType", {})
+    interval = acquisition.get("interval", {})
+    references = metadata.get("references", {})
+    submission = metadata.get("submission", {})
+    specification = metadata.get("specification", {})
+
+    file_name = first_present(metadata, "fileName") or str(candidate.get("file_name") or "")
+    site_id = first_present(station, "id") or str(candidate.get("site_id") or "")
+    coverage_start = first_present(interval, "start")
+    coverage_end = first_present(interval, "stop")
+    first_year, last_year = parse_year_range(file_name, coverage_start, coverage_end)
+    network = parse_network_prefix(file_name, site_id)
+    direct_download_url = build_direct_download_url(object_id, file_name)
+    metadata_url = first_present(candidate, "metadata_url") or f"{OBJECT_METADATA_BASE_URL}{object_id}"
+
+    row = dict(candidate)
+    row.update(
+        {
+            "site_id": site_id,
+            "site_name": first_present(station_org, "name")
+            or first_present(station_location, "label")
+            or str(candidate.get("site_name") or "")
+            or site_id,
+            "country": first_present(station, "countryCode") or str(candidate.get("country") or ""),
+            "network": network or str(candidate.get("network") or ""),
+            "source_network": network or str(candidate.get("source_network") or ""),
+            "vegetation_type": first_present(ecosystem, "label") or str(candidate.get("vegetation_type") or ""),
+            "first_year": first_year,
+            "last_year": last_year,
+            "latitude": maybe_float(first_present(station_location, "lat")),
+            "longitude": maybe_float(first_present(station_location, "lon")),
+            "download_link": direct_download_url,
+            "object_id": object_id,
+            "file_name": file_name,
+            "direct_download_url": direct_download_url,
+            "metadata_url": metadata_url,
+            "access_url": first_present(metadata, "accessUrl") or str(candidate.get("access_url") or ""),
+            "object_spec": first_present_nested(specification, "self", "uri") or str(candidate.get("object_spec") or ""),
+            "project": first_present_nested(specification, "project", "self", "uri") or str(candidate.get("project") or ""),
+            "coverage_start": coverage_start,
+            "coverage_end": coverage_end,
+            "production_end": first_present(submission, "stop"),
+            "citation": first_present(references, "citationString") or str(candidate.get("citation") or ""),
+        }
+    )
+    return row
+
+
+def hydrate_candidates(
+    candidates: Sequence[Dict[str, Any]],
+    timeout: int,
+    retries: int,
+    retry_delay: float,
+) -> List[Dict[str, Any]]:
+    hydrated: List[Dict[str, Any]] = []
+    total = len(candidates)
+    for index, candidate in enumerate(candidates, start=1):
+        hydrated.append(hydrate_candidate_from_metadata(candidate, timeout, retries, retry_delay))
+        if index == total or index % 25 == 0:
+            print(f"ICOS object metadata hydrated: {index}/{total}", flush=True)
         time.sleep(0.05)
-    return candidates, datacite_total_matches, len(object_urls)
+    return hydrated
+
+
+def fetch_candidates(timeout: int, retries: int, retry_delay: float) -> Tuple[List[Dict[str, Any]], int]:
+    # Root cause: a DOI/DataCite-based discovery path only covered a subset of ICOS FLUXNET files,
+    # which dropped valid sites like AT-Neu before normalization or deduplication. Discovery now
+    # starts from the complete ICOS metadata graph, then chosen rows are hydrated via object JSON.
+    payload = sparql_post(SPARQL_DISCOVERY_QUERY, timeout, retries, retry_delay, label="discovery")
+    bindings = payload.get("results", {}).get("bindings", [])
+    print(f"ICOS discovery query rows: {len(bindings)}", flush=True)
+
+    candidates: List[Dict[str, Any]] = []
+    seen_object_ids: set[str] = set()
+    for binding in bindings:
+        candidate = build_candidate(binding)
+        if candidate is None:
+            continue
+        object_id = str(candidate.get("object_id") or "")
+        if object_id in seen_object_ids:
+            continue
+        seen_object_ids.add(object_id)
+        candidates.append(candidate)
+    return candidates, len(bindings)
+
+
+def print_expected_site_stage(stage_label: str, site_ids: Iterable[str]) -> List[str]:
+    normalized = {str(site_id).strip() for site_id in site_ids if str(site_id).strip()}
+    present = [site_id for site_id in EXPECTED_REGRESSION_SITE_IDS if site_id in normalized]
+    missing = [site_id for site_id in EXPECTED_REGRESSION_SITE_IDS if site_id not in normalized]
+    print(f"{stage_label}: expected sites present {len(present)}/{len(EXPECTED_REGRESSION_SITE_IDS)}", flush=True)
+    print(f"{stage_label} present: {', '.join(present) if present else '(none)'}", flush=True)
+    print(f"{stage_label} missing: {', '.join(missing) if missing else '(none)'}", flush=True)
+    return missing
+
+
+def build_final_explorer_sources(
+    shuttle_site_ids: set[str],
+    icos_rows: Sequence[Dict[str, Any]],
+) -> Dict[str, str]:
+    sources: Dict[str, str] = {site_id: "Shuttle" for site_id in shuttle_site_ids}
+    for row in icos_rows:
+        site_id = str(row.get("site_id") or "").strip()
+        if not site_id or site_id in sources:
+            continue
+        sources[site_id] = "ICOS-direct"
+    return sources
 
 
 def main() -> None:
     args = parse_args()
     output_csv = Path(args.output_csv)
     output_json = Path(args.output_json)
+    shuttle_site_ids = load_shuttle_site_ids(args.shuttle_csv)
 
-    candidates, datacite_total_matches, fetched_metadata_objects = fetch_candidates(
-        page_size=max(1, args.page_size),
+    raw_candidates, fetched_binding_count = fetch_candidates(
         timeout=max(1, args.timeout),
         retries=max(1, args.retries),
         retry_delay=max(0.1, args.retry_delay),
     )
-    deduped_rows, skipped_noncanonical_sites = dedupe_candidates(candidates)
+    normalized_candidates = sorted(
+        raw_candidates,
+        key=lambda row: (str(row.get("site_id") or ""), str(row.get("file_name") or ""), str(row.get("object_id") or "")),
+    )
+    deduped_rows = dedupe_candidates(normalized_candidates)
+    deduped_rows = hydrate_candidates(
+        deduped_rows,
+        timeout=max(1, args.timeout),
+        retries=max(1, args.retries),
+        retry_delay=max(0.1, args.retry_delay),
+    )
     deduped_rows = sorted(deduped_rows, key=lambda row: (str(row.get("site_id") or ""), str(row.get("file_name") or "")))
+    final_icos_rows = [row for row in deduped_rows if str(row.get("site_id") or "") not in shuttle_site_ids]
+    final_explorer_sources = build_final_explorer_sources(shuttle_site_ids, deduped_rows)
 
-    shuttle_site_ids = load_shuttle_site_ids(args.shuttle_csv)
-    suppressed_by_shuttle = sum(1 for row in deduped_rows if str(row.get("site_id") or "") in shuttle_site_ids)
-    final_additional_rows = len(deduped_rows) - suppressed_by_shuttle
+    fetched_site_ids = {str(row.get("site_id") or "") for row in raw_candidates}
+    normalized_site_ids = {str(row.get("site_id") or "") for row in normalized_candidates}
+    deduped_site_ids = {str(row.get("site_id") or "") for row in deduped_rows}
+    final_icos_site_ids = {str(row.get("site_id") or "") for row in final_icos_rows}
+
+    print(f"ICOS FLUXNET rows fetched: {fetched_binding_count}", flush=True)
+    print(f"ICOS unique site IDs after fetch: {len(fetched_site_ids)}", flush=True)
+    print_expected_site_stage("After fetch", fetched_site_ids)
+    print(f"ICOS rows after normalization: {len(normalized_candidates)}", flush=True)
+    print(f"ICOS unique site IDs after normalization: {len(normalized_site_ids)}", flush=True)
+    print_expected_site_stage("After normalization", normalized_site_ids)
+    print(f"ICOS rows after per-site deduplication: {len(deduped_rows)}", flush=True)
+    print_expected_site_stage("After deduplication", deduped_site_ids)
+    print(f"ICOS rows after Shuttle precedence suppression: {len(final_icos_rows)}", flush=True)
+    print_expected_site_stage("After ICOS manifest emission", final_icos_site_ids)
+
+    final_missing = [site_id for site_id in EXPECTED_REGRESSION_SITE_IDS if site_id not in final_explorer_sources]
+    print(f"Final explorer site count (Shuttle + ICOS-direct before AmeriFlux fallbacks): {len(final_explorer_sources)}", flush=True)
+    print(
+        "Final explorer sources for expected sites: "
+        + ", ".join(f"{site_id}={final_explorer_sources.get(site_id, 'MISSING')}" for site_id in EXPECTED_REGRESSION_SITE_IDS),
+        flush=True,
+    )
+    if final_missing:
+        raise RuntimeError(
+            "Expected ICOS/Shuttle sites missing from final explorer data: " + ", ".join(final_missing)
+        )
 
     write_csv(output_csv, deduped_rows)
+    suppressed_by_shuttle = len(deduped_rows) - len(final_icos_rows)
     version_hash = write_json(
         output_json,
         deduped_rows,
         meta_extra={
-            "discovery_method": "DataCite query + ICOS object metadata JSON",
-            "datacite_api_url": DATACITE_API_URL,
-            "datacite_query": DATACITE_QUERY,
-            "datacite_total_matches": datacite_total_matches,
-            "icos_metadata_objects_fetched": fetched_metadata_objects,
-            "candidate_rows_discovered": len(candidates),
+            "discovery_method": "ICOS SPARQL metadata query",
+            "sparql_endpoint": SPARQL_ENDPOINT,
+            "fetched_binding_rows": fetched_binding_count,
+            "fetched_unique_site_ids": len(fetched_site_ids),
+            "normalized_rows": len(normalized_candidates),
+            "normalized_unique_site_ids": len(normalized_site_ids),
             "retained_rows_after_dedup": len(deduped_rows),
-            "skipped_noncanonical_sites": skipped_noncanonical_sites,
             "suppressed_by_shuttle": suppressed_by_shuttle,
-            "final_rows_after_precedence": final_additional_rows,
+            "final_rows_after_precedence": len(final_icos_rows),
             "project": PROJECT_FLUXNET,
         },
         snapshot_updated_at=args.snapshot_updated_at,
@@ -616,13 +782,6 @@ def main() -> None:
 
     print(f"Wrote ICOS-direct CSV: {output_csv}")
     print(f"Wrote ICOS-direct JSON: {output_json}")
-    print(f"DataCite FLUXNET zip datasets discovered: {datacite_total_matches}")
-    print(f"ICOS object metadata records fetched: {fetched_metadata_objects}")
-    print(f"ICOS candidate rows discovered: {len(candidates)}")
-    print(f"ICOS rows retained after per-site dedup: {len(deduped_rows)}")
-    print(f"ICOS sites skipped as non-canonical: {skipped_noncanonical_sites}")
-    print(f"ICOS rows suppressed by Shuttle precedence: {suppressed_by_shuttle}")
-    print(f"ICOS rows that would merge into explorer: {final_additional_rows}")
     print(f"Version: sha256:{version_hash}")
 
 

@@ -111,6 +111,15 @@ jobs:
             --snapshot-updated-at "${SNAPSHOT_UPDATED_AT}" \
             --snapshot-updated-date "${SNAPSHOT_UPDATED_DATE}"
 
+      - name: Validate ICOS-direct site coverage
+        env:
+          TARGET_SNAPSHOT_CSV: assets/shuttle_snapshot.csv
+          TARGET_ICOS_DIRECT_CSV: assets/icos_direct_fluxnet.csv
+        run: |
+          python scripts/validate_icos_direct_fluxnet.py \
+            --shuttle-csv "${TARGET_SNAPSHOT_CSV}" \
+            --icos-csv "${TARGET_ICOS_DIRECT_CSV}"
+
       - name: Commit and push snapshot files if changed
         env:
           TARGET_SNAPSHOT_CSV: assets/shuttle_snapshot.csv

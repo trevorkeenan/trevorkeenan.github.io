@@ -10,7 +10,7 @@ This repo includes a GitHub Actions workflow at `.github/workflows/update-shuttl
   - `assets/icos_direct_fluxnet.csv`
   - `assets/icos_direct_fluxnet.json`
 - Source: `fluxnet/shuttle` installed from GitHub during the workflow run
-- ICOS direct source: `scripts/refresh_icos_direct_fluxnet.py` discovers ICOS FLUXNET zip datasets via DataCite and resolves them against the official ICOS Carbon Portal metadata JSON endpoint
+- ICOS direct source: `scripts/refresh_icos_direct_fluxnet.py` discovers candidate FLUXNET files from the official ICOS Carbon Portal SPARQL metadata endpoint, then hydrates the chosen per-site rows from the ICOS object JSON endpoint so the build does not depend on timeout-prone metadata joins
 - JSON format: compact browser payload with normalized `snake_case` column names (`{"columns":[...],"rows":[...]}`), keeping key discovery/download fields
 - Safety behavior: the workflow only stages/commits the generated snapshot files, and it refuses to overwrite the Shuttle CSV snapshot if `listall()` returns zero rows
 
@@ -41,7 +41,7 @@ Merge behavior:
 - `FLUXNET2015` is used only as a fallback for sites missing from both Shuttle and AmeriFlux FLUXNET.
 - If a site exists in both AmeriFlux FLUXNET and FLUXNET2015, only the AmeriFlux FLUXNET row is kept when Shuttle and ICOS-direct are both absent.
 
-The ICOS-direct snapshot is discovered from ICOS Carbon Portal metadata rather than HTML scraping. The ICOS per-row UX remains a direct `licence_accept` link with the existing button text `Accept ICOS license and download`.
+The ICOS-direct snapshot is discovered from ICOS Carbon Portal metadata rather than HTML scraping or a DOI subset. The ICOS per-row UX remains a direct `licence_accept` link with the existing button text `Accept ICOS license and download`.
 
 AmeriFlux availability is cached in browser localStorage with separate keys for AmeriFlux FLUXNET and FLUXNET2015 availability refreshes, so the app does not call those endpoints on every page load.
 
@@ -106,3 +106,5 @@ AmeriFlux API bulk script behavior:
 - AmeriFlux smoke check (counts; optional AR-Bal download URL if credentials are set): `python3 scripts/ameriflux_api_smoke.py`
 - Refresh the cached ICOS-direct snapshot locally:
   `python3 scripts/refresh_icos_direct_fluxnet.py --shuttle-csv assets/shuttle_snapshot.csv --output-csv assets/icos_direct_fluxnet.csv --output-json assets/icos_direct_fluxnet.json`
+- Validate that the final Shuttle/ICOS explorer inputs still contain the expected regression sites:
+  `python3 scripts/validate_icos_direct_fluxnet.py --shuttle-csv assets/shuttle_snapshot.csv --icos-csv assets/icos_direct_fluxnet.csv`
