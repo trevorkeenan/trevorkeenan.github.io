@@ -314,6 +314,16 @@
     };
   }
 
+  function resolveAmeriFluxIdentityOverride(identityOverride) {
+    if (!identityOverride || typeof identityOverride !== "object") {
+      return null;
+    }
+    return resolveAmeriFluxBulkIdentity(
+      firstDefinedString(identityOverride, ["enteredUserId", "user_id", "userId"]),
+      firstDefinedString(identityOverride, ["enteredUserEmail", "user_email", "userEmail"])
+    );
+  }
+
   function readAmeriFluxBulkIdentityPreferences() {
     var storage = getLocalStorageSafe();
     var stored;
@@ -780,17 +790,23 @@
       : buildV2DownloadPayload(siteIds, variant, policy, identity, dataProduct);
   }
 
-  function buildAmeriFluxCurlCommand(siteId, variant, policy, endpointUrl, dataProduct) {
+  function buildAmeriFluxCurlCommand(siteId, variant, policy, endpointUrl, dataProduct, identityOverride) {
     var site = String(siteId || "").trim();
     var product = normalizeDownloadProduct(dataProduct);
+    var resolvedIdentity = resolveAmeriFluxIdentityOverride(identityOverride);
     var payload = buildDownloadPayloadForProduct(
       [site || "SITE_ID_HERE"],
       variant,
       policy,
-      {
-        user_id: AMERIFLUX_TEMPLATE_USER_ID,
-        user_email: AMERIFLUX_TEMPLATE_USER_EMAIL
-      },
+      resolvedIdentity
+        ? {
+          user_id: resolvedIdentity.user_id,
+          user_email: resolvedIdentity.user_email
+        }
+        : {
+          user_id: AMERIFLUX_TEMPLATE_USER_ID,
+          user_email: AMERIFLUX_TEMPLATE_USER_EMAIL
+        },
       product
     );
     var payloadJson = JSON.stringify(payload, null, 2);
@@ -2099,7 +2115,20 @@
     }
   }
 
-  AmeriFluxSource.prototype.getDownloadIdentity = function () {
+  AmeriFluxSource.prototype.getDownloadIdentity = function (identityOverride) {
+    var overrideIdentity = resolveAmeriFluxIdentityOverride(identityOverride);
+    if (overrideIdentity) {
+      return {
+        enteredUserId: overrideIdentity.enteredUserId,
+        enteredUserEmail: overrideIdentity.enteredUserEmail,
+        user_id: overrideIdentity.user_id,
+        user_email: overrideIdentity.user_email,
+        enabled: !!(overrideIdentity.user_id && overrideIdentity.user_email),
+        trusted_runtime: true,
+        has_credentials: !!(overrideIdentity.user_id && overrideIdentity.user_email),
+        reason: ""
+      };
+    }
     var userId = String(this.userId || "").trim();
     var userEmail = String(this.userEmail || "").trim();
     var hasCredentials = !!(userId && userEmail);
@@ -2121,8 +2150,8 @@
     };
   };
 
-  AmeriFluxSource.prototype.canDownload = function () {
-    return !!this.getDownloadIdentity().enabled;
+  AmeriFluxSource.prototype.canDownload = function (identityOverride) {
+    return !!this.getDownloadIdentity(identityOverride).enabled;
   };
 
   AmeriFluxSource.prototype.list_sites = function () {
@@ -2169,12 +2198,13 @@
     return buildDownloadPayloadForProduct(siteIds, variant, policy, identity, this.dataProduct);
   };
 
-  AmeriFluxSource.prototype.getManualDownloadResult = function (siteId, variant, policy, reason) {
+  AmeriFluxSource.prototype.getManualDownloadResult = function (siteId, variant, policy, reason, identityOverride) {
     var site = String(siteId || "").trim();
     var manualReason = String(reason || "").trim();
+    var resolvedIdentity = resolveAmeriFluxIdentityOverride(identityOverride);
     var payloadTemplate = this.buildDownloadPayload([site || "SITE_ID_HERE"], variant, policy, {
-      user_id: AMERIFLUX_TEMPLATE_USER_ID,
-      user_email: AMERIFLUX_TEMPLATE_USER_EMAIL
+      user_id: resolvedIdentity ? resolvedIdentity.user_id : AMERIFLUX_TEMPLATE_USER_ID,
+      user_email: resolvedIdentity ? resolvedIdentity.user_email : AMERIFLUX_TEMPLATE_USER_EMAIL
     });
     return {
       mode: "manual",
@@ -2183,14 +2213,14 @@
       reason: manualReason || "AmeriFlux downloads require configured credentials in a trusted runtime context.",
       message: this.sourceLabel + " downloads require your own AmeriFlux identity. Copy and run the generated curl command locally.",
       payload_template: payloadTemplate,
-      curl_command: buildAmeriFluxCurlCommand(site, variant, policy, this.downloadUrl, this.dataProduct),
+      curl_command: buildAmeriFluxCurlCommand(site, variant, policy, this.downloadUrl, this.dataProduct, resolvedIdentity || undefined),
       manifest: {},
       data_urls: []
     };
   };
 
-  AmeriFluxSource.prototype.get_download_urls = function (siteId, variant, policy) {
-    var identity = this.getDownloadIdentity();
+  AmeriFluxSource.prototype.get_download_urls = function (siteId, variant, policy, identityOverride) {
+    var identity = this.getDownloadIdentity(identityOverride);
     var site = String(siteId || "").trim();
     if (!site) {
       return Promise.reject(new Error("AmeriFlux download requires a site_id."));
@@ -2199,7 +2229,7 @@
       var reason = !identity.trusted_runtime
         ? "AmeriFlux API downloads are disabled in this browser runtime."
         : "AMERIFLUX_USER_ID or AMERIFLUX_USER_EMAIL is missing.";
-      return Promise.resolve(this.getManualDownloadResult(site, variant, policy, reason));
+      return Promise.resolve(this.getManualDownloadResult(site, variant, policy, reason, identityOverride));
     }
 
     var payload = this.buildDownloadPayload([site], variant, policy, identity);
@@ -2228,8 +2258,8 @@
     });
   };
 
-  AmeriFluxSource.prototype.download_site = function (siteId, variant, policy) {
-    return this.get_download_urls(siteId, variant, policy);
+  AmeriFluxSource.prototype.download_site = function (siteId, variant, policy, identityOverride) {
+    return this.get_download_urls(siteId, variant, policy, identityOverride);
   };
 
   function compareRows(a, b, sortKey, sortDir) {
@@ -3688,16 +3718,24 @@
     return buildAmeriFluxSelectedSitesText(this.getAmeriFluxBulkEntries(rows));
   };
 
-  Explorer.prototype.getAmeriFluxBulkIdentity = function () {
+  Explorer.prototype.getEffectiveAmeriFluxIdentity = function () {
     return resolveAmeriFluxBulkIdentity(
       this.state.ameriFluxBulkUserIdInput,
       this.state.ameriFluxBulkUserEmailInput
     );
   };
 
+  Explorer.prototype.getAmeriFluxBulkIdentity = function () {
+    return this.getEffectiveAmeriFluxIdentity();
+  };
+
+  Explorer.prototype.canAmeriFluxApiDownload = function () {
+    return !!this.ameriFluxSource.canDownload(this.getEffectiveAmeriFluxIdentity());
+  };
+
   Explorer.prototype.buildAmeriFluxBulkScript = function (rows) {
     var entries = this.getAmeriFluxBulkEntries(rows);
-    var identity = this.getAmeriFluxBulkIdentity();
+    var identity = this.getEffectiveAmeriFluxIdentity();
     return buildAmeriFluxBulkScriptText(entries, {
       defaultUserId: identity.user_id,
       defaultUserEmail: identity.user_email,
@@ -4281,18 +4319,19 @@
     var product = String(dataProduct || AMERIFLUX_FLUXNET_PRODUCT).trim().toUpperCase();
     var label = String(sourceLabel || "").trim() || (product === FLUXNET2015_PRODUCT ? FLUXNET2015_SOURCE_ONLY : AMERIFLUX_SOURCE_ONLY);
     var apiSource = this.getAmeriFluxApiSource(product);
+    var identity = this.getEffectiveAmeriFluxIdentity();
     if (!site) {
       return;
     }
 
     var originalText = buttonEl ? buttonEl.textContent : "";
-    var canDirectDownload = apiSource.canDownload();
+    var canDirectDownload = apiSource.canDownload(identity);
     if (buttonEl) {
       buttonEl.disabled = true;
       buttonEl.textContent = getApiActionPreparingLabel(product, canDirectDownload);
     }
 
-    apiSource.download_site(site, AMERIFLUX_DEFAULT_VARIANT, AMERIFLUX_DEFAULT_POLICY)
+    apiSource.download_site(site, AMERIFLUX_DEFAULT_VARIANT, AMERIFLUX_DEFAULT_POLICY, identity)
       .then(function (result) {
         if (result && result.manual_download_required) {
           var curlCommand = String(result.curl_command || "").trim();
@@ -4698,7 +4737,7 @@
     var rows = this.getDisplayedRows();
     var pageRows = rows;
     var selectedKeys = this.state.selectedKeys || {};
-    var canAmeriFluxDownload = this.ameriFluxSource.canDownload();
+    var canAmeriFluxDownload = this.canAmeriFluxApiDownload();
 
     tbody.innerHTML = "";
 

@@ -620,6 +620,96 @@ test('AmeriFlux API download returns manual fallback when trusted credentials ar
   assert.equal(result.data_urls.length, 0);
 });
 
+test('AmeriFlux API download accepts effective identity override even without trusted runtime', async () => {
+  const source = hooks.createAmeriFluxSource({
+    trustedRuntime: false,
+    userId: '',
+    userEmail: '',
+    dataProduct: 'FLUXNET',
+    sourceLabel: 'AmeriFlux'
+  });
+  const identity = hooks.resolveAmeriFluxBulkIdentity('', '');
+  const originalFetch = global.fetch;
+  let seenRequest = null;
+
+  global.fetch = async (url, options) => {
+    seenRequest = {
+      url,
+      options
+    };
+    return {
+      ok: true,
+      status: 200,
+      headers: { get: () => '' },
+      json: async () => ({
+        data_urls: [{ url: 'https://example.org/AR-Bal.zip' }],
+        manifest: { ok: true }
+      })
+    };
+  };
+
+  try {
+    const result = await source.get_download_urls('AR-Bal', 'FULLSET', 'CCBY4.0', identity);
+    const payload = JSON.parse(seenRequest.options.body);
+
+    assert.equal(result.mode, 'api');
+    assert.equal(result.manual_download_required, false);
+    assert.equal(seenRequest.url, 'https://amfcdn.lbl.gov/api/v2/data_download');
+    assert.equal(payload.user_id, 'trevorkeenan');
+    assert.equal(payload.user_email, 'trevorkeenan@berkeley.edu');
+    assert.equal(payload.site_ids[0], 'AR-Bal');
+    assert.equal(seenRequest.options.body.includes('YOUR_AMERIFLUX_USERNAME'), false);
+    assert.equal(seenRequest.options.body.includes('YOUR_EMAIL'), false);
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('AmeriFlux API download uses custom effective identity override values', async () => {
+  const source = hooks.createAmeriFluxSource({
+    trustedRuntime: false,
+    userId: '',
+    userEmail: '',
+    dataProduct: 'FLUXNET2015',
+    sourceLabel: 'FLUXNET2015'
+  });
+  const identity = hooks.resolveAmeriFluxBulkIdentity('custom-user', 'custom@example.org');
+  const originalFetch = global.fetch;
+  let seenRequest = null;
+
+  global.fetch = async (url, options) => {
+    seenRequest = {
+      url,
+      options
+    };
+    return {
+      ok: true,
+      status: 200,
+      headers: { get: () => '' },
+      json: async () => ({
+        data_urls: [{ url: 'https://example.org/AR-Bal-fluxnet2015.zip' }],
+        manifest: { ok: true }
+      })
+    };
+  };
+
+  try {
+    const result = await source.get_download_urls('AR-Bal', 'FULLSET', 'CCBY4.0', identity);
+    const payload = JSON.parse(seenRequest.options.body);
+
+    assert.equal(result.mode, 'api');
+    assert.equal(result.manual_download_required, false);
+    assert.equal(seenRequest.url, 'https://amfcdn.lbl.gov/api/v1/data_download');
+    assert.equal(payload.user_id, 'custom-user');
+    assert.equal(payload.user_email, 'custom@example.org');
+    assert.equal(payload.data_product, 'FLUXNET2015');
+    assert.equal(seenRequest.options.body.includes('YOUR_AMERIFLUX_USERNAME'), false);
+    assert.equal(seenRequest.options.body.includes('YOUR_EMAIL'), false);
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
 test('AmeriFlux curl command generator uses product-specific endpoints and payloads', () => {
   const fluxnetCommand = hooks.buildAmeriFluxCurlCommand('AR-Bal', 'FULLSET', 'CCBY4.0', undefined, 'FLUXNET');
   const fluxnet2015Command = hooks.buildAmeriFluxCurlCommand('AR-Bal', 'FULLSET', 'CCBY4.0', undefined, 'FLUXNET2015');
@@ -639,6 +729,35 @@ test('AmeriFlux curl command generator uses product-specific endpoints and paylo
   assert.equal(fluxnet2015Command.includes('clean_url="${url%%\\?*}"'), true);
   assert.equal(fluxnet2015Command.includes('filename="$(basename "$clean_url")"'), true);
   assert.equal(fluxnet2015Command.includes('curl -L "$url" -o "$filename"'), true);
+});
+
+test('AmeriFlux curl command generator uses effective identity override when provided', () => {
+  const fallbackCommand = hooks.buildAmeriFluxCurlCommand(
+    'AR-Bal',
+    'FULLSET',
+    'CCBY4.0',
+    undefined,
+    'FLUXNET',
+    hooks.resolveAmeriFluxBulkIdentity('', '')
+  );
+  const customCommand = hooks.buildAmeriFluxCurlCommand(
+    'AR-Bal',
+    'FULLSET',
+    'CCBY4.0',
+    undefined,
+    'FLUXNET2015',
+    hooks.resolveAmeriFluxBulkIdentity('custom-user', 'custom@example.org')
+  );
+
+  assert.equal(fallbackCommand.includes('YOUR_AMERIFLUX_USERNAME'), false);
+  assert.equal(fallbackCommand.includes('YOUR_EMAIL'), false);
+  assert.match(fallbackCommand, /"user_id": "trevorkeenan"/);
+  assert.match(fallbackCommand, /"user_email": "trevorkeenan@berkeley\.edu"/);
+
+  assert.equal(customCommand.includes('YOUR_AMERIFLUX_USERNAME'), false);
+  assert.equal(customCommand.includes('YOUR_EMAIL'), false);
+  assert.match(customCommand, /"user_id": "custom-user"/);
+  assert.match(customCommand, /"user_email": "custom@example\.org"/);
 });
 
 test('AmeriFlux selected-sites export includes source label and data product', () => {
