@@ -2115,20 +2115,7 @@
     }
   }
 
-  AmeriFluxSource.prototype.getDownloadIdentity = function (identityOverride) {
-    var overrideIdentity = resolveAmeriFluxIdentityOverride(identityOverride);
-    if (overrideIdentity) {
-      return {
-        enteredUserId: overrideIdentity.enteredUserId,
-        enteredUserEmail: overrideIdentity.enteredUserEmail,
-        user_id: overrideIdentity.user_id,
-        user_email: overrideIdentity.user_email,
-        enabled: !!(overrideIdentity.user_id && overrideIdentity.user_email),
-        trusted_runtime: true,
-        has_credentials: !!(overrideIdentity.user_id && overrideIdentity.user_email),
-        reason: ""
-      };
-    }
+  AmeriFluxSource.prototype.getDownloadIdentity = function () {
     var userId = String(this.userId || "").trim();
     var userEmail = String(this.userEmail || "").trim();
     var hasCredentials = !!(userId && userEmail);
@@ -2150,8 +2137,8 @@
     };
   };
 
-  AmeriFluxSource.prototype.canDownload = function (identityOverride) {
-    return !!this.getDownloadIdentity(identityOverride).enabled;
+  AmeriFluxSource.prototype.canDownload = function () {
+    return !!this.getDownloadIdentity().enabled;
   };
 
   AmeriFluxSource.prototype.list_sites = function () {
@@ -2220,18 +2207,23 @@
   };
 
   AmeriFluxSource.prototype.get_download_urls = function (siteId, variant, policy, identityOverride) {
-    var identity = this.getDownloadIdentity(identityOverride);
+    var runtimeIdentity = this.getDownloadIdentity();
     var site = String(siteId || "").trim();
     if (!site) {
       return Promise.reject(new Error("AmeriFlux download requires a site_id."));
     }
-    if (!identity.enabled) {
-      var reason = !identity.trusted_runtime
+    if (!runtimeIdentity.enabled) {
+      var reason = !runtimeIdentity.trusted_runtime
         ? "AmeriFlux API downloads are disabled in this browser runtime."
         : "AMERIFLUX_USER_ID or AMERIFLUX_USER_EMAIL is missing.";
       return Promise.resolve(this.getManualDownloadResult(site, variant, policy, reason, identityOverride));
     }
 
+    var requestIdentity = resolveAmeriFluxIdentityOverride(identityOverride) || runtimeIdentity;
+    var identity = {
+      user_id: requestIdentity.user_id,
+      user_email: requestIdentity.user_email
+    };
     var payload = this.buildDownloadPayload([site], variant, policy, identity);
     return fetchJsonWithRetry(this.downloadUrl, {
       method: "POST",
@@ -3729,10 +3721,6 @@
     return this.getEffectiveAmeriFluxIdentity();
   };
 
-  Explorer.prototype.canAmeriFluxApiDownload = function () {
-    return !!this.ameriFluxSource.canDownload(this.getEffectiveAmeriFluxIdentity());
-  };
-
   Explorer.prototype.buildAmeriFluxBulkScript = function (rows) {
     var entries = this.getAmeriFluxBulkEntries(rows);
     var identity = this.getEffectiveAmeriFluxIdentity();
@@ -4325,7 +4313,7 @@
     }
 
     var originalText = buttonEl ? buttonEl.textContent : "";
-    var canDirectDownload = apiSource.canDownload(identity);
+    var canDirectDownload = apiSource.canDownload();
     if (buttonEl) {
       buttonEl.disabled = true;
       buttonEl.textContent = getApiActionPreparingLabel(product, canDirectDownload);
@@ -4737,7 +4725,7 @@
     var rows = this.getDisplayedRows();
     var pageRows = rows;
     var selectedKeys = this.state.selectedKeys || {};
-    var canAmeriFluxDownload = this.canAmeriFluxApiDownload();
+    var canAmeriFluxDownload = this.ameriFluxSource.canDownload();
 
     tbody.innerHTML = "";
 

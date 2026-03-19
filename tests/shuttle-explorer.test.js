@@ -620,7 +620,7 @@ test('AmeriFlux API download returns manual fallback when trusted credentials ar
   assert.equal(result.data_urls.length, 0);
 });
 
-test('AmeriFlux API download accepts effective identity override even without trusted runtime', async () => {
+test('AmeriFlux row download stays manual without trusted runtime even with fallback identity override', async () => {
   const source = hooks.createAmeriFluxSource({
     trustedRuntime: false,
     userId: '',
@@ -630,42 +630,29 @@ test('AmeriFlux API download accepts effective identity override even without tr
   });
   const identity = hooks.resolveAmeriFluxBulkIdentity('', '');
   const originalFetch = global.fetch;
-  let seenRequest = null;
+  let fetchCalled = false;
 
-  global.fetch = async (url, options) => {
-    seenRequest = {
-      url,
-      options
-    };
-    return {
-      ok: true,
-      status: 200,
-      headers: { get: () => '' },
-      json: async () => ({
-        data_urls: [{ url: 'https://example.org/AR-Bal.zip' }],
-        manifest: { ok: true }
-      })
-    };
+  global.fetch = async () => {
+    fetchCalled = true;
+    throw new Error('fetch should not be called for manual AmeriFlux row actions');
   };
 
   try {
     const result = await source.get_download_urls('AR-Bal', 'FULLSET', 'CCBY4.0', identity);
-    const payload = JSON.parse(seenRequest.options.body);
 
-    assert.equal(result.mode, 'api');
-    assert.equal(result.manual_download_required, false);
-    assert.equal(seenRequest.url, 'https://amfcdn.lbl.gov/api/v2/data_download');
-    assert.equal(payload.user_id, 'trevorkeenan');
-    assert.equal(payload.user_email, 'trevorkeenan@berkeley.edu');
-    assert.equal(payload.site_ids[0], 'AR-Bal');
-    assert.equal(seenRequest.options.body.includes('YOUR_AMERIFLUX_USERNAME'), false);
-    assert.equal(seenRequest.options.body.includes('YOUR_EMAIL'), false);
+    assert.equal(result.mode, 'manual');
+    assert.equal(result.manual_download_required, true);
+    assert.equal(result.payload_template.user_id, 'trevorkeenan');
+    assert.equal(result.payload_template.user_email, 'trevorkeenan@berkeley.edu');
+    assert.equal(String(result.curl_command || '').includes('YOUR_AMERIFLUX_USERNAME'), false);
+    assert.equal(String(result.curl_command || '').includes('YOUR_EMAIL'), false);
+    assert.equal(fetchCalled, false);
   } finally {
     global.fetch = originalFetch;
   }
 });
 
-test('AmeriFlux API download uses custom effective identity override values', async () => {
+test('AmeriFlux row manual content uses custom effective identity override values', async () => {
   const source = hooks.createAmeriFluxSource({
     trustedRuntime: false,
     userId: '',
@@ -675,36 +662,24 @@ test('AmeriFlux API download uses custom effective identity override values', as
   });
   const identity = hooks.resolveAmeriFluxBulkIdentity('custom-user', 'custom@example.org');
   const originalFetch = global.fetch;
-  let seenRequest = null;
+  let fetchCalled = false;
 
-  global.fetch = async (url, options) => {
-    seenRequest = {
-      url,
-      options
-    };
-    return {
-      ok: true,
-      status: 200,
-      headers: { get: () => '' },
-      json: async () => ({
-        data_urls: [{ url: 'https://example.org/AR-Bal-fluxnet2015.zip' }],
-        manifest: { ok: true }
-      })
-    };
+  global.fetch = async () => {
+    fetchCalled = true;
+    throw new Error('fetch should not be called for manual AmeriFlux row actions');
   };
 
   try {
     const result = await source.get_download_urls('AR-Bal', 'FULLSET', 'CCBY4.0', identity);
-    const payload = JSON.parse(seenRequest.options.body);
 
-    assert.equal(result.mode, 'api');
-    assert.equal(result.manual_download_required, false);
-    assert.equal(seenRequest.url, 'https://amfcdn.lbl.gov/api/v1/data_download');
-    assert.equal(payload.user_id, 'custom-user');
-    assert.equal(payload.user_email, 'custom@example.org');
-    assert.equal(payload.data_product, 'FLUXNET2015');
-    assert.equal(seenRequest.options.body.includes('YOUR_AMERIFLUX_USERNAME'), false);
-    assert.equal(seenRequest.options.body.includes('YOUR_EMAIL'), false);
+    assert.equal(result.mode, 'manual');
+    assert.equal(result.manual_download_required, true);
+    assert.equal(result.payload_template.user_id, 'custom-user');
+    assert.equal(result.payload_template.user_email, 'custom@example.org');
+    assert.equal(result.payload_template.data_product, 'FLUXNET2015');
+    assert.equal(String(result.curl_command || '').includes('YOUR_AMERIFLUX_USERNAME'), false);
+    assert.equal(String(result.curl_command || '').includes('YOUR_EMAIL'), false);
+    assert.equal(fetchCalled, false);
   } finally {
     global.fetch = originalFetch;
   }
