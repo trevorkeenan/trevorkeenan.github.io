@@ -106,6 +106,24 @@
     JPF: "JapanFlux",
     KOF: "KoreaFlux"
   };
+  var VEGETATION_NAME_TO_IGBP_CODE = {
+    cropland: "CRO",
+    croplands: "CRO",
+    "evergreen needleleaf forest": "ENF",
+    "evergreen needleleaf forests": "ENF",
+    grassland: "GRA",
+    grasslands: "GRA",
+    "open shrubland": "OSH",
+    "open shrublands": "OSH",
+    "permanent wetland": "WET",
+    "permanent wetlands": "WET",
+    savanna: "SAV",
+    savannas: "SAV",
+    "urban and built up land": "URB",
+    "urban and built up lands": "URB",
+    "water body": "WAT",
+    "water bodies": "WAT"
+  };
 
   var SORT_COLUMNS = [
     { key: "site_id", label: "Site ID", type: "string" },
@@ -493,6 +511,26 @@
     return normalizeNetworkTokens(value).join(";");
   }
 
+  function vegetationLookupKey(value) {
+    return String(value || "")
+      .trim()
+      .toLowerCase()
+      .replace(/&/g, " and ")
+      .replace(/[^a-z0-9]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  function normalizeVegetationType(value) {
+    var raw = String(value == null ? "" : value).trim();
+    var canonicalCode;
+    if (!raw) {
+      return "";
+    }
+    canonicalCode = VEGETATION_NAME_TO_IGBP_CODE[vegetationLookupKey(raw)];
+    return canonicalCode || raw;
+  }
+
   function hasNetworkTag(value, expected) {
     var target = String(expected || "").trim().toLowerCase();
     if (!target) {
@@ -648,6 +686,7 @@
       return row;
     }
     row.country = deriveCountry(row.site_id, row.country);
+    row.vegetation_type = normalizeVegetationType(row.vegetation_type);
     row.first_year = parseIntOrNull(row.first_year);
     row.last_year = parseIntOrNull(row.last_year);
     row.years = yearRangeLabel(row.first_year, row.last_year);
@@ -701,6 +740,20 @@
     var values = [];
     (rows || []).forEach(function (row) {
       var value = sourceFilterValue(row);
+      if (!value || seen[value]) {
+        return;
+      }
+      seen[value] = true;
+      values.push(value);
+    });
+    return values.sort();
+  }
+
+  function uniqueVegetationFilterValues(rows) {
+    var seen = {};
+    var values = [];
+    (rows || []).forEach(function (row) {
+      var value = String(row && row.vegetation_type || "").trim();
       if (!value || seen[value]) {
         return;
       }
@@ -4627,7 +4680,6 @@
     var hubMap = {};
     var networkMap = {};
     var countryMap = {};
-    var vegetationMap = {};
 
     rows.forEach(function (row) {
       if (!hubMap[row.data_hub]) {
@@ -4641,9 +4693,6 @@
       });
       if (row.country) {
         countryMap[row.country] = true;
-      }
-      if (row.vegetation_type) {
-        vegetationMap[row.vegetation_type] = true;
       }
     });
 
@@ -4721,7 +4770,7 @@
     if (b.vegetationFilter) {
       var currentVegetation = this.state.selectedVegetation;
       b.vegetationFilter.innerHTML = "<option value=\"\">All vegetation types</option>";
-      Object.keys(vegetationMap).sort().forEach(function (vegetationType) {
+      uniqueVegetationFilterValues(rows).forEach(function (vegetationType) {
         var option = document.createElement("option");
         option.value = vegetationType;
         option.textContent = vegetationType;
@@ -5173,6 +5222,7 @@
     normalizeNetworkToken: normalizeNetworkToken,
     normalizeNetworkTokens: normalizeNetworkTokens,
     normalizeNetworkDisplayValue: normalizeNetworkDisplayValue,
+    normalizeVegetationType: normalizeVegetationType,
     calculateCoverageLength: calculateCoverageLength,
     shouldEnableBulkToolsActions: shouldEnableBulkToolsActions,
     formatSelectedSiteCount: formatSelectedSiteCount,
@@ -5195,6 +5245,7 @@
     partitionRowsByBulkSource: partitionRowsByBulkSource,
     summarizeBulkSelection: summarizeBulkSelection,
     uniqueSourceFilterValues: uniqueSourceFilterValues,
+    uniqueVegetationFilterValues: uniqueVegetationFilterValues,
     summarizeApiOnlyRowCoordinateCoverage: summarizeApiOnlyRowCoordinateCoverage,
     buildCoordinateLookup: buildCoordinateLookup,
     enrichRowsWithCoordinateLookup: enrichRowsWithCoordinateLookup,

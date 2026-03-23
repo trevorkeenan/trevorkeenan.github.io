@@ -62,6 +62,31 @@ function buildScriptRuntimeBin(tempDir, options) {
   return binDir;
 }
 
+function makeCatalogRow(overrides) {
+  return Object.assign(
+    {
+      site_id: 'XX-Test',
+      site_name: 'Test Site',
+      country: 'US',
+      data_hub: 'ICOS',
+      network: 'FLX',
+      source_network: 'FLX',
+      network_display: 'FLX',
+      network_tokens: ['FLX'],
+      vegetation_type: '',
+      first_year: 2010,
+      last_year: 2011,
+      years: '2010-2011',
+      download_link: 'https://example.org/test.zip',
+      download_mode: 'direct',
+      source_label: 'ICOS',
+      source_reason: 'Available directly from the ICOS Carbon Portal FLUXNET archive.',
+      source_origin: 'icos_direct'
+    },
+    overrides || {}
+  );
+}
+
 function expectedJqGuidancePattern() {
   if (process.platform === 'darwin') {
     return /macOS: brew install jq/;
@@ -327,6 +352,16 @@ test('Network helpers normalize selected short codes to display names and dedupe
   );
 });
 
+test('Vegetation helper maps ICOS full-name variants to canonical IGBP codes and preserves codes', () => {
+  assert.equal(hooks.normalizeVegetationType('Grasslands'), 'GRA');
+  assert.equal(hooks.normalizeVegetationType(' grasslands '), 'GRA');
+  assert.equal(hooks.normalizeVegetationType('Evergreen needleleaf forests'), 'ENF');
+  assert.equal(hooks.normalizeVegetationType('Urban and Built-up lands'), 'URB');
+  assert.equal(hooks.normalizeVegetationType('Permanent wetlands'), 'WET');
+  assert.equal(hooks.normalizeVegetationType('GRA'), 'GRA');
+  assert.equal(hooks.normalizeVegetationType('DNF'), 'DNF');
+});
+
 test('Merged Shuttle rows expose normalized network display names for filter tokens', () => {
   const merged = hooks.mergeCatalogRows([
     {
@@ -353,6 +388,73 @@ test('Merged Shuttle rows expose normalized network display names for filter tok
 
   assert.equal(merged.rows[0].network_display, 'ChinaFlux;JapanFlux');
   assert.deepEqual(merged.rows[0].network_tokens, ['ChinaFlux', 'JapanFlux']);
+});
+
+test('Merged rows normalize mixed code and full-name vegetation values across sources', () => {
+  const merged = hooks.mergeCatalogRows(
+    [
+      makeCatalogRow({
+        site_id: 'US-Code',
+        data_hub: 'AmeriFlux',
+        network: 'AmeriFlux',
+        source_network: 'AMF',
+        network_display: 'AmeriFlux',
+        network_tokens: ['AmeriFlux'],
+        vegetation_type: 'GRA',
+        download_link: 'https://example.org/us-code.zip',
+        source_label: '',
+        source_reason: '',
+        source_origin: 'shuttle'
+      })
+    ],
+    [
+      makeCatalogRow({
+        site_id: 'AT-Full',
+        vegetation_type: 'Grasslands',
+        download_link: 'https://example.org/at-full.zip'
+      }),
+      makeCatalogRow({
+        site_id: 'BE-Full',
+        vegetation_type: 'Evergreen Needleleaf Forests',
+        download_link: 'https://example.org/be-full.zip'
+      })
+    ],
+    [],
+    []
+  );
+
+  assert.equal(merged.rows.find((row) => row.site_id === 'US-Code').vegetation_type, 'GRA');
+  assert.equal(merged.rows.find((row) => row.site_id === 'AT-Full').vegetation_type, 'GRA');
+  assert.equal(merged.rows.find((row) => row.site_id === 'BE-Full').vegetation_type, 'ENF');
+});
+
+test('ICOS-style vegetation full names normalize robustly for case and spacing variants', () => {
+  const merged = hooks.mergeCatalogRows(
+    [],
+    [
+      makeCatalogRow({
+        site_id: 'AT-Neu',
+        vegetation_type: ' grasslands ',
+        download_link: 'https://example.org/at-neu.zip'
+      }),
+      makeCatalogRow({
+        site_id: 'SE-Nor',
+        vegetation_type: 'Evergreen needleleaf forests',
+        download_link: 'https://example.org/se-nor.zip'
+      }),
+      makeCatalogRow({
+        site_id: 'US-Urb',
+        vegetation_type: 'Urban and Built-up lands',
+        download_link: 'https://example.org/us-urb.zip'
+      })
+    ],
+    [],
+    []
+  );
+
+  assert.equal(merged.rows.find((row) => row.site_id === 'AT-Neu').vegetation_type, 'GRA');
+  assert.equal(merged.rows.find((row) => row.site_id === 'SE-Nor').vegetation_type, 'ENF');
+  assert.equal(merged.rows.find((row) => row.site_id === 'US-Urb').vegetation_type, 'URB');
 });
 
 test('AmeriFlux download helpers route FLUXNET to v2 and FLUXNET2015 to v1', () => {
@@ -535,6 +637,47 @@ test('Source filter options include Shuttle, AmeriFlux, AmeriFlux-shuttle, and F
   ]);
 
   assert.deepEqual(values, ['AmeriFlux', 'AmeriFlux-shuttle', 'FLUXNET2015', 'Shuttle']);
+});
+
+test('Vegetation filter values include only canonical codes after mixed-source normalization', () => {
+  const merged = hooks.mergeCatalogRows(
+    [
+      makeCatalogRow({
+        site_id: 'US-GRA',
+        data_hub: 'AmeriFlux',
+        network: 'AmeriFlux',
+        source_network: 'AMF',
+        network_display: 'AmeriFlux',
+        network_tokens: ['AmeriFlux'],
+        vegetation_type: 'GRA',
+        download_link: 'https://example.org/us-gra.zip',
+        source_label: '',
+        source_reason: '',
+        source_origin: 'shuttle'
+      })
+    ],
+    [
+      makeCatalogRow({
+        site_id: 'AT-Gra',
+        vegetation_type: 'Grasslands',
+        download_link: 'https://example.org/at-gra.zip'
+      }),
+      makeCatalogRow({
+        site_id: 'US-Urb',
+        vegetation_type: 'Urban and Built-up lands',
+        download_link: 'https://example.org/us-urb.zip'
+      }),
+      makeCatalogRow({
+        site_id: 'US-Urb-2',
+        vegetation_type: 'urban and built up lands',
+        download_link: 'https://example.org/us-urb-2.zip'
+      })
+    ],
+    [],
+    []
+  );
+
+  assert.deepEqual(hooks.uniqueVegetationFilterValues(merged.rows), ['GRA', 'URB']);
 });
 
 test('Coordinate lookup enriches JSON rows from the CSV snapshot without duplicating metadata', () => {
