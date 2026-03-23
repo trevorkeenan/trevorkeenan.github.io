@@ -1,9 +1,101 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const childProcess = require('node:child_process');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 
 const hooks = require('../assets/shuttle-explorer.js');
+
+const BASH_PATH = childProcess.execFileSync('bash', ['-lc', 'command -v bash'], { encoding: 'utf8' }).trim();
+const SCRIPT_RUNTIME_COMMANDS = ['basename', 'cat', 'mkdir', 'tee', 'uname'];
+
+function resolveCommandPath(command) {
+  return childProcess.execFileSync('bash', ['-lc', 'command -v ' + command], { encoding: 'utf8' }).trim();
+}
+
+function writeExecutable(filePath, text) {
+  fs.writeFileSync(filePath, text, { mode: 0o755 });
+}
+
+function buildScriptRuntimeBin(tempDir, options) {
+  const opts = options || {};
+  const binDir = path.join(tempDir, 'bin');
+  fs.mkdirSync(binDir);
+
+  SCRIPT_RUNTIME_COMMANDS.forEach((command) => {
+    fs.symlinkSync(resolveCommandPath(command), path.join(binDir, command));
+  });
+
+  if (opts.includePython3) {
+    fs.symlinkSync(resolveCommandPath('python3'), path.join(binDir, 'python3'));
+  }
+
+  writeExecutable(
+    path.join(binDir, 'curl'),
+    [
+      '#!' + BASH_PATH,
+      'set -euo pipefail',
+      '',
+      'if [ "${1:-}" = "-sS" ]; then',
+      '  printf \'%s\' \'{"data_urls":[{"url":"https://example.org/mock.zip?download=1"}]}\'',
+      '  exit 0',
+      'fi',
+      '',
+      'if [ "${1:-}" = "-L" ]; then',
+      '  url="${2:-}"',
+      '  shift 2',
+      '  if [ "${1:-}" != "-o" ] || [ -z "${2:-}" ]; then',
+      '    echo "unexpected curl download args: $*" >&2',
+      '    exit 1',
+      '  fi',
+      '  printf \'downloaded:%s\\n\' "$url" > "$2"',
+      '  exit 0',
+      'fi',
+      '',
+      'echo "unexpected curl args: $*" >&2',
+      'exit 1',
+      ''
+    ].join('\n')
+  );
+
+  return binDir;
+}
+
+function expectedJqGuidancePattern() {
+  if (process.platform === 'darwin') {
+    return /macOS: brew install jq/;
+  }
+
+  if (process.platform === 'win32') {
+    return /Windows shells:\s+choco install jq\s+scoop install jq\s+winget install jqlang\.jq/s;
+  }
+
+  if (process.platform === 'linux') {
+    var distroId = '';
+    if (fs.existsSync('/etc/os-release')) {
+      var osReleaseText = fs.readFileSync('/etc/os-release', 'utf8');
+      var idMatch = osReleaseText.match(/^ID="?([^"\n]+)"?/m);
+      if (idMatch) {
+        distroId = idMatch[1];
+      }
+    }
+
+    if (distroId === 'debian' || distroId === 'ubuntu') {
+      return /Debian\/Ubuntu: sudo apt-get install jq/;
+    }
+
+    if (distroId === 'fedora' || distroId === 'rhel') {
+      return /Fedora\/RHEL: sudo dnf install jq/;
+    }
+
+    if (distroId === 'arch') {
+      return /Arch: sudo pacman -S jq/;
+    }
+  }
+
+  return /See https:\/\/jqlang\.github\.io\/jq\/download\//;
+}
 
 test('AmeriFlux availability parser filters entries with empty publish_years', () => {
   const payload = {
@@ -762,6 +854,20 @@ test('AmeriFlux bulk script generator supports mixed FLUXNET and FLUXNET2015 pro
   assert.equal(script.includes('USER_EMAIL="${AMERIFLUX_USER_EMAIL:-custom@example.org}"'), true);
   assert.equal(script.includes('V2_DOWNLOAD_URL="${AMERIFLUX_V2_DOWNLOAD_URL:-https://amfcdn.lbl.gov/api/v2/data_download}"'), true);
   assert.equal(script.includes('V1_DOWNLOAD_URL="${AMERIFLUX_V1_DOWNLOAD_URL:-https://amfcdn.lbl.gov/api/v1/data_download}"'), true);
+  assert.equal(script.includes('extract_urls() {'), true);
+  assert.equal(script.includes("printf '%s' \"$1\" | jq -r '.data_urls[]?.url // empty'"), true);
+  assert.equal(script.includes("printf '%s' \"$1\" | python3 -c '"), true);
+  assert.equal(script.includes('if ! command -v jq >/dev/null 2>&1 && ! command -v python3 >/dev/null 2>&1; then'), true);
+  assert.equal(script.includes('This script requires jq or python3 to parse the AmeriFlux API response.'), true);
+  assert.equal(script.includes('macOS: brew install jq'), true);
+  assert.equal(script.includes('Debian/Ubuntu: sudo apt-get install jq'), true);
+  assert.equal(script.includes('Fedora/RHEL: sudo dnf install jq'), true);
+  assert.equal(script.includes('Arch: sudo pacman -S jq'), true);
+  assert.equal(script.includes('Windows shells:'), true);
+  assert.equal(script.includes('choco install jq'), true);
+  assert.equal(script.includes('scoop install jq'), true);
+  assert.equal(script.includes('winget install jqlang.jq'), true);
+  assert.equal(script.includes('See https://jqlang.github.io/jq/download/'), true);
   assert.equal(script.includes('if [ "$DATA_PRODUCT" = "FLUXNET2015" ]; then'), true);
   assert.equal(script.includes('\\"data_product\\": \\"${DATA_PRODUCT}\\"'), true);
   assert.equal(script.includes('\\"data_variant\\": \\"FULLSET\\"'), true);
@@ -770,8 +876,10 @@ test('AmeriFlux bulk script generator supports mixed FLUXNET and FLUXNET2015 pro
   assert.equal(script.includes('\\"intended_use\\": \\"QED Lab FLUXNET Data Explorer\\"'), true);
   assert.equal(script.includes('\\"is_test\\": false'), false);
   assert.equal(script.includes('while IFS=$\'\\t\' read -r SITE_ID DATA_PRODUCT SOURCE_LABEL; do'), true);
+  assert.equal(script.includes('URLS=$(extract_urls "$RESPONSE" 2>/dev/null || true)'), true);
   assert.equal(script.includes('clean_url="${url%%\\?*}"'), true);
   assert.equal(script.includes('filename="$(basename "$clean_url")"'), true);
+  assert.equal(script.includes('jq is required but was not found in PATH.'), false);
 });
 
 test('AmeriFlux bulk script generator uses internal fallback contact values when no input is provided', () => {
@@ -781,6 +889,64 @@ test('AmeriFlux bulk script generator uses internal fallback contact values when
 
   assert.equal(script.includes('USER_ID="${AMERIFLUX_USER_ID:-trevorkeenan}"'), true);
   assert.equal(script.includes('USER_EMAIL="${AMERIFLUX_USER_EMAIL:-trevorkeenan@berkeley.edu}"'), true);
+});
+
+test('Generated AmeriFlux bulk script falls back to python3 when jq is unavailable', () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ameriflux-bulk-script-'));
+  const scriptPath = path.join(tempDir, 'download_ameriflux_selected.sh');
+  const outDir = path.join(tempDir, 'downloads');
+  const sitesFile = path.join(tempDir, 'ameriflux_selected_sites.txt');
+  const logFile = path.join(tempDir, 'ameriflux_bulk_download.log');
+  const binDir = buildScriptRuntimeBin(tempDir, { includePython3: true });
+
+  writeExecutable(
+    scriptPath,
+    hooks.buildAmeriFluxBulkScriptText([
+      { site_id: 'AR-Bal', data_product: 'FLUXNET', source_label: 'AmeriFlux' }
+    ])
+  );
+
+  childProcess.execFileSync(BASH_PATH, [scriptPath, outDir, sitesFile, logFile], {
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      PATH: binDir
+    }
+  });
+
+  assert.equal(fs.existsSync(path.join(outDir, 'mock.zip')), true);
+  assert.match(fs.readFileSync(path.join(outDir, 'mock.zip'), 'utf8'), /downloaded:https:\/\/example\.org\/mock\.zip\?download=1/);
+  assert.match(fs.readFileSync(logFile, 'utf8'), /Downloading mock\.zip \(AR-Bal, FLUXNET\)/);
+  assert.match(fs.readFileSync(sitesFile, 'utf8'), /^# site_id\tdata_product\tsource_label/m);
+});
+
+test('Generated AmeriFlux bulk script exits with jq install guidance when neither jq nor python3 is available', () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ameriflux-bulk-script-'));
+  const scriptPath = path.join(tempDir, 'download_ameriflux_selected.sh');
+  const outDir = path.join(tempDir, 'downloads');
+  const sitesFile = path.join(tempDir, 'ameriflux_selected_sites.txt');
+  const logFile = path.join(tempDir, 'ameriflux_bulk_download.log');
+  const binDir = buildScriptRuntimeBin(tempDir, { includePython3: false });
+
+  writeExecutable(
+    scriptPath,
+    hooks.buildAmeriFluxBulkScriptText([
+      { site_id: 'AR-Bal', data_product: 'FLUXNET', source_label: 'AmeriFlux' }
+    ])
+  );
+
+  const result = childProcess.spawnSync(BASH_PATH, [scriptPath, outDir, sitesFile, logFile], {
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      PATH: binDir
+    }
+  });
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /This script requires jq or python3 to parse the AmeriFlux API response\./);
+  assert.match(result.stderr, expectedJqGuidancePattern());
+  assert.equal(fs.existsSync(sitesFile), false);
 });
 
 test('Download-all wrapper script delegates to both child scripts when both source partitions exist', () => {
