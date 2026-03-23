@@ -1174,15 +1174,20 @@ test('Browser-facing explorer markup does not include hardcoded AmeriFlux identi
 
 test('Vegetation filter markup includes an IGBP info tooltip and external reference link', () => {
   const explorerJs = fs.readFileSync(path.join(__dirname, '..', 'assets', 'shuttle-explorer.js'), 'utf8');
+  const explorerCss = fs.readFileSync(path.join(__dirname, '..', 'assets', 'shuttle-explorer.css'), 'utf8');
 
+  assert.equal(explorerJs.includes('data-role=\\"vegetation-info-wrap\\"'), true);
   assert.equal(explorerJs.includes('data-role=\\"vegetation-info-toggle\\"'), true);
   assert.equal(explorerJs.includes('aria-label=\\"About IGBP vegetation codes\\"'), true);
+  assert.equal(explorerJs.includes('aria-expanded=\\"false\\"'), true);
   assert.equal(
     explorerJs.includes(
       'Vegetation codes follow IGBP classifications as outlined <a href=\\"https://fluxnet.org/data/badm-data-templates/igbp-classification/\\" target=\\"_blank\\" rel=\\"noopener noreferrer\\">here</a>'
     ),
     true
   );
+  assert.equal(explorerCss.includes('.shuttle-explorer__tooltip-wrap.is-open .shuttle-explorer__tooltip'), true);
+  assert.equal(explorerCss.includes('.shuttle-explorer__tooltip {'), true);
 });
 
 test('Bulk tools layout keeps Shuttle and AmeriFlux action buttons in the intended order', () => {

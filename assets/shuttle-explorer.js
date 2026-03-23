@@ -2546,8 +2546,8 @@
       ".shuttle-explorer__tooltip-toggle{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;padding:0;border:1px solid #b7c1ce;border-radius:999px;background:#fff;color:#2f5374;font-size:.74em;font-weight:700;line-height:1;cursor:help;}",
       ".shuttle-explorer__tooltip-toggle:hover,.shuttle-explorer__tooltip-toggle:focus{background:#eef3f9;}",
       ".shuttle-explorer__tooltip-toggle:focus{outline:2px solid #2f5374;outline-offset:1px;}",
-      ".shuttle-explorer__tooltip{position:absolute;top:calc(100% + 6px);right:0;z-index:5;width:min(260px,calc(100vw - 40px));padding:8px 10px;border:1px solid #d5dbe3;border-radius:8px;background:#fff;box-shadow:0 8px 18px rgba(35,54,74,.12);color:#33475b;font-size:.82em;line-height:1.4;opacity:0;pointer-events:none;transform:translateY(-2px);transition:opacity .12s ease,transform .12s ease;}",
-      ".shuttle-explorer__tooltip-wrap:hover .shuttle-explorer__tooltip,.shuttle-explorer__tooltip-wrap:focus-within .shuttle-explorer__tooltip{opacity:1;pointer-events:auto;transform:translateY(0);}",
+      ".shuttle-explorer__tooltip{position:absolute;top:calc(100% + 6px);right:0;z-index:5;display:block;width:min(260px,calc(100vw - 40px));padding:8px 10px;border:1px solid #d5dbe3;border-radius:8px;background:#fff;box-shadow:0 8px 18px rgba(35,54,74,.12);color:#33475b;font-size:.82em;line-height:1.4;opacity:0;visibility:hidden;pointer-events:none;transform:translateY(-2px);transition:opacity .12s ease,transform .12s ease,visibility .12s ease;}",
+      ".shuttle-explorer__tooltip-wrap.is-open .shuttle-explorer__tooltip,.shuttle-explorer__tooltip-wrap:hover .shuttle-explorer__tooltip,.shuttle-explorer__tooltip-wrap:focus-within .shuttle-explorer__tooltip{opacity:1;visibility:visible;pointer-events:auto;transform:translateY(0);}",
       ".shuttle-explorer__tooltip a{color:#2f5374;}",
       ".shuttle-explorer__tooltip a:hover,.shuttle-explorer__tooltip a:focus{text-decoration:underline;}",
       ".shuttle-explorer__field input,.shuttle-explorer__field select{width:100%;padding:7px 8px;border:1px solid #b7c1ce;border-radius:6px;background:#fff;font:inherit;}",
@@ -2638,8 +2638,8 @@
       "  <div class=\"shuttle-explorer__field\">",
       "    <div class=\"shuttle-explorer__label-row\">",
       "      <label for=\"shuttle-vegetation\">Vegetation type</label>",
-      "      <span class=\"shuttle-explorer__tooltip-wrap\">",
-      "        <button type=\"button\" class=\"shuttle-explorer__tooltip-toggle\" data-role=\"vegetation-info-toggle\" aria-label=\"About IGBP vegetation codes\" aria-describedby=\"shuttle-vegetation-tooltip\">i</button>",
+      "      <span class=\"shuttle-explorer__tooltip-wrap\" data-role=\"vegetation-info-wrap\">",
+      "        <button type=\"button\" class=\"shuttle-explorer__tooltip-toggle\" data-role=\"vegetation-info-toggle\" aria-label=\"About IGBP vegetation codes\" aria-describedby=\"shuttle-vegetation-tooltip\" aria-expanded=\"false\">i</button>",
       "        <span class=\"shuttle-explorer__tooltip\" id=\"shuttle-vegetation-tooltip\" role=\"tooltip\">Vegetation codes follow IGBP classifications as outlined <a href=\"https://fluxnet.org/data/badm-data-templates/igbp-classification/\" target=\"_blank\" rel=\"noopener noreferrer\">here</a></span>",
       "      </span>",
       "    </div>",
@@ -2855,6 +2855,8 @@
       sourceFilter: bySelector(this.root, "[data-role='source-filter']"),
       countryFilter: bySelector(this.root, "[data-role='country-filter']"),
       vegetationFilter: bySelector(this.root, "[data-role='vegetation-filter']"),
+      vegetationInfoWrap: bySelector(this.root, "[data-role='vegetation-info-wrap']"),
+      vegetationInfoToggle: bySelector(this.root, "[data-role='vegetation-info-toggle']"),
       hubFilters: bySelector(this.root, "[data-role='hub-filters']"),
       widgetLastUpdatedInline: bySelector(this.root, "[data-role='widget-last-updated-inline']"),
       summaryRow: bySelector(this.root, "[data-role='summary-row']"),
@@ -2907,6 +2909,14 @@
       copyAttribution: bySelector(this.root, "[data-role='copy-attribution']"),
       copyStatus: bySelector(this.root, "[data-role='copy-status']")
     };
+  };
+
+  Explorer.prototype.setVegetationTooltipOpen = function (isOpen) {
+    if (!this.bindings.vegetationInfoWrap || !this.bindings.vegetationInfoToggle) {
+      return;
+    }
+    this.bindings.vegetationInfoWrap.classList.toggle("is-open", !!isOpen);
+    this.bindings.vegetationInfoToggle.setAttribute("aria-expanded", isOpen ? "true" : "false");
   };
 
   Explorer.prototype.bindEvents = function () {
@@ -2970,6 +2980,31 @@
         self.updateDerivedState();
         self.render();
         self.trackFilterChange("vegetation_type", self.state.selectedVegetation);
+      });
+    }
+
+    if (b.vegetationInfoWrap && b.vegetationInfoToggle) {
+      this.setVegetationTooltipOpen(false);
+      b.vegetationInfoToggle.addEventListener("click", function (event) {
+        event.preventDefault();
+        event.stopPropagation();
+        self.setVegetationTooltipOpen(!b.vegetationInfoWrap.classList.contains("is-open"));
+      });
+      b.vegetationInfoToggle.addEventListener("keydown", function (event) {
+        if (event.key === "Escape" || event.key === "Esc") {
+          self.setVegetationTooltipOpen(false);
+          b.vegetationInfoToggle.blur();
+        }
+      });
+      b.vegetationInfoWrap.addEventListener("focusout", function (event) {
+        if (!b.vegetationInfoWrap.contains(event.relatedTarget)) {
+          self.setVegetationTooltipOpen(false);
+        }
+      });
+      document.addEventListener("click", function (event) {
+        if (!b.vegetationInfoWrap.contains(event.target)) {
+          self.setVegetationTooltipOpen(false);
+        }
       });
     }
 
