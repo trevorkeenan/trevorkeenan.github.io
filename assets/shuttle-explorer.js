@@ -7,6 +7,7 @@
   var DEFAULT_ICOS_DIRECT_CSV_URL = "assets/icos_direct_fluxnet.csv";
   var AMERIFLUX_SITE_INFO_URL = "assets/ameriflux_site_info.csv";
   var FLUXNET2015_SITE_INFO_URL = "assets/siteinfo_fluxnet2015.csv";
+  var SITE_VEGETATION_METADATA_URL = "assets/site_vegetation_metadata.csv";
   var DEFAULT_PAGE_SIZE = 10;
   var MAX_PAGE_BUTTONS = 7;
   var SEARCH_DEBOUNCE_MS = 180;
@@ -193,12 +194,20 @@
     return normalizeSiteId(firstDefinedString(raw, ["site_id", "mysitename", "site_code", "siteid", "site"]));
   }
 
+  function vegetationMetadataSiteId(raw) {
+    return normalizeSiteId(firstDefinedString(raw, ["site_id", "mysitename", "site_code", "siteid", "site"]));
+  }
+
   function siteInfoSiteName(raw) {
     return firstDefinedString(raw, ["site_name", "site_title", "site_label", "name", "sitename"]);
   }
 
   function siteInfoCountry(raw) {
     return firstDefinedString(raw, ["country", "country_name", "country_code"]);
+  }
+
+  function extractVegetationMetadataValue(raw) {
+    return firstDefinedString(raw, ["vegetation_type", "igbp", "veg_type"]);
   }
 
   function countryCodeToName(code) {
@@ -1454,7 +1463,7 @@
       source_network: networkLabel,
       network_display: networkLabel,
       network_tokens: [networkLabel],
-      vegetation_type: "",
+      vegetation_type: firstDefinedString(site, ["vegetation_type", "igbp", "veg_type"]),
       first_year: firstYear,
       last_year: lastYear,
       years: years,
@@ -1839,6 +1848,19 @@
     return lookup;
   }
 
+  function buildVegetationMetadataLookup(rawRows) {
+    var lookup = {};
+    (Array.isArray(rawRows) ? rawRows : []).forEach(function (raw) {
+      var siteId = vegetationMetadataSiteId(raw);
+      var vegetationType = extractVegetationMetadataValue(raw);
+      if (!siteId || !vegetationType) {
+        return;
+      }
+      lookup[siteId] = vegetationType;
+    });
+    return lookup;
+  }
+
   function loadAmeriFluxSiteInfo(url) {
     return fetchText(url).then(function (result) {
       return {
@@ -1860,30 +1882,68 @@
     });
   }
 
-  function enrichAmeriFluxSitesWithMetadata(sites, siteInfoLookup) {
+  function loadVegetationMetadata(url) {
+    return fetchText(url).then(function (result) {
+      var lookup = buildVegetationMetadataLookup(csvTextToObjects(result.text));
+      var canonical = JSON.stringify(Object.keys(lookup).sort().map(function (siteId) {
+        return [siteId, lookup[siteId]];
+      }));
+      return {
+        lookup: lookup,
+        source: "csv",
+        sourceUrl: url,
+        lastModified: result.lastModified || "",
+        meta: {
+          version: stableHashString(canonical)
+        },
+        warning: ""
+      };
+    }).catch(function (error) {
+      return {
+        lookup: {},
+        source: "csv",
+        sourceUrl: url,
+        lastModified: "",
+        meta: {},
+        warning: "Vegetation metadata unavailable; API-only vegetation coverage may be incomplete.",
+        error: error
+      };
+    });
+  }
+
+  function enrichSitesWithMetadata(sites, siteInfoLookup, vegetationLookup) {
     return (Array.isArray(sites) ? sites : []).map(function (site) {
       var siteId = normalizeSiteId(site && site.site_id);
       var siteInfo = siteId && siteInfoLookup ? siteInfoLookup[siteId] : null;
       var enriched = Object.assign({}, site);
       var derivedCountry = deriveCountry(siteId, "");
+      var vegetationType = extractVegetationMetadataValue(enriched);
       enriched.country = deriveCountry(siteId, enriched.country);
-      if (!siteInfo) {
-        return enriched;
+      if (vegetationType) {
+        enriched.vegetation_type = vegetationType;
+      } else if (siteId && vegetationLookup && vegetationLookup[siteId]) {
+        enriched.vegetation_type = vegetationLookup[siteId];
       }
-      if (!String(enriched.site_name || "").trim() && siteInfo.site_name) {
-        enriched.site_name = siteInfo.site_name;
-      }
-      if ((!String(enriched.country || "").trim() || String(enriched.country || "").trim() === derivedCountry) && siteInfo.country) {
-        enriched.country = siteInfo.country;
-      }
-      if (parseCoordinate(enriched.latitude, -90, 90) == null && siteInfo.latitude != null) {
-        enriched.latitude = siteInfo.latitude;
-      }
-      if (parseCoordinate(enriched.longitude, -180, 180) == null && siteInfo.longitude != null) {
-        enriched.longitude = siteInfo.longitude;
+      if (siteInfo) {
+        if (!String(enriched.site_name || "").trim() && siteInfo.site_name) {
+          enriched.site_name = siteInfo.site_name;
+        }
+        if ((!String(enriched.country || "").trim() || String(enriched.country || "").trim() === derivedCountry) && siteInfo.country) {
+          enriched.country = siteInfo.country;
+        }
+        if (parseCoordinate(enriched.latitude, -90, 90) == null && siteInfo.latitude != null) {
+          enriched.latitude = siteInfo.latitude;
+        }
+        if (parseCoordinate(enriched.longitude, -180, 180) == null && siteInfo.longitude != null) {
+          enriched.longitude = siteInfo.longitude;
+        }
       }
       return enriched;
     });
+  }
+
+  function enrichAmeriFluxSitesWithMetadata(sites, siteInfoLookup, vegetationLookup) {
+    return enrichSitesWithMetadata(sites, siteInfoLookup, vegetationLookup);
   }
 
   function buildFluxnet2015SiteLookup(rawRows) {
@@ -1919,30 +1979,8 @@
     });
   }
 
-  function enrichFluxnet2015SitesWithMetadata(sites, siteInfoLookup) {
-    return (Array.isArray(sites) ? sites : []).map(function (site) {
-      var siteId = normalizeSiteId(site && site.site_id);
-      var siteInfo = siteId && siteInfoLookup ? siteInfoLookup[siteId] : null;
-      var enriched = Object.assign({}, site);
-      var derivedCountry = deriveCountry(siteId, "");
-      enriched.country = deriveCountry(siteId, enriched.country);
-      if (!siteInfo) {
-        return enriched;
-      }
-      if (!String(enriched.site_name || "").trim() && siteInfo.site_name) {
-        enriched.site_name = siteInfo.site_name;
-      }
-      if ((!String(enriched.country || "").trim() || String(enriched.country || "").trim() === derivedCountry) && siteInfo.country) {
-        enriched.country = siteInfo.country;
-      }
-      if (parseCoordinate(enriched.latitude, -90, 90) == null && siteInfo.latitude != null) {
-        enriched.latitude = siteInfo.latitude;
-      }
-      if (parseCoordinate(enriched.longitude, -180, 180) == null && siteInfo.longitude != null) {
-        enriched.longitude = siteInfo.longitude;
-      }
-      return enriched;
-    });
+  function enrichFluxnet2015SitesWithMetadata(sites, siteInfoLookup, vegetationLookup) {
+    return enrichSitesWithMetadata(sites, siteInfoLookup, vegetationLookup);
   }
 
   function summarizeApiOnlyRowCoordinateCoverage(rows) {
@@ -2775,6 +2813,7 @@
     this.icosDirectCsvUrl = root.getAttribute("data-icos-direct-csv-src") || DEFAULT_ICOS_DIRECT_CSV_URL;
     this.ameriFluxSiteInfoUrl = root.getAttribute("data-ameriflux-site-info-src") || AMERIFLUX_SITE_INFO_URL;
     this.fluxnet2015SiteInfoUrl = root.getAttribute("data-fluxnet2015-site-info-src") || FLUXNET2015_SITE_INFO_URL;
+    this.vegetationMetadataUrl = root.getAttribute("data-vegetation-metadata-src") || SITE_VEGETATION_METADATA_URL;
     this.pageSize = Math.max(1, parseInt(root.getAttribute("data-page-size") || String(DEFAULT_PAGE_SIZE), 10) || DEFAULT_PAGE_SIZE);
     var ameriIdentity = resolveAmeriFluxIdentityFromRoot(root);
     this.shuttleSource = new ShuttleSource(this.jsonUrl, this.csvUrl);
@@ -5100,16 +5139,19 @@
     this.trackExplorerLoadedOnce();
   };
 
-  Explorer.prototype.buildMergedSnapshotState = function (shuttleResult, icosDirectResult, ameriResult, fluxnet2015Result, ameriFluxSiteInfoResult, fluxnet2015SiteInfoResult) {
+  Explorer.prototype.buildMergedSnapshotState = function (shuttleResult, icosDirectResult, ameriResult, fluxnet2015Result, ameriFluxSiteInfoResult, fluxnet2015SiteInfoResult, vegetationMetadataResult) {
     var ameriFluxSiteInfoLookup = ameriFluxSiteInfoResult && ameriFluxSiteInfoResult.lookup ? ameriFluxSiteInfoResult.lookup : {};
     var fluxnet2015SiteInfoLookup = fluxnet2015SiteInfoResult && fluxnet2015SiteInfoResult.lookup ? fluxnet2015SiteInfoResult.lookup : {};
+    var vegetationMetadataLookup = vegetationMetadataResult && vegetationMetadataResult.lookup ? vegetationMetadataResult.lookup : {};
     var enrichedAmeriFluxSites = enrichAmeriFluxSitesWithMetadata(
       ameriResult && Array.isArray(ameriResult.sites) ? ameriResult.sites : [],
-      ameriFluxSiteInfoLookup
+      ameriFluxSiteInfoLookup,
+      vegetationMetadataLookup
     );
     var enrichedFluxnet2015Sites = enrichFluxnet2015SitesWithMetadata(
       fluxnet2015Result && Array.isArray(fluxnet2015Result.sites) ? fluxnet2015Result.sites : [],
-      fluxnet2015SiteInfoLookup
+      fluxnet2015SiteInfoLookup,
+      vegetationMetadataLookup
     );
     var merge = mergeCatalogRows(
       shuttleResult && Array.isArray(shuttleResult.rows) ? shuttleResult.rows : [],
@@ -5128,7 +5170,8 @@
         ameriResult && ameriResult.warning ? ameriResult.warning : "",
         fluxnet2015Result && fluxnet2015Result.warning ? fluxnet2015Result.warning : "",
         ameriFluxSiteInfoResult && ameriFluxSiteInfoResult.warning ? ameriFluxSiteInfoResult.warning : "",
-        fluxnet2015SiteInfoResult && fluxnet2015SiteInfoResult.warning ? fluxnet2015SiteInfoResult.warning : ""
+        fluxnet2015SiteInfoResult && fluxnet2015SiteInfoResult.warning ? fluxnet2015SiteInfoResult.warning : "",
+        vegetationMetadataResult && vegetationMetadataResult.warning ? vegetationMetadataResult.warning : ""
       ),
       snapshotUpdatedDate: extractSnapshotUpdatedDate(shuttleResult && shuttleResult.meta ? shuttleResult.meta : {}),
       amerifluxTotalSites: ameriResult && ameriResult.totalSites ? ameriResult.totalSites : 0,
@@ -5171,7 +5214,8 @@
       this.ameriFluxSource.list_sites(),
       this.fluxnet2015Source.list_sites(),
       loadAmeriFluxSiteInfo(this.ameriFluxSiteInfoUrl),
-      loadFluxnet2015SiteInfo(this.fluxnet2015SiteInfoUrl)
+      loadFluxnet2015SiteInfo(this.fluxnet2015SiteInfoUrl),
+      loadVegetationMetadata(this.vegetationMetadataUrl)
     ])
       .then(function (results) {
         var shuttleResult = results[0] || {};
@@ -5180,14 +5224,24 @@
         var fluxnet2015Result = results[3] || {};
         var ameriFluxSiteInfoResult = results[4] || {};
         var fluxnet2015SiteInfoResult = results[5] || {};
-        var snapshotState = self.buildMergedSnapshotState(shuttleResult, icosDirectResult, ameriResult, fluxnet2015Result, ameriFluxSiteInfoResult, fluxnet2015SiteInfoResult);
+        var vegetationMetadataResult = results[6] || {};
+        var snapshotState = self.buildMergedSnapshotState(
+          shuttleResult,
+          icosDirectResult,
+          ameriResult,
+          fluxnet2015Result,
+          ameriFluxSiteInfoResult,
+          fluxnet2015SiteInfoResult,
+          vegetationMetadataResult
+        );
         var freshnessKey = [
           "shuttle:" + buildSnapshotFreshnessKey(shuttleResult),
           "icos-direct:" + buildSnapshotFreshnessKey(icosDirectResult),
           String(ameriResult.freshnessKey || "ameriflux:none"),
           String(fluxnet2015Result.freshnessKey || "fluxnet2015:none"),
           "ameriflux-site-info:" + buildSnapshotFreshnessKey(ameriFluxSiteInfoResult),
-          "fluxnet2015-site-info:" + buildSnapshotFreshnessKey(fluxnet2015SiteInfoResult)
+          "fluxnet2015-site-info:" + buildSnapshotFreshnessKey(fluxnet2015SiteInfoResult),
+          "vegetation-metadata:" + buildSnapshotFreshnessKey(vegetationMetadataResult)
         ].join("|");
 
         self.applyLoadedSnapshotState(snapshotState);
@@ -5300,6 +5354,7 @@
     buildCoordinateLookup: buildCoordinateLookup,
     enrichRowsWithCoordinateLookup: enrichRowsWithCoordinateLookup,
     buildAmeriFluxSiteInfoLookup: buildAmeriFluxSiteInfoLookup,
+    buildVegetationMetadataLookup: buildVegetationMetadataLookup,
     enrichAmeriFluxSitesWithMetadata: enrichAmeriFluxSitesWithMetadata,
     buildFluxnet2015SiteLookup: buildFluxnet2015SiteLookup,
     enrichFluxnet2015SitesWithMetadata: enrichFluxnet2015SitesWithMetadata,

@@ -457,6 +457,105 @@ test('ICOS-style vegetation full names normalize robustly for case and spacing v
   assert.equal(merged.rows.find((row) => row.site_id === 'US-Urb').vegetation_type, 'URB');
 });
 
+test('AmeriFlux-only rows keep backfilled vegetation through merge and search indexing', () => {
+  const merged = hooks.mergeCatalogRows(
+    [],
+    [],
+    [
+      {
+        site_id: 'BR-New',
+        publish_years: [2019],
+        first_year: 2019,
+        last_year: 2019,
+        country: 'BR',
+        vegetation_type: 'Grasslands'
+      }
+    ],
+    []
+  );
+
+  assert.equal(merged.rows[0].source_label, 'AmeriFlux');
+  assert.equal(merged.rows[0].vegetation_type, 'GRA');
+  assert.equal(merged.rows[0].search_text.includes('gra'), true);
+});
+
+test('FLUXNET2015 API-only rows keep backfilled vegetation through merge and search indexing', () => {
+  const merged = hooks.mergeCatalogRows(
+    [],
+    [],
+    [],
+    [
+      {
+        site_id: 'AR-SLu',
+        publish_years: [2002, 2003],
+        first_year: 2002,
+        last_year: 2003,
+        country: 'AR',
+        vegetation_type: 'Savannas'
+      }
+    ]
+  );
+
+  assert.equal(merged.rows[0].source_label, 'FLUXNET2015');
+  assert.equal(merged.rows[0].vegetation_type, 'SAV');
+  assert.equal(merged.rows[0].search_text.includes('sav'), true);
+});
+
+test('AmeriFlux-shuttle overlap keeps Shuttle vegetation unchanged when API metadata also exists', () => {
+  const merged = hooks.mergeCatalogRows(
+    [
+      makeCatalogRow({
+        site_id: 'AR-Bal',
+        data_hub: 'AmeriFlux',
+        network: 'AmeriFlux',
+        source_network: 'AMF',
+        network_display: 'AmeriFlux',
+        network_tokens: ['AmeriFlux'],
+        vegetation_type: 'CRO',
+        download_link: 'https://example.org/ar-bal.zip',
+        source_label: '',
+        source_reason: '',
+        source_origin: 'shuttle'
+      })
+    ],
+    [],
+    [
+      {
+        site_id: 'AR-Bal',
+        publish_years: [2012, 2013],
+        first_year: 2012,
+        last_year: 2013,
+        country: 'AR',
+        vegetation_type: 'Grasslands'
+      }
+    ],
+    []
+  );
+
+  assert.equal(merged.rows[0].source_label, 'AmeriFlux-shuttle');
+  assert.equal(merged.rows[0].vegetation_type, 'CRO');
+});
+
+test('API-only rows do not fabricate vegetation when authoritative metadata is absent', () => {
+  const merged = hooks.mergeCatalogRows(
+    [],
+    [],
+    [
+      {
+        site_id: 'US-NoVeg',
+        publish_years: [2024],
+        first_year: 2024,
+        last_year: 2024,
+        country: 'US'
+      }
+    ],
+    []
+  );
+
+  assert.equal(merged.rows[0].vegetation_type, '');
+  assert.equal(merged.rows[0].search_text.includes('gra'), false);
+});
+
 test('AmeriFlux download helpers route FLUXNET to v2 and FLUXNET2015 to v1', () => {
   assert.equal(
     hooks.getDownloadEndpointForProduct('FLUXNET'),
@@ -746,9 +845,12 @@ test('AmeriFlux site info lookup enriches API availability rows by normalized SI
       country: 'BR'
     }
   ];
+  const vegetationLookup = {
+    'AR-BAL': 'Grasslands'
+  };
 
   const lookup = hooks.buildAmeriFluxSiteInfoLookup(rawSiteInfoRows);
-  const enriched = hooks.enrichAmeriFluxSitesWithMetadata(availabilitySites, lookup);
+  const enriched = hooks.enrichAmeriFluxSitesWithMetadata(availabilitySites, lookup, vegetationLookup);
 
   assert.deepEqual(lookup['AR-BAL'], {
     site_id: 'AR-BAL',
@@ -761,10 +863,12 @@ test('AmeriFlux site info lookup enriches API availability rows by normalized SI
   assert.equal(enriched[0].country, 'Argentina');
   assert.equal(enriched[0].latitude, -37.7596);
   assert.equal(enriched[0].longitude, -58.3024);
+  assert.equal(enriched[0].vegetation_type, 'Grasslands');
   assert.equal(enriched[1].site_name, undefined);
   assert.equal(enriched[1].country, 'Brazil');
   assert.equal(enriched[1].latitude, undefined);
   assert.equal(enriched[1].longitude, undefined);
+  assert.equal(enriched[1].vegetation_type, undefined);
 });
 
 test('FLUXNET2015 site info lookup accepts mysitename/lon/lat columns and enriches FLUXNET2015 rows separately', () => {
@@ -791,9 +895,12 @@ test('FLUXNET2015 site info lookup accepts mysitename/lon/lat columns and enrich
       country: 'ZZ'
     }
   ];
+  const vegetationLookup = {
+    'AR-SLU': 'Evergreen Needleleaf Forests'
+  };
 
   const lookup = hooks.buildFluxnet2015SiteLookup(rawSiteInfoRows);
-  const enriched = hooks.enrichFluxnet2015SitesWithMetadata(availabilitySites, lookup);
+  const enriched = hooks.enrichFluxnet2015SitesWithMetadata(availabilitySites, lookup, vegetationLookup);
 
   assert.deepEqual(lookup['AR-SLU'], {
     site_id: 'AR-SLU',
@@ -805,9 +912,23 @@ test('FLUXNET2015 site info lookup accepts mysitename/lon/lat columns and enrich
   assert.equal(enriched[0].latitude, -33.4648);
   assert.equal(enriched[0].longitude, -66.4598);
   assert.equal(enriched[0].country, 'Argentina');
+  assert.equal(enriched[0].vegetation_type, 'Evergreen Needleleaf Forests');
   assert.equal(enriched[1].latitude, undefined);
   assert.equal(enriched[1].longitude, undefined);
   assert.equal(enriched[1].country, 'ZZ');
+  assert.equal(enriched[1].vegetation_type, undefined);
+});
+
+test('Vegetation metadata lookup builds canonical site-id keys from CSV-like rows', () => {
+  const lookup = hooks.buildVegetationMetadataLookup([
+    { site_id: ' us-new ', vegetation_type: 'Grasslands' },
+    { mysitename: 'AR-SLu', igbp: 'MF' }
+  ]);
+
+  assert.deepEqual(lookup, {
+    'US-NEW': 'Grasslands',
+    'AR-SLU': 'MF'
+  });
 });
 
 test('API-only coordinate coverage summary reports AmeriFlux and FLUXNET2015 counts separately', () => {
