@@ -1172,6 +1172,19 @@ test('Browser-facing explorer markup does not include hardcoded AmeriFlux identi
   assert.equal(explorerJs.includes('value="trevorkeenan@berkeley.edu"'), false);
 });
 
+test('Vegetation filter markup includes an IGBP info tooltip and external reference link', () => {
+  const explorerJs = fs.readFileSync(path.join(__dirname, '..', 'assets', 'shuttle-explorer.js'), 'utf8');
+
+  assert.equal(explorerJs.includes('data-role=\\"vegetation-info-toggle\\"'), true);
+  assert.equal(explorerJs.includes('aria-label=\\"About IGBP vegetation codes\\"'), true);
+  assert.equal(
+    explorerJs.includes(
+      'Vegetation codes follow IGBP classifications as outlined <a href=\\"https://fluxnet.org/data/badm-data-templates/igbp-classification/\\" target=\\"_blank\\" rel=\\"noopener noreferrer\\">here</a>'
+    ),
+    true
+  );
+});
+
 test('Bulk tools layout keeps Shuttle and AmeriFlux action buttons in the intended order', () => {
   const explorerJs = fs.readFileSync(path.join(__dirname, '..', 'assets', 'shuttle-explorer.js'), 'utf8');
   const shuttleRowStart = explorerJs.indexOf('data-role=\\"show-cli-command\\">Show Shuttle CLI command</button>"');
