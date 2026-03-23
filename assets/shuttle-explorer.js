@@ -107,23 +107,42 @@
     JPF: "JapanFlux",
     KOF: "KoreaFlux"
   };
-  var VEGETATION_NAME_TO_IGBP_CODE = {
-    cropland: "CRO",
-    croplands: "CRO",
-    "evergreen needleleaf forest": "ENF",
-    "evergreen needleleaf forests": "ENF",
-    grassland: "GRA",
-    grasslands: "GRA",
-    "open shrubland": "OSH",
-    "open shrublands": "OSH",
-    "permanent wetland": "WET",
-    "permanent wetlands": "WET",
-    savanna: "SAV",
-    savannas: "SAV",
-    "urban and built up land": "URB",
-    "urban and built up lands": "URB",
-    "water body": "WAT",
-    "water bodies": "WAT"
+  var VEGETATION_IGBP_DISPLAY_NAMES = {
+    BSV: "Barren or Sparsely Vegetated",
+    CRO: "Croplands",
+    CSH: "Closed Shrublands",
+    CVM: "Cropland/Natural Vegetation Mosaics",
+    DBF: "Deciduous Broadleaf Forests",
+    DNF: "Deciduous Needleleaf Forests",
+    EBF: "Evergreen Broadleaf Forests",
+    ENF: "Evergreen Needleleaf Forests",
+    GRA: "Grasslands",
+    MF: "Mixed Forests",
+    OSH: "Open Shrublands",
+    SAV: "Savannas",
+    SNO: "Snow and Ice",
+    URB: "Urban and Built-Up Lands",
+    WAT: "Water Bodies",
+    WET: "Permanent Wetlands",
+    WSA: "Woody Savannas"
+  };
+  var VEGETATION_IGBP_LABEL_ALIASES = {
+    BSV: ["Barren or Sparsely Vegetated Lands", "Barren or Sparsely Vegetated Land"],
+    CRO: ["Cropland"],
+    CSH: ["Closed Shrubland"],
+    CVM: ["Cropland/Natural Vegetation Mosaic", "Cropland Natural Vegetation Mosaic", "Cropland Natural Vegetation Mosaics"],
+    DBF: ["Deciduous Broadleaf Forest"],
+    DNF: ["Deciduous Needleleaf Forest"],
+    EBF: ["Evergreen Broadleaf Forest"],
+    ENF: ["Evergreen Needleleaf Forest"],
+    GRA: ["Grassland"],
+    MF: ["Mixed Forest"],
+    OSH: ["Open Shrubland"],
+    SAV: ["Savanna"],
+    URB: ["Urban and Built Up Lands", "Urban and Built Up Land", "Urban and Built-up Lands", "Urban and Built-up Land"],
+    WAT: ["Water Body"],
+    WET: ["Permanent Wetland"],
+    WSA: ["Woody Savanna"]
   };
 
   var SORT_COLUMNS = [
@@ -530,6 +549,22 @@
       .trim();
   }
 
+  function buildVegetationNameToCodeMap() {
+    var lookup = {};
+    Object.keys(VEGETATION_IGBP_DISPLAY_NAMES).forEach(function (code) {
+      var names = [VEGETATION_IGBP_DISPLAY_NAMES[code]].concat(VEGETATION_IGBP_LABEL_ALIASES[code] || []);
+      names.forEach(function (name) {
+        var key = vegetationLookupKey(name);
+        if (key) {
+          lookup[key] = code;
+        }
+      });
+    });
+    return lookup;
+  }
+
+  var VEGETATION_NAME_TO_IGBP_CODE = buildVegetationNameToCodeMap();
+
   function normalizeVegetationType(value) {
     var raw = String(value == null ? "" : value).trim();
     var canonicalCode;
@@ -538,6 +573,16 @@
     }
     canonicalCode = VEGETATION_NAME_TO_IGBP_CODE[vegetationLookupKey(raw)];
     return canonicalCode || raw;
+  }
+
+  function vegetationDisplayLabel(value) {
+    var raw = String(value == null ? "" : value).trim();
+    var canonicalCode;
+    if (!raw) {
+      return "";
+    }
+    canonicalCode = String(normalizeVegetationType(raw) || "").trim().toUpperCase();
+    return VEGETATION_IGBP_DISPLAY_NAMES[canonicalCode] || raw;
   }
 
   function hasNetworkTag(value, expected) {
@@ -770,6 +815,20 @@
       values.push(value);
     });
     return values.sort();
+  }
+
+  function buildVegetationFilterOptions(rows) {
+    return uniqueVegetationFilterValues(rows)
+      .map(function (vegetationType) {
+        return {
+          value: vegetationType,
+          label: vegetationDisplayLabel(vegetationType)
+        };
+      })
+      .sort(function (a, b) {
+        var byLabel = a.label.localeCompare(b.label);
+        return byLabel || a.value.localeCompare(b.value);
+      });
   }
 
   function getApiRowDataProduct(row) {
@@ -4859,10 +4918,10 @@
     if (b.vegetationFilter) {
       var currentVegetation = this.state.selectedVegetation;
       b.vegetationFilter.innerHTML = "<option value=\"\">All vegetation types</option>";
-      uniqueVegetationFilterValues(rows).forEach(function (vegetationType) {
+      buildVegetationFilterOptions(rows).forEach(function (vegetationOption) {
         var option = document.createElement("option");
-        option.value = vegetationType;
-        option.textContent = vegetationType;
+        option.value = vegetationOption.value;
+        option.textContent = vegetationOption.label;
         b.vegetationFilter.appendChild(option);
       });
       b.vegetationFilter.value = currentVegetation;
@@ -5327,6 +5386,7 @@
     normalizeNetworkTokens: normalizeNetworkTokens,
     normalizeNetworkDisplayValue: normalizeNetworkDisplayValue,
     normalizeVegetationType: normalizeVegetationType,
+    vegetationDisplayLabel: vegetationDisplayLabel,
     calculateCoverageLength: calculateCoverageLength,
     shouldEnableBulkToolsActions: shouldEnableBulkToolsActions,
     formatSelectedSiteCount: formatSelectedSiteCount,
@@ -5350,6 +5410,7 @@
     summarizeBulkSelection: summarizeBulkSelection,
     uniqueSourceFilterValues: uniqueSourceFilterValues,
     uniqueVegetationFilterValues: uniqueVegetationFilterValues,
+    buildVegetationFilterOptions: buildVegetationFilterOptions,
     summarizeApiOnlyRowCoordinateCoverage: summarizeApiOnlyRowCoordinateCoverage,
     buildCoordinateLookup: buildCoordinateLookup,
     enrichRowsWithCoordinateLookup: enrichRowsWithCoordinateLookup,

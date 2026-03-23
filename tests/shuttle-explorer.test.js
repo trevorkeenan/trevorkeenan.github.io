@@ -779,6 +779,104 @@ test('Vegetation filter values include only canonical codes after mixed-source n
   assert.deepEqual(hooks.uniqueVegetationFilterValues(merged.rows), ['GRA', 'URB']);
 });
 
+test('Vegetation display labels map canonical codes to full IGBP names for dropdown use', () => {
+  assert.equal(hooks.vegetationDisplayLabel('GRA'), 'Grasslands');
+  assert.equal(hooks.vegetationDisplayLabel('ENF'), 'Evergreen Needleleaf Forests');
+  assert.equal(hooks.vegetationDisplayLabel('CVM'), 'Cropland/Natural Vegetation Mosaics');
+  assert.equal(hooks.vegetationDisplayLabel('unknown-code'), 'unknown-code');
+});
+
+test('Vegetation filter options use full names, preserve canonical values, and avoid duplicates across sources', () => {
+  const merged = hooks.mergeCatalogRows(
+    [
+      makeCatalogRow({
+        site_id: 'US-Shu',
+        data_hub: 'AmeriFlux',
+        network: 'AmeriFlux',
+        source_network: 'AMF',
+        network_display: 'AmeriFlux',
+        network_tokens: ['AmeriFlux'],
+        vegetation_type: 'GRA',
+        download_link: 'https://example.org/us-shu.zip',
+        source_label: '',
+        source_reason: '',
+        source_origin: 'shuttle'
+      }),
+      makeCatalogRow({
+        site_id: 'AU-Ter',
+        data_hub: 'TERN',
+        network: 'TERN',
+        source_network: 'TERN',
+        network_display: 'TERN',
+        network_tokens: ['TERN'],
+        vegetation_type: 'Grasslands',
+        download_link: 'https://example.org/au-ter.zip',
+        source_label: '',
+        source_reason: '',
+        source_origin: 'shuttle'
+      })
+    ],
+    [
+      makeCatalogRow({
+        site_id: 'AT-Ico',
+        data_hub: 'ICOS',
+        vegetation_type: 'grasslands',
+        download_link: 'https://example.org/at-ico.zip'
+      }),
+      makeCatalogRow({
+        site_id: 'SE-Enf',
+        data_hub: 'ICOS',
+        vegetation_type: 'ENF',
+        download_link: 'https://example.org/se-enf.zip'
+      })
+    ],
+    [
+      {
+        site_id: 'BR-Amf',
+        publish_years: [2021],
+        first_year: 2021,
+        last_year: 2021,
+        country: 'BR',
+        vegetation_type: 'Grasslands'
+      }
+    ],
+    []
+  );
+
+  const options = hooks.buildVegetationFilterOptions(merged.rows);
+  const grasslandsOption = options.find((option) => option.label === 'Grasslands');
+
+  assert.deepEqual(options, [
+    { value: 'ENF', label: 'Evergreen Needleleaf Forests' },
+    { value: 'GRA', label: 'Grasslands' }
+  ]);
+  assert.deepEqual(grasslandsOption, { value: 'GRA', label: 'Grasslands' });
+  assert.deepEqual(
+    merged.rows
+      .filter((row) => row.vegetation_type === grasslandsOption.value)
+      .map((row) => row.site_id)
+      .sort(),
+    ['AT-Ico', 'AU-Ter', 'BR-Amf', 'US-Shu']
+  );
+});
+
+test('Table-style output keeps canonical vegetation codes rather than dropdown display labels', () => {
+  const text = hooks.buildTableClipboardText([
+    {
+      site_id: 'US-Gra',
+      site_name: 'Grass Site',
+      country: 'USA',
+      data_hub: 'AmeriFlux',
+      vegetation_type: 'GRA',
+      years: '2012-2013',
+      length_years: 2
+    }
+  ]);
+
+  assert.match(text, /\tGRA\t2012-2013\t2/);
+  assert.equal(text.includes('Grasslands'), false);
+});
+
 test('Coordinate lookup enriches JSON rows from the CSV snapshot without duplicating metadata', () => {
   const csvRows = [
     {
