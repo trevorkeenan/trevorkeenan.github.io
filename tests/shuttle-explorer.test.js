@@ -465,7 +465,7 @@ test('Sites with additional BASE years surface both products and bulk helpers ke
   );
   assert.match(coverageHtml, /FLUXNET:/);
   assert.match(coverageHtml, /BASE:/);
-  assert.match(coverageHtml, /Sites with FLUXNET \+ additional BASE years/);
+  assert.match(coverageHtml, /additional years in BASE/);
 });
 
 test('Exact year-set comparison surfaces both products when coverage differs internally, not only at the endpoints', () => {

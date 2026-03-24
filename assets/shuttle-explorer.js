@@ -58,6 +58,7 @@
   var FILTER_LABEL_FLUXNET_AVAILABLE = "FLUXNET available";
   var FILTER_LABEL_BASE_ONLY = "Only BASE available";
   var FILTER_LABEL_ADDITIONAL_BASE_YEARS = "Sites with FLUXNET + additional BASE years";
+  var TABLE_LABEL_ADDITIONAL_BASE_YEARS = "additional years in BASE";
   var MAX_HTTP_RETRIES = 3;
   var RETRY_BASE_DELAY_MS = 500;
   var COPY_TABLE_BUTTON_LABEL = "Copy table to clipboard";
@@ -3219,7 +3220,7 @@
     }).join("<span class=\"shuttle-explorer__coverage-sep\" aria-hidden=\"true\">\u00b7</span>");
 
     if (row && row.surfacedProductClassification === SURFACED_CLASSIFICATION_ADDITIONAL_BASE_YEARS) {
-      badgeHtml = "<div class=\"shuttle-explorer__coverage-badge\"><span class=\"shuttle-explorer__source-badge shuttle-explorer__source-badge--base-addition\">" + escapeHtml(FILTER_LABEL_ADDITIONAL_BASE_YEARS) + "</span></div>";
+      badgeHtml = "<div class=\"shuttle-explorer__coverage-badge\"><span class=\"shuttle-explorer__source-badge shuttle-explorer__source-badge--base-addition\">" + escapeHtml(TABLE_LABEL_ADDITIONAL_BASE_YEARS) + "</span></div>";
     }
 
     return "<div class=\"shuttle-explorer__coverage-list\">" + content + "</div>" + badgeHtml;
