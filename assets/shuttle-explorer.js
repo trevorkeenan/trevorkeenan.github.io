@@ -12,8 +12,8 @@
   var MAX_PAGE_BUTTONS = 7;
   var SEARCH_DEBOUNCE_MS = 180;
   var STYLE_ID = "shuttle-explorer-inline-styles";
-  var SNAPSHOT_CACHE_SCHEMA_VERSION = 5;
-  var SNAPSHOT_CACHE_STORAGE_PREFIX = "shuttle-explorer:snapshot-cache:v5";
+  var SNAPSHOT_CACHE_SCHEMA_VERSION = 6;
+  var SNAPSHOT_CACHE_STORAGE_PREFIX = "shuttle-explorer:snapshot-cache:v6";
   var AMERIFLUX_FLUXNET_AVAILABILITY_URL = "https://amfcdn.lbl.gov/api/v2/data_availability/AmeriFlux/FLUXNET/CCBY4.0";
   var AMERIFLUX_BASE_AVAILABILITY_URL = "https://amfcdn.lbl.gov/api/v2/data_availability/AmeriFlux/BASE-BADM/CCBY4.0";
   var FLUXNET2015_AVAILABILITY_URL = "https://amfcdn.lbl.gov/api/v2/data_availability/FLUXNET/FLUXNET2015/CCBY4.0";
@@ -56,8 +56,8 @@
   var SURFACED_CLASSIFICATION_BASE_ONLY = "base_only";
   var SURFACED_CLASSIFICATION_ADDITIONAL_BASE_YEARS = "additional_base_years";
   var FILTER_LABEL_FLUXNET_AVAILABLE = "FLUXNET available";
-  var FILTER_LABEL_BASE_ONLY = "BASE only";
-  var FILTER_LABEL_ADDITIONAL_BASE_YEARS = "Additional BASE years";
+  var FILTER_LABEL_BASE_ONLY = "Only BASE available";
+  var FILTER_LABEL_ADDITIONAL_BASE_YEARS = "Sites with FLUXNET + additional BASE years";
   var MAX_HTTP_RETRIES = 3;
   var RETRY_BASE_DELAY_MS = 500;
   var COPY_TABLE_BUTTON_LABEL = "Copy table to clipboard";
@@ -744,6 +744,7 @@
     var networkDisplay = String(row && (row.network_display || row.network || row.source_network) || "").trim();
     var surfacedSummary = buildSurfacedCoverageSummary(row && row.surfacedProducts);
     var classification = String(row && row.surfacedProductClassification || "").trim();
+    var availabilityLabels = Array.isArray(row && row.availability_filter_labels) ? row.availability_filter_labels.join(" ") : "";
     return (
       String(row && row.site_id || "") + " " +
       String(row && row.site_name || "") + " " +
@@ -753,6 +754,7 @@
       String(row && row.vegetation_type || "") + " " +
       String(row && row.source_label || "") + " " +
       String(row && row.source_filter || "") + " " +
+      availabilityLabels + " " +
       String(row && row.years || "") + " " +
       surfacedSummary + " " +
       classification
@@ -773,6 +775,7 @@
     row.source_origin = resolveSourceOrigin(row);
     row.source_priority = resolveSourcePriority(row);
     row.source_filter = sourceFilterValue(row);
+    row.availability_filter_labels = availabilityFilterLabels(row);
     row.is_icos = isIcosRow(row);
     row.has_coordinates = parseCoordinate(row.latitude, -90, 90) != null &&
       parseCoordinate(row.longitude, -180, 180) != null;
@@ -809,29 +812,59 @@
   }
 
   function sourceFilterValue(row) {
-    var classification = String(row && row.surfacedProductClassification || "").trim();
-    if (classification === SURFACED_CLASSIFICATION_BASE_ONLY) {
-      return FILTER_LABEL_BASE_ONLY;
+    var explicit = String(row && row.source_provenance_filter || "").trim();
+    var label;
+    var dataProduct;
+    if (explicit) {
+      return explicit;
     }
-    if (classification === SURFACED_CLASSIFICATION_ADDITIONAL_BASE_YEARS) {
-      return FILTER_LABEL_ADDITIONAL_BASE_YEARS;
+    label = String(row && row.source_label || "").trim();
+    dataProduct = getApiRowDataProduct(row);
+    if (label === BASE_SOURCE_ONLY || dataProduct === AMERIFLUX_BASE_PRODUCT) {
+      return AMERIFLUX_SOURCE_ONLY;
     }
-    if (row && row.primaryProcessedProduct) {
-      return FILTER_LABEL_FLUXNET_AVAILABLE;
-    }
-    if (classification === SURFACED_CLASSIFICATION_PROCESSED_ONLY) {
-      return FILTER_LABEL_FLUXNET_AVAILABLE;
-    }
-    return FILTER_LABEL_FLUXNET_AVAILABLE;
+    return label || SHUTTLE_SOURCE;
   }
 
   function uniqueSourceFilterValues(rows) {
-    var available = {};
+    var seen = {};
+    var values = [];
     (rows || []).forEach(function (row) {
       var value = sourceFilterValue(row);
-      if (value) {
-        available[value] = true;
+      if (!value || seen[value]) {
+        return;
       }
+      seen[value] = true;
+      values.push(value);
+    });
+    return values.sort();
+  }
+
+  function hasProcessedProduct(row) {
+    return !!(row && (row.hasProcessedProduct || row.hasFluxnetAvailable || row.primaryProcessedProduct));
+  }
+
+  function availabilityFilterLabels(row) {
+    var labels = [];
+    var classification = String(row && row.surfacedProductClassification || "").trim();
+    if (hasProcessedProduct(row)) {
+      labels.push(FILTER_LABEL_FLUXNET_AVAILABLE);
+    }
+    if (classification === SURFACED_CLASSIFICATION_BASE_ONLY) {
+      labels.push(FILTER_LABEL_BASE_ONLY);
+    }
+    if (classification === SURFACED_CLASSIFICATION_ADDITIONAL_BASE_YEARS) {
+      labels.push(FILTER_LABEL_ADDITIONAL_BASE_YEARS);
+    }
+    return labels;
+  }
+
+  function uniqueAvailabilityFilterValues(rows) {
+    var available = {};
+    (rows || []).forEach(function (row) {
+      availabilityFilterLabels(row).forEach(function (label) {
+        available[label] = true;
+      });
     });
     return [
       FILTER_LABEL_FLUXNET_AVAILABLE,
@@ -840,6 +873,47 @@
     ].filter(function (label) {
       return !!available[label];
     });
+  }
+
+  function availabilityFilterMatches(row, selectedAvailability) {
+    if (!selectedAvailability) {
+      return true;
+    }
+    return availabilityFilterLabels(row).indexOf(String(selectedAvailability || "").trim()) !== -1;
+  }
+
+  function rowMatchesExplorerFilters(row, filters) {
+    var opts = filters || {};
+    var search = String(opts.search || "").trim().toLowerCase();
+    var selectedNetwork = String(opts.selectedNetwork || "");
+    var selectedSource = String(opts.selectedSource || "");
+    var selectedAvailability = String(opts.selectedAvailability || "");
+    var selectedCountry = String(opts.selectedCountry || "");
+    var selectedVegetation = String(opts.selectedVegetation || "");
+    var selectedHubs = opts.selectedHubs && typeof opts.selectedHubs === "object" ? opts.selectedHubs : {};
+
+    if (search && String(row && row.search_text || "").indexOf(search) === -1) {
+      return false;
+    }
+    if (selectedNetwork && (!row || row.network_tokens.indexOf(selectedNetwork) === -1)) {
+      return false;
+    }
+    if (selectedSource && sourceFilterValue(row) !== selectedSource) {
+      return false;
+    }
+    if (!availabilityFilterMatches(row, selectedAvailability)) {
+      return false;
+    }
+    if (selectedCountry && String(row && row.country || "") !== selectedCountry) {
+      return false;
+    }
+    if (selectedVegetation && String(row && row.vegetation_type || "") !== selectedVegetation) {
+      return false;
+    }
+    if (Object.keys(selectedHubs).length && !selectedHubs[row.data_hub]) {
+      return false;
+    }
+    return true;
   }
 
   function uniqueVegetationFilterValues(rows) {
@@ -1915,11 +1989,15 @@
   function applySurfacedProductsToRow(row, primaryProcessedProduct, ameriFluxBaseProduct, surfacedProducts, classification) {
     var products = Array.isArray(surfacedProducts) ? surfacedProducts.slice() : [];
     var unionYears = buildSurfacedYearUnion(products);
+    var provenanceSource = sourceFilterValue(primaryProcessedProduct || row);
 
     row.primaryProcessedProduct = primaryProcessedProduct || null;
     row.ameriFluxBaseProduct = ameriFluxBaseProduct || null;
     row.surfacedProducts = products;
     row.surfacedProductClassification = String(classification || "");
+    row.hasProcessedProduct = !!primaryProcessedProduct;
+    row.hasFluxnetAvailable = row.hasProcessedProduct;
+    row.source_provenance_filter = provenanceSource;
 
     if (unionYears.length) {
       row.first_year = unionYears[0];
@@ -1932,6 +2010,7 @@
     }
 
     row.source_filter = sourceFilterValue(row);
+    row.availability_filter_labels = availabilityFilterLabels(row);
     row.search_text = buildRowSearchText(row);
     return row;
   }
@@ -3140,7 +3219,7 @@
     }).join("<span class=\"shuttle-explorer__coverage-sep\" aria-hidden=\"true\">\u00b7</span>");
 
     if (row && row.surfacedProductClassification === SURFACED_CLASSIFICATION_ADDITIONAL_BASE_YEARS) {
-      badgeHtml = "<div class=\"shuttle-explorer__coverage-badge\"><span class=\"shuttle-explorer__source-badge shuttle-explorer__source-badge--base-addition\">Additional BASE years</span></div>";
+      badgeHtml = "<div class=\"shuttle-explorer__coverage-badge\"><span class=\"shuttle-explorer__source-badge shuttle-explorer__source-badge--base-addition\">" + escapeHtml(FILTER_LABEL_ADDITIONAL_BASE_YEARS) + "</span></div>";
     }
 
     return "<div class=\"shuttle-explorer__coverage-list\">" + content + "</div>" + badgeHtml;
@@ -3193,7 +3272,7 @@
       ".shuttle-explorer__status.is-error{background:#fff3f3;color:#8b1e1e;border:1px solid #f2c7c7;}",
       ".shuttle-explorer__status.is-loading{background:#f2f7ff;color:#234d7b;border:1px solid #d6e5fb;}",
       ".shuttle-explorer__status.is-ok{background:#f3fbf4;color:#225e2b;border:1px solid #cfe8d4;}",
-      ".shuttle-explorer__controls{display:grid;grid-template-columns:2fr 1fr 1fr 1fr 1fr;gap:10px;margin:0 0 10px;}",
+      ".shuttle-explorer__controls{display:grid;grid-template-columns:2fr 1fr 1fr 1fr 1fr 1fr;gap:10px;margin:0 0 10px;}",
       ".shuttle-explorer__field{display:flex;flex-direction:column;gap:4px;}",
       ".shuttle-explorer__field label{font-size:.82em;color:#4d5b6a;}",
       ".shuttle-explorer__label-row{display:inline-flex;align-items:center;gap:6px;}",
@@ -3288,12 +3367,16 @@
       "    <input id=\"shuttle-search\" type=\"search\" placeholder=\"e.g., US-Ton or Tonzi\" data-role=\"search\" />",
       "  </div>",
       "  <div class=\"shuttle-explorer__field\">",
-      "    <label for=\"shuttle-network\">Network</label>",
-      "    <select id=\"shuttle-network\" data-role=\"network-filter\"><option value=\"\">All networks</option></select>",
+      "    <label for=\"shuttle-source\">Source</label>",
+      "    <select id=\"shuttle-source\" data-role=\"source-filter\"><option value=\"\">All sources</option></select>",
       "  </div>",
       "  <div class=\"shuttle-explorer__field\">",
-      "    <label for=\"shuttle-source\">Availability</label>",
-      "    <select id=\"shuttle-source\" data-role=\"source-filter\"><option value=\"\">All sites</option></select>",
+      "    <label for=\"shuttle-availability\">Availability</label>",
+      "    <select id=\"shuttle-availability\" data-role=\"availability-filter\"><option value=\"\">All sites</option></select>",
+      "  </div>",
+      "  <div class=\"shuttle-explorer__field\">",
+      "    <label for=\"shuttle-network\">Network</label>",
+      "    <select id=\"shuttle-network\" data-role=\"network-filter\"><option value=\"\">All networks</option></select>",
       "  </div>",
       "  <div class=\"shuttle-explorer__field\">",
       "    <label for=\"shuttle-country\">Country</label>",
@@ -3495,6 +3578,7 @@
       search: "",
       selectedNetwork: "",
       selectedSource: "",
+      selectedAvailability: "",
       selectedCountry: "",
       selectedVegetation: "",
       selectedHubs: {},
@@ -3530,6 +3614,7 @@
       search: bySelector(this.root, "[data-role='search']"),
       networkFilter: bySelector(this.root, "[data-role='network-filter']"),
       sourceFilter: bySelector(this.root, "[data-role='source-filter']"),
+      availabilityFilter: bySelector(this.root, "[data-role='availability-filter']"),
       countryFilter: bySelector(this.root, "[data-role='country-filter']"),
       vegetationFilter: bySelector(this.root, "[data-role='vegetation-filter']"),
       vegetationInfoWrap: bySelector(this.root, "[data-role='vegetation-info-wrap']"),
@@ -3637,6 +3722,16 @@
         self.updateDerivedState();
         self.render();
         self.trackFilterChange("source", self.state.selectedSource);
+      });
+    }
+
+    if (b.availabilityFilter) {
+      b.availabilityFilter.addEventListener("change", function () {
+        self.state.selectedAvailability = String(b.availabilityFilter.value || "");
+        self.state.page = 1;
+        self.updateDerivedState();
+        self.render();
+        self.trackFilterChange("availability", self.state.selectedAvailability);
       });
     }
 
@@ -4047,6 +4142,7 @@
     this.state.search = "";
     this.state.selectedNetwork = "";
     this.state.selectedSource = "";
+    this.state.selectedAvailability = "";
     this.state.selectedCountry = "";
     this.state.selectedVegetation = "";
     Object.keys(this.state.selectedHubs).forEach(function (hub) {
@@ -4064,6 +4160,9 @@
     }
     if (this.bindings.sourceFilter) {
       this.bindings.sourceFilter.value = "";
+    }
+    if (this.bindings.availabilityFilter) {
+      this.bindings.availabilityFilter.value = "";
     }
     if (this.bindings.countryFilter) {
       this.bindings.countryFilter.value = "";
@@ -5468,7 +5567,7 @@
 
     if (b.sourceFilter) {
       var currentSource = this.state.selectedSource;
-      b.sourceFilter.innerHTML = "<option value=\"\">All sites</option>";
+      b.sourceFilter.innerHTML = "<option value=\"\">All sources</option>";
       uniqueSourceFilterValues(rows).forEach(function (sourceValue) {
         var option = document.createElement("option");
         option.value = sourceValue;
@@ -5478,6 +5577,21 @@
       b.sourceFilter.value = currentSource;
       if (b.sourceFilter.value !== currentSource) {
         this.state.selectedSource = "";
+      }
+    }
+
+    if (b.availabilityFilter) {
+      var currentAvailability = this.state.selectedAvailability;
+      b.availabilityFilter.innerHTML = "<option value=\"\">All sites</option>";
+      uniqueAvailabilityFilterValues(rows).forEach(function (availabilityValue) {
+        var option = document.createElement("option");
+        option.value = availabilityValue;
+        option.textContent = availabilityValue;
+        b.availabilityFilter.appendChild(option);
+      });
+      b.availabilityFilter.value = currentAvailability;
+      if (b.availabilityFilter.value !== currentAvailability) {
+        this.state.selectedAvailability = "";
       }
     }
 
@@ -5518,30 +5632,21 @@
     var search = String(this.state.search || "").trim().toLowerCase();
     var selectedNetwork = this.state.selectedNetwork;
     var selectedSource = this.state.selectedSource;
+    var selectedAvailability = this.state.selectedAvailability;
     var selectedCountry = this.state.selectedCountry;
     var selectedVegetation = this.state.selectedVegetation;
     var selectedHubs = this.state.selectedHubs;
 
     this.state.filteredRows = this.state.rows.filter(function (row) {
-      if (search && row.search_text.indexOf(search) === -1) {
-        return false;
-      }
-      if (selectedNetwork && row.network_tokens.indexOf(selectedNetwork) === -1) {
-        return false;
-      }
-      if (selectedSource && sourceFilterValue(row) !== selectedSource) {
-        return false;
-      }
-      if (selectedCountry && row.country !== selectedCountry) {
-        return false;
-      }
-      if (selectedVegetation && row.vegetation_type !== selectedVegetation) {
-        return false;
-      }
-      if (Object.keys(selectedHubs).length && !selectedHubs[row.data_hub]) {
-        return false;
-      }
-      return true;
+      return rowMatchesExplorerFilters(row, {
+        search: search,
+        selectedNetwork: selectedNetwork,
+        selectedSource: selectedSource,
+        selectedAvailability: selectedAvailability,
+        selectedCountry: selectedCountry,
+        selectedVegetation: selectedVegetation,
+        selectedHubs: selectedHubs
+      });
     }).slice().sort(function (a, b) {
       return compareRows(a, b, self.state.sortKey, self.state.sortDir);
     });
@@ -6019,6 +6124,8 @@
     partitionRowsByBulkSource: partitionRowsByBulkSource,
     summarizeBulkSelection: summarizeBulkSelection,
     uniqueSourceFilterValues: uniqueSourceFilterValues,
+    uniqueAvailabilityFilterValues: uniqueAvailabilityFilterValues,
+    rowMatchesExplorerFilters: rowMatchesExplorerFilters,
     uniqueVegetationFilterValues: uniqueVegetationFilterValues,
     buildVegetationFilterOptions: buildVegetationFilterOptions,
     summarizeApiOnlyRowCoordinateCoverage: summarizeApiOnlyRowCoordinateCoverage,
