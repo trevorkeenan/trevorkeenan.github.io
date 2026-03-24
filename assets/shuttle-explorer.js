@@ -12,9 +12,10 @@
   var MAX_PAGE_BUTTONS = 7;
   var SEARCH_DEBOUNCE_MS = 180;
   var STYLE_ID = "shuttle-explorer-inline-styles";
-  var SNAPSHOT_CACHE_SCHEMA_VERSION = 4;
-  var SNAPSHOT_CACHE_STORAGE_PREFIX = "shuttle-explorer:snapshot-cache:v4";
+  var SNAPSHOT_CACHE_SCHEMA_VERSION = 5;
+  var SNAPSHOT_CACHE_STORAGE_PREFIX = "shuttle-explorer:snapshot-cache:v5";
   var AMERIFLUX_FLUXNET_AVAILABILITY_URL = "https://amfcdn.lbl.gov/api/v2/data_availability/AmeriFlux/FLUXNET/CCBY4.0";
+  var AMERIFLUX_BASE_AVAILABILITY_URL = "https://amfcdn.lbl.gov/api/v2/data_availability/AmeriFlux/BASE-BADM/CCBY4.0";
   var FLUXNET2015_AVAILABILITY_URL = "https://amfcdn.lbl.gov/api/v2/data_availability/FLUXNET/FLUXNET2015/CCBY4.0";
   var AMERIFLUX_V2_DOWNLOAD_URL = "https://amfcdn.lbl.gov/api/v2/data_download";
   var AMERIFLUX_V1_DOWNLOAD_URL = "https://amfcdn.lbl.gov/api/v1/data_download";
@@ -30,6 +31,7 @@
   var AMERIFLUX_TRUSTED_RUNTIME_FLAG = "amerifluxTrustedRuntime";
   var ICOS_DIRECT_SOURCE_ONLY = "ICOS";
   var AMERIFLUX_SOURCE_ONLY = "AmeriFlux";
+  var BASE_SOURCE_ONLY = "BASE";
   var FLUXNET2015_SOURCE_ONLY = "FLUXNET2015";
   var AMERIFLUX_SHUTTLE = "AmeriFlux-shuttle";
   var SHUTTLE_SOURCE = "Shuttle";
@@ -41,11 +43,21 @@
   var AMERIFLUX_SOURCE_PRIORITY = 200;
   var FLUXNET2015_SOURCE_PRIORITY = 100;
   var AMERIFLUX_FLUXNET_PRODUCT = "FLUXNET";
+  var AMERIFLUX_BASE_PRODUCT = "BASE-BADM";
   var FLUXNET2015_PRODUCT = "FLUXNET2015";
   var AMERIFLUX_DATA_HUB = "AmeriFlux";
   var AMERIFLUX_FLUXNET_AVAILABILITY_CACHE_KEY = "shuttle-explorer:ameriflux-fluxnet-availability:v1";
+  var AMERIFLUX_BASE_AVAILABILITY_CACHE_KEY = "shuttle-explorer:ameriflux-base-availability:v1";
   var FLUXNET2015_AVAILABILITY_CACHE_KEY = "shuttle-explorer:fluxnet2015-availability:v1";
   var AMERIFLUX_AVAILABILITY_CACHE_MAX_AGE_MS = 6 * 60 * 60 * 1000;
+  var PRODUCT_FAMILY_FLUXNET = "FLUXNET";
+  var PRODUCT_FAMILY_BASE = "BASE";
+  var SURFACED_CLASSIFICATION_PROCESSED_ONLY = "processed_only";
+  var SURFACED_CLASSIFICATION_BASE_ONLY = "base_only";
+  var SURFACED_CLASSIFICATION_ADDITIONAL_BASE_YEARS = "additional_base_years";
+  var FILTER_LABEL_FLUXNET_AVAILABLE = "FLUXNET available";
+  var FILTER_LABEL_BASE_ONLY = "BASE only";
+  var FILTER_LABEL_ADDITIONAL_BASE_YEARS = "Additional BASE years";
   var MAX_HTTP_RETRIES = 3;
   var RETRY_BASE_DELAY_MS = 500;
   var COPY_TABLE_BUTTON_LABEL = "Copy table to clipboard";
@@ -613,6 +625,8 @@
       row.source_network = FLUXNET2015_SOURCE_ONLY;
       networkDisplay = FLUXNET2015_SOURCE_ONLY;
     } else if (
+      sourceLabel === BASE_SOURCE_ONLY ||
+      dataProduct === AMERIFLUX_BASE_PRODUCT ||
       String(row.data_hub || "").toLowerCase() === "ameriflux" ||
       sourceLabel === AMERIFLUX_SOURCE_ONLY ||
       sourceLabel === AMERIFLUX_SHUTTLE ||
@@ -689,7 +703,12 @@
     if (dataProduct === FLUXNET2015_PRODUCT || sourceLabel === FLUXNET2015_SOURCE_ONLY) {
       return FLUXNET2015_SOURCE_PRIORITY;
     }
-    if (sourceOrigin === AMERIFLUX_API_SOURCE_ORIGIN || sourceLabel === AMERIFLUX_SOURCE_ONLY) {
+    if (
+      sourceOrigin === AMERIFLUX_API_SOURCE_ORIGIN ||
+      sourceLabel === AMERIFLUX_SOURCE_ONLY ||
+      sourceLabel === BASE_SOURCE_ONLY ||
+      dataProduct === AMERIFLUX_BASE_PRODUCT
+    ) {
       return AMERIFLUX_SOURCE_PRIORITY;
     }
     return SHUTTLE_SOURCE_PRIORITY;
@@ -723,6 +742,8 @@
 
   function buildRowSearchText(row) {
     var networkDisplay = String(row && (row.network_display || row.network || row.source_network) || "").trim();
+    var surfacedSummary = buildSurfacedCoverageSummary(row && row.surfacedProducts);
+    var classification = String(row && row.surfacedProductClassification || "").trim();
     return (
       String(row && row.site_id || "") + " " +
       String(row && row.site_name || "") + " " +
@@ -731,7 +752,10 @@
       String(row && row.source_network || "") + " " +
       String(row && row.vegetation_type || "") + " " +
       String(row && row.source_label || "") + " " +
-      String(row && row.source_filter || "")
+      String(row && row.source_filter || "") + " " +
+      String(row && row.years || "") + " " +
+      surfacedSummary + " " +
+      classification
     ).toLowerCase();
   }
 
@@ -785,22 +809,37 @@
   }
 
   function sourceFilterValue(row) {
-    var label = String(row && row.source_label || "").trim();
-    return label || SHUTTLE_SOURCE;
+    var classification = String(row && row.surfacedProductClassification || "").trim();
+    if (classification === SURFACED_CLASSIFICATION_BASE_ONLY) {
+      return FILTER_LABEL_BASE_ONLY;
+    }
+    if (classification === SURFACED_CLASSIFICATION_ADDITIONAL_BASE_YEARS) {
+      return FILTER_LABEL_ADDITIONAL_BASE_YEARS;
+    }
+    if (row && row.primaryProcessedProduct) {
+      return FILTER_LABEL_FLUXNET_AVAILABLE;
+    }
+    if (classification === SURFACED_CLASSIFICATION_PROCESSED_ONLY) {
+      return FILTER_LABEL_FLUXNET_AVAILABLE;
+    }
+    return FILTER_LABEL_FLUXNET_AVAILABLE;
   }
 
   function uniqueSourceFilterValues(rows) {
-    var seen = {};
-    var values = [];
+    var available = {};
     (rows || []).forEach(function (row) {
       var value = sourceFilterValue(row);
-      if (!value || seen[value]) {
-        return;
+      if (value) {
+        available[value] = true;
       }
-      seen[value] = true;
-      values.push(value);
     });
-    return values.sort();
+    return [
+      FILTER_LABEL_FLUXNET_AVAILABLE,
+      FILTER_LABEL_BASE_ONLY,
+      FILTER_LABEL_ADDITIONAL_BASE_YEARS
+    ].filter(function (label) {
+      return !!available[label];
+    });
   }
 
   function uniqueVegetationFilterValues(rows) {
@@ -833,30 +872,58 @@
 
   function getApiRowDataProduct(row) {
     var value = String(row && row.api_data_product || "").trim().toUpperCase();
+    if (value === AMERIFLUX_BASE_PRODUCT || value === PRODUCT_FAMILY_BASE) {
+      return AMERIFLUX_BASE_PRODUCT;
+    }
     if (value === FLUXNET2015_PRODUCT) {
       return FLUXNET2015_PRODUCT;
     }
     return AMERIFLUX_FLUXNET_PRODUCT;
   }
 
+  function apiProductDisplayName(dataProduct) {
+    var normalized = normalizeDownloadProduct(dataProduct);
+    if (normalized === AMERIFLUX_BASE_PRODUCT) {
+      return BASE_SOURCE_ONLY;
+    }
+    if (normalized === FLUXNET2015_PRODUCT) {
+      return FLUXNET2015_SOURCE_ONLY;
+    }
+    return PRODUCT_FAMILY_FLUXNET;
+  }
+
+  function productFamilyDisplayName(productFamily, useLongLabel) {
+    var family = String(productFamily || "").trim().toUpperCase();
+    if (family === PRODUCT_FAMILY_BASE) {
+      return useLongLabel ? "BASE (standardized observations)" : PRODUCT_FAMILY_BASE;
+    }
+    return useLongLabel ? "FLUXNET (ONEFlux-derived)" : PRODUCT_FAMILY_FLUXNET;
+  }
+
   function getApiActionCopyLabel(dataProduct) {
-    return dataProduct === FLUXNET2015_PRODUCT ? "Copy FLUXNET2015 curl command" : "Copy AmeriFlux curl command";
+    return "Copy " + apiProductDisplayName(dataProduct) + " curl command";
   }
 
   function getApiActionRequestLabel(dataProduct) {
-    return dataProduct === FLUXNET2015_PRODUCT ? "Request FLUXNET2015 URL" : "Request AmeriFlux URL";
+    return "Request " + apiProductDisplayName(dataProduct) + " URL";
   }
 
   function getApiActionPreparingLabel(dataProduct, canDirectDownload) {
+    var productName = apiProductDisplayName(dataProduct);
     return canDirectDownload
-      ? (dataProduct === FLUXNET2015_PRODUCT ? "Requesting FLUXNET2015 URL…" : "Requesting AmeriFlux URL…")
-      : (dataProduct === FLUXNET2015_PRODUCT ? "Preparing FLUXNET2015 command…" : "Preparing curl command…");
+      ? ("Requesting " + productName + " URL…")
+      : ("Preparing " + productName + " command…");
   }
 
   function normalizeDownloadProduct(dataProduct) {
-    return String(dataProduct || "").trim().toUpperCase() === FLUXNET2015_PRODUCT
-      ? FLUXNET2015_PRODUCT
-      : AMERIFLUX_FLUXNET_PRODUCT;
+    var normalized = String(dataProduct || "").trim().toUpperCase();
+    if (normalized === FLUXNET2015_PRODUCT) {
+      return FLUXNET2015_PRODUCT;
+    }
+    if (normalized === AMERIFLUX_BASE_PRODUCT || normalized === PRODUCT_FAMILY_BASE || normalized === BASE_SOURCE_ONLY) {
+      return AMERIFLUX_BASE_PRODUCT;
+    }
+    return AMERIFLUX_FLUXNET_PRODUCT;
   }
 
   // AmeriFlux currently supports FLUXNET downloads through v2, while FLUXNET2015
@@ -971,28 +1038,32 @@
       var siteId;
       var dataProduct;
       var sourceLabel;
+      var dedupeKey;
       if (typeof entry === "string") {
         siteId = String(entry || "").trim();
         dataProduct = AMERIFLUX_FLUXNET_PRODUCT;
         sourceLabel = AMERIFLUX_SOURCE_ONLY;
       } else {
         siteId = String(entry && (entry.site_id || entry.siteId) || "").trim();
-        dataProduct = String(entry && (entry.data_product || entry.dataProduct) || AMERIFLUX_FLUXNET_PRODUCT).trim().toUpperCase();
+        dataProduct = String(entry && (entry.data_product || entry.dataProduct || entry.api_data_product || entry.apiDataProduct) || AMERIFLUX_FLUXNET_PRODUCT).trim().toUpperCase();
         sourceLabel = String(entry && (entry.source_label || entry.sourceLabel) || "").trim();
       }
       if (!siteId) {
         return;
       }
-      if (dataProduct !== FLUXNET2015_PRODUCT) {
+      if (dataProduct !== FLUXNET2015_PRODUCT && dataProduct !== AMERIFLUX_BASE_PRODUCT) {
         dataProduct = AMERIFLUX_FLUXNET_PRODUCT;
       }
       if (!sourceLabel) {
-        sourceLabel = dataProduct === FLUXNET2015_PRODUCT ? FLUXNET2015_SOURCE_ONLY : AMERIFLUX_SOURCE_ONLY;
+        sourceLabel = dataProduct === FLUXNET2015_PRODUCT
+          ? FLUXNET2015_SOURCE_ONLY
+          : (dataProduct === AMERIFLUX_BASE_PRODUCT ? BASE_SOURCE_ONLY : AMERIFLUX_SOURCE_ONLY);
       }
-      if (seen[siteId]) {
+      dedupeKey = siteId + "|" + dataProduct;
+      if (seen[dedupeKey]) {
         return;
       }
-      seen[siteId] = true;
+      seen[dedupeKey] = true;
       out.push({
         site_id: siteId,
         data_product: dataProduct,
@@ -1019,18 +1090,27 @@
     return lines.join("\n") + "\n";
   }
 
+  function flattenSurfacedProducts(rows) {
+    var products = [];
+    (rows || []).forEach(function (row) {
+      getSurfacedProductsForRow(row).forEach(function (product) {
+        products.push(Object.assign({}, product, {
+          parentSelectionKey: String(row && row._selection_key || "")
+        }));
+      });
+    });
+    return products;
+  }
+
   function partitionRowsByBulkSource(rows) {
     var shuttleRows = [];
     var ameriFluxRows = [];
-    (rows || []).forEach(function (row) {
-      if (!row) {
+    flattenSurfacedProducts(rows).forEach(function (product) {
+      if (product.download_mode === "ameriflux_api") {
+        ameriFluxRows.push(product);
         return;
       }
-      if (row.download_mode === "ameriflux_api") {
-        ameriFluxRows.push(row);
-        return;
-      }
-      shuttleRows.push(row);
+      shuttleRows.push(product);
     });
     return {
       shuttleRows: shuttleRows,
@@ -1040,8 +1120,8 @@
 
   function summarizeBulkSelection(rows) {
     var partition = partitionRowsByBulkSource(rows);
-    var shuttleCount = partition.shuttleRows.length;
-    var ameriFluxCount = partition.ameriFluxRows.length;
+    var shuttleCount = uniqueSiteIdsFromRows(partition.shuttleRows).length;
+    var ameriFluxCount = uniqueSiteIdsFromRows(partition.ameriFluxRows).length;
     return {
       shuttleRows: partition.shuttleRows,
       ameriFluxRows: partition.ameriFluxRows,
@@ -1240,9 +1320,9 @@
       "#!/usr/bin/env bash",
       "set -euo pipefail",
       "",
-      "# Bulk download wrapper for selected FLUXNET sites",
+      "# Bulk download wrapper for surfaced products from selected FLUXNET sites",
       "# Shuttle is preferred for overlap sites (AmeriFlux-shuttle).",
-      "# AmeriFlux API-backed sites (AmeriFlux and FLUXNET2015) are downloaded via the AmeriFlux API.",
+      "# AmeriFlux API-backed surfaced products (FLUXNET, BASE, and FLUXNET2015) are downloaded via the AmeriFlux API.",
       "",
       "SCRIPT_DIR=\"$(cd \"$(dirname \"${BASH_SOURCE[0]}\")\" && pwd)\"",
       "cd \"$SCRIPT_DIR\"",
@@ -1443,6 +1523,82 @@
     return out;
   }
 
+  function buildContiguousYearArray(firstYear, lastYear) {
+    var start = parseIntOrNull(firstYear);
+    var end = parseIntOrNull(lastYear);
+    var years = [];
+    var year;
+    if (start == null || end == null || end < start) {
+      return years;
+    }
+    for (year = start; year <= end; year += 1) {
+      years.push(year);
+    }
+    return years;
+  }
+
+  function normalizedExactYears(values, firstYear, lastYear) {
+    var years = normalizePublishYears(values);
+    if (years.length) {
+      return years;
+    }
+    return buildContiguousYearArray(firstYear, lastYear);
+  }
+
+  function yearCoverageSegmentLabel(startYear, endYear) {
+    return startYear === endYear ? String(startYear) : (String(startYear) + "-" + String(endYear));
+  }
+
+  function exactYearCoverageLabel(values, firstYear, lastYear) {
+    var years = normalizedExactYears(values, firstYear, lastYear);
+    var labels = [];
+    var rangeStart;
+    var previousYear;
+
+    if (!years.length) {
+      return yearRangeLabel(firstYear, lastYear);
+    }
+
+    rangeStart = years[0];
+    previousYear = years[0];
+
+    years.slice(1).forEach(function (year) {
+      if (year === previousYear + 1) {
+        previousYear = year;
+        return;
+      }
+      labels.push(yearCoverageSegmentLabel(rangeStart, previousYear));
+      rangeStart = year;
+      previousYear = year;
+    });
+
+    labels.push(yearCoverageSegmentLabel(rangeStart, previousYear));
+    return labels.join(", ");
+  }
+
+  function exactYearSetKey(values, firstYear, lastYear) {
+    return normalizedExactYears(values, firstYear, lastYear).join(",");
+  }
+
+  function exactYearSetsMatch(aYears, bYears, aFirstYear, aLastYear, bFirstYear, bLastYear) {
+    return exactYearSetKey(aYears, aFirstYear, aLastYear) === exactYearSetKey(bYears, bFirstYear, bLastYear);
+  }
+
+  function buildSiteAvailabilityLookup(sites) {
+    var lookup = {};
+    (Array.isArray(sites) ? sites : []).forEach(function (site) {
+      var siteId = normalizeSiteId(site && site.site_id);
+      if (!siteId) {
+        return;
+      }
+      lookup[siteId] = Object.assign({}, site, {
+        site_id: String(site && site.site_id || "").trim() || siteId,
+        publish_years: normalizedExactYears(site && site.publish_years, site && site.first_year, site && site.last_year)
+      });
+    });
+    return lookup;
+  }
+
   function parseAmeriFluxAvailabilityPayload(payload, freshnessNamespace) {
     var values = payload && Array.isArray(payload.values) ? payload.values : [];
     var sites = [];
@@ -1461,7 +1617,7 @@
         publish_years: publishYears,
         first_year: publishYears[0],
         last_year: publishYears[publishYears.length - 1],
-        years: yearRangeLabel(publishYears[0], publishYears[publishYears.length - 1]),
+        years: exactYearCoverageLabel(publishYears, publishYears[0], publishYears[publishYears.length - 1]),
         country: deriveCountry(siteId, "")
       });
     });
@@ -1495,19 +1651,22 @@
     var siteId = String(site && site.site_id || "").trim();
     var siteName = String(site && site.site_name || "").trim();
     var country = deriveCountry(siteId, site && site.country ? site.country : "");
-    var firstYear = parseIntOrNull(site && site.first_year);
-    var lastYear = parseIntOrNull(site && site.last_year);
-    var years = yearRangeLabel(firstYear, lastYear);
+    var publishYears = normalizedExactYears(site && site.publish_years, site && site.first_year, site && site.last_year);
+    var firstYear = publishYears.length ? publishYears[0] : parseIntOrNull(site && site.first_year);
+    var lastYear = publishYears.length ? publishYears[publishYears.length - 1] : parseIntOrNull(site && site.last_year);
+    var years = exactYearCoverageLabel(publishYears, firstYear, lastYear);
     var keySuffix = years === "\u2014" ? "unknown" : years;
     var latitude = parseCoordinate(site && site.latitude, -90, 90);
     var longitude = parseCoordinate(site && site.longitude, -180, 180);
     var dataProduct = String(opts.dataProduct || AMERIFLUX_FLUXNET_PRODUCT).trim().toUpperCase();
     var networkLabel;
-    if (dataProduct !== FLUXNET2015_PRODUCT) {
+    if (dataProduct !== FLUXNET2015_PRODUCT && dataProduct !== AMERIFLUX_BASE_PRODUCT) {
       dataProduct = AMERIFLUX_FLUXNET_PRODUCT;
     }
     networkLabel = dataProduct === FLUXNET2015_PRODUCT ? FLUXNET2015_SOURCE_ONLY : AMERIFLUX_SOURCE_ONLY;
-    var sourceLabel = String(opts.sourceLabel || "").trim() || (dataProduct === FLUXNET2015_PRODUCT ? FLUXNET2015_SOURCE_ONLY : AMERIFLUX_SOURCE_ONLY);
+    var sourceLabel = String(opts.sourceLabel || "").trim() || (dataProduct === FLUXNET2015_PRODUCT
+      ? FLUXNET2015_SOURCE_ONLY
+      : (dataProduct === AMERIFLUX_BASE_PRODUCT ? BASE_SOURCE_ONLY : AMERIFLUX_SOURCE_ONLY));
     var sourceReason = String(opts.sourceReason || "").trim() || (sourceLabel === FLUXNET2015_SOURCE_ONLY
       ? "Only available from AmeriFlux API FLUXNET2015 fallback."
       : "Only available from AmeriFlux API.");
@@ -1535,16 +1694,305 @@
       source_reason: sourceReason,
       source_origin: AMERIFLUX_API_SOURCE_ORIGIN,
       api_data_product: dataProduct,
-      publish_years: Array.isArray(site && site.publish_years) ? site.publish_years.slice() : []
+      publish_years: publishYears
     };
     return finalizeRowComputedState(row);
   }
 
-  function mergeCatalogRows(shuttleRows, icosDirectRows, ameriFluxSites, fluxnet2015Sites) {
+  function inferProcessedDataProduct(row) {
+    var explicit = getApiRowDataProduct(row);
+    var fileName = String(row && (row.file_name || row.download_link) || "").toUpperCase();
+    var sourceLabel = String(row && row.source_label || "").trim();
+    if (explicit === FLUXNET2015_PRODUCT || sourceLabel === FLUXNET2015_SOURCE_ONLY || fileName.indexOf("FLUXNET2015") !== -1) {
+      return FLUXNET2015_PRODUCT;
+    }
+    return AMERIFLUX_FLUXNET_PRODUCT;
+  }
+
+  function buildSurfacedProductMetadata(fields) {
+    var sourceOrigin = String(fields && (fields.sourceOrigin || fields.source_origin || fields.source) || "").trim();
+    var siteId = String(fields && (fields.siteId || fields.site_id) || "").trim();
+    var canonicalSiteId = normalizeSiteId(siteId);
+    var exactYears = normalizedExactYears(
+      fields && (fields.exactYears || fields.exact_years || fields.publish_years),
+      fields && (fields.firstYear || fields.first_year),
+      fields && (fields.lastYear || fields.last_year)
+    );
+    var firstYear = exactYears.length ? exactYears[0] : parseIntOrNull(fields && (fields.firstYear || fields.first_year));
+    var lastYear = exactYears.length ? exactYears[exactYears.length - 1] : parseIntOrNull(fields && (fields.lastYear || fields.last_year));
+    var productFamily = String(fields && (fields.productFamily || fields.product_family) || PRODUCT_FAMILY_FLUXNET).trim().toUpperCase();
+    var sourceLabel = String(fields && (fields.sourceLabel || fields.source_label) || "").trim();
+    var downloadMode = String(fields && (fields.downloadMode || fields.download_mode) || "").trim() || "direct";
+    var apiDataProduct = normalizeDownloadProduct(fields && (fields.apiDataProduct || fields.api_data_product));
+    var downloadLink = String(fields && (fields.downloadLink || fields.download_link) || "").trim();
+    var dataHub = String(fields && (fields.dataHub || fields.data_hub) || "").trim();
+    var siteName = String(fields && (fields.siteName || fields.site_name) || "").trim();
+    var country = deriveCountry(canonicalSiteId || siteId, fields && (fields.country || fields.country_name) ? (fields.country || fields.country_name) : "");
+    var vegetationType = normalizeVegetationType(fields && (fields.vegetationType || fields.vegetation_type || fields.igbp));
+    var latitude = parseCoordinate(fields && (fields.latitude || fields.location_lat), -90, 90);
+    var longitude = parseCoordinate(fields && (fields.longitude || fields.location_long || fields.location_lon), -180, 180);
+    var coverageLabel = exactYearCoverageLabel(exactYears, firstYear, lastYear);
+    var sourceReason = String(fields && (fields.sourceReason || fields.source_reason) || "").trim();
+    var objectId = String(fields && (fields.objectId || fields.object_id) || "").trim();
+    var fileName = String(fields && (fields.fileName || fields.file_name) || "").trim();
+    var directDownloadUrl = String(fields && (fields.directDownloadUrl || fields.direct_download_url) || "").trim();
+    var metadataUrl = String(fields && (fields.metadataUrl || fields.metadata_url) || "").trim();
+    var accessUrl = String(fields && (fields.accessUrl || fields.access_url) || "").trim();
+    var citation = String(fields && fields.citation || "").trim();
+    var isIcos = !!(fields && (fields.isIcos || fields.is_icos));
+    var network = String(fields && fields.network || "").trim();
+    var sourceNetwork = String(fields && (fields.sourceNetwork || fields.source_network) || "").trim();
+    var networkDisplay = String(fields && (fields.networkDisplay || fields.network_display) || network || sourceNetwork).trim();
+
+    return {
+      productFamily: productFamily === PRODUCT_FAMILY_BASE ? PRODUCT_FAMILY_BASE : PRODUCT_FAMILY_FLUXNET,
+      source: sourceOrigin || resolveSourceOrigin(fields || {}),
+      sourceLabel: sourceLabel,
+      siteId: siteId || canonicalSiteId,
+      exactYears: exactYears,
+      coverageLabel: coverageLabel,
+      firstYear: firstYear,
+      lastYear: lastYear,
+      lengthYears: exactYears.length || calculateCoverageLength(firstYear, lastYear),
+      downloadMode: downloadMode,
+      downloadLink: downloadLink,
+      apiDataProduct: downloadMode === "ameriflux_api" ? apiDataProduct : inferProcessedDataProduct(fields || {}),
+      dataHub: dataHub,
+      sourceOrigin: sourceOrigin || resolveSourceOrigin(fields || {}),
+      sourceReason: sourceReason,
+      siteName: siteName,
+      country: country,
+      vegetationType: vegetationType,
+      latitude: latitude,
+      longitude: longitude,
+      isIcos: isIcos,
+      objectId: objectId,
+      fileName: fileName,
+      directDownloadUrl: directDownloadUrl,
+      metadataUrl: metadataUrl,
+      accessUrl: accessUrl,
+      citation: citation,
+      network: network,
+      sourceNetwork: sourceNetwork,
+      networkDisplay: networkDisplay,
+      site_id: siteId || canonicalSiteId,
+      source_label: sourceLabel,
+      download_mode: downloadMode,
+      download_link: downloadLink,
+      api_data_product: downloadMode === "ameriflux_api" ? apiDataProduct : inferProcessedDataProduct(fields || {}),
+      data_hub: dataHub,
+      source_origin: sourceOrigin || resolveSourceOrigin(fields || {}),
+      source_reason: sourceReason,
+      site_name: siteName,
+      vegetation_type: vegetationType,
+      network: network,
+      source_network: sourceNetwork,
+      network_display: networkDisplay,
+      first_year: firstYear,
+      last_year: lastYear,
+      years: coverageLabel,
+      length_years: exactYears.length || calculateCoverageLength(firstYear, lastYear),
+      is_icos: isIcos,
+      object_id: objectId,
+      file_name: fileName,
+      direct_download_url: directDownloadUrl,
+      metadata_url: metadataUrl,
+      access_url: accessUrl
+    };
+  }
+
+  function resolveProcessedExactYears(row, availabilityLookups) {
+    var siteId = normalizeSiteId(row && row.site_id);
+    var explicitYears = normalizePublishYears(row && row.publish_years);
+    var lookups = availabilityLookups || {};
+    var ameriFluxLookup = lookups.ameriFluxFluxnet || {};
+    var fluxnet2015Lookup = lookups.fluxnet2015 || {};
+    var baseLookup = lookups.ameriFluxBase || {};
+    var dataHub = String(row && row.data_hub || "").trim();
+    var sourceLabel = String(row && row.source_label || "").trim();
+    var inferredProduct = inferProcessedDataProduct(row);
+
+    if (explicitYears.length) {
+      return explicitYears;
+    }
+    if (siteId && inferredProduct === FLUXNET2015_PRODUCT && fluxnet2015Lookup[siteId]) {
+      return normalizedExactYears(
+        fluxnet2015Lookup[siteId].publish_years,
+        fluxnet2015Lookup[siteId].first_year,
+        fluxnet2015Lookup[siteId].last_year
+      );
+    }
+    if (siteId && baseLookup[siteId] && ameriFluxLookup[siteId]) {
+      return normalizedExactYears(
+        ameriFluxLookup[siteId].publish_years,
+        ameriFluxLookup[siteId].first_year,
+        ameriFluxLookup[siteId].last_year
+      );
+    }
+    if (
+      siteId &&
+      ameriFluxLookup[siteId] &&
+      (
+        dataHub === AMERIFLUX_DATA_HUB ||
+        sourceLabel === AMERIFLUX_SOURCE_ONLY ||
+        sourceLabel === AMERIFLUX_SHUTTLE ||
+        hasNetworkTag(row && row.network_display, AMERIFLUX_SOURCE_ONLY) ||
+        hasNetworkTag(row && row.network, AMERIFLUX_SOURCE_ONLY) ||
+        hasNetworkTag(row && row.source_network, AMERIFLUX_SOURCE_ONLY)
+      )
+    ) {
+      return normalizedExactYears(
+        ameriFluxLookup[siteId].publish_years,
+        ameriFluxLookup[siteId].first_year,
+        ameriFluxLookup[siteId].last_year
+      );
+    }
+    return buildContiguousYearArray(row && row.first_year, row && row.last_year);
+  }
+
+  function buildPrimaryProcessedProduct(row, availabilityLookups) {
+    var sourceLabel = String(row && row.source_label || "").trim();
+    var dataProduct = getApiRowDataProduct(row);
+    if (!row || sourceLabel === BASE_SOURCE_ONLY || dataProduct === AMERIFLUX_BASE_PRODUCT) {
+      return null;
+    }
+    return buildSurfacedProductMetadata(Object.assign({}, row, {
+      productFamily: PRODUCT_FAMILY_FLUXNET,
+      exactYears: resolveProcessedExactYears(row, availabilityLookups)
+    }));
+  }
+
+  function buildAmeriFluxBaseProduct(site) {
+    if (!site) {
+      return null;
+    }
+    return buildSurfacedProductMetadata({
+      productFamily: PRODUCT_FAMILY_BASE,
+      source: AMERIFLUX_API_SOURCE_ORIGIN,
+      sourceLabel: BASE_SOURCE_ONLY,
+      siteId: site.site_id,
+      exactYears: site.publish_years,
+      firstYear: site.first_year,
+      lastYear: site.last_year,
+      downloadMode: "ameriflux_api",
+      downloadLink: "",
+      apiDataProduct: AMERIFLUX_BASE_PRODUCT,
+      dataHub: AMERIFLUX_DATA_HUB,
+      sourceOrigin: AMERIFLUX_API_SOURCE_ORIGIN,
+      sourceReason: "Available from AmeriFlux API.",
+      siteName: site.site_name,
+      country: site.country,
+      vegetationType: site.vegetation_type,
+      latitude: site.latitude,
+      longitude: site.longitude
+    });
+  }
+
+  function buildSurfacedCoverageSummary(products) {
+    return (Array.isArray(products) ? products : []).map(function (product) {
+      return productFamilyDisplayName(product && product.productFamily, false) + ": " + String(product && product.coverageLabel || "\u2014");
+    }).join(" \u00b7 ");
+  }
+
+  function buildSurfacedYearUnion(products) {
+    var years = [];
+    var seen = {};
+    (Array.isArray(products) ? products : []).forEach(function (product) {
+      (Array.isArray(product && product.exactYears) ? product.exactYears : []).forEach(function (year) {
+        if (seen[year]) {
+          return;
+        }
+        seen[year] = true;
+        years.push(year);
+      });
+    });
+    years.sort(function (a, b) {
+      return a - b;
+    });
+    return years;
+  }
+
+  function applySurfacedProductsToRow(row, primaryProcessedProduct, ameriFluxBaseProduct, surfacedProducts, classification) {
+    var products = Array.isArray(surfacedProducts) ? surfacedProducts.slice() : [];
+    var unionYears = buildSurfacedYearUnion(products);
+
+    row.primaryProcessedProduct = primaryProcessedProduct || null;
+    row.ameriFluxBaseProduct = ameriFluxBaseProduct || null;
+    row.surfacedProducts = products;
+    row.surfacedProductClassification = String(classification || "");
+
+    if (unionYears.length) {
+      row.first_year = unionYears[0];
+      row.last_year = unionYears[unionYears.length - 1];
+      row.years = buildSurfacedCoverageSummary(products);
+      row.length_years = unionYears.length;
+    } else {
+      row.years = yearRangeLabel(row.first_year, row.last_year);
+      row.length_years = calculateCoverageLength(row.first_year, row.last_year);
+    }
+
+    row.source_filter = sourceFilterValue(row);
+    row.search_text = buildRowSearchText(row);
+    return row;
+  }
+
+  function getSurfacedProductsForRow(row) {
+    if (row && Array.isArray(row.surfacedProducts) && row.surfacedProducts.length) {
+      return row.surfacedProducts.slice();
+    }
+    if (row && row.primaryProcessedProduct) {
+      return [row.primaryProcessedProduct];
+    }
+    if (!row) {
+      return [];
+    }
+    return [buildPrimaryProcessedProduct(row, {})].filter(Boolean);
+  }
+
+  function applySurfacedProductSelection(row, availabilityLookups) {
+    var siteId = normalizeSiteId(row && row.site_id);
+    var lookups = availabilityLookups || {};
+    var primaryProcessedProduct = buildPrimaryProcessedProduct(row, lookups);
+    var ameriFluxBaseProduct = siteId && lookups.ameriFluxBase && lookups.ameriFluxBase[siteId]
+      ? buildAmeriFluxBaseProduct(lookups.ameriFluxBase[siteId])
+      : null;
+    var surfacedProducts;
+    var classification;
+
+    if (!primaryProcessedProduct && ameriFluxBaseProduct) {
+      surfacedProducts = [ameriFluxBaseProduct];
+      classification = SURFACED_CLASSIFICATION_BASE_ONLY;
+    } else if (primaryProcessedProduct && !ameriFluxBaseProduct) {
+      surfacedProducts = [primaryProcessedProduct];
+      classification = SURFACED_CLASSIFICATION_PROCESSED_ONLY;
+    } else if (primaryProcessedProduct && ameriFluxBaseProduct && exactYearSetsMatch(
+      primaryProcessedProduct.exactYears,
+      ameriFluxBaseProduct.exactYears,
+      primaryProcessedProduct.firstYear,
+      primaryProcessedProduct.lastYear,
+      ameriFluxBaseProduct.firstYear,
+      ameriFluxBaseProduct.lastYear
+    )) {
+      surfacedProducts = [primaryProcessedProduct];
+      classification = SURFACED_CLASSIFICATION_PROCESSED_ONLY;
+    } else {
+      surfacedProducts = [primaryProcessedProduct, ameriFluxBaseProduct].filter(Boolean);
+      classification = surfacedProducts.length > 1
+        ? SURFACED_CLASSIFICATION_ADDITIONAL_BASE_YEARS
+        : (primaryProcessedProduct ? SURFACED_CLASSIFICATION_PROCESSED_ONLY : SURFACED_CLASSIFICATION_BASE_ONLY);
+    }
+
+    return applySurfacedProductsToRow(row, primaryProcessedProduct, ameriFluxBaseProduct, surfacedProducts, classification);
+  }
+
+  function mergeCatalogRows(shuttleRows, icosDirectRows, ameriFluxSites, fluxnet2015Sites, ameriFluxBaseSites) {
     if (arguments.length < 4) {
       fluxnet2015Sites = ameriFluxSites;
       ameriFluxSites = icosDirectRows;
       icosDirectRows = [];
+      ameriFluxBaseSites = [];
+    } else if (arguments.length < 5) {
+      ameriFluxBaseSites = [];
     }
     var mergedRows = (Array.isArray(shuttleRows) ? shuttleRows : []).map(function (row) {
       return Object.assign({}, row);
@@ -1554,6 +2002,7 @@
     });
     var ameriSites = Array.isArray(ameriFluxSites) ? ameriFluxSites : [];
     var fluxnet2015 = Array.isArray(fluxnet2015Sites) ? fluxnet2015Sites : [];
+    var ameriFluxBase = Array.isArray(ameriFluxBaseSites) ? ameriFluxBaseSites : [];
     var shuttleBySite = {};
     var canonicalSiteIds = {};
     var icosSuppressedByShuttle = 0;
@@ -1561,6 +2010,8 @@
     var overlapSites = 0;
     var ameriOnlySites = 0;
     var fluxnet2015OnlySites = 0;
+    var baseOnlySites = 0;
+    var additionalBaseYearsSites = 0;
 
     // Keep precedence centralized here: Shuttle > ICOS-direct > AmeriFlux FLUXNET > FLUXNET2015.
     mergedRows.forEach(function (row) {
@@ -1676,8 +2127,52 @@
       finalizeRowComputedState(row);
     });
 
+    var availabilityLookups = {
+      ameriFluxFluxnet: buildSiteAvailabilityLookup(ameriSites),
+      fluxnet2015: buildSiteAvailabilityLookup(fluxnet2015),
+      ameriFluxBase: buildSiteAvailabilityLookup(ameriFluxBase)
+    };
+    var finalRows = mergedRows.map(function (row) {
+      return applySurfacedProductSelection(row, availabilityLookups);
+    });
+    var finalSiteIds = {};
+
+    finalRows.forEach(function (row) {
+      var siteId = normalizeSiteId(row && row.site_id);
+      if (siteId) {
+        finalSiteIds[siteId] = true;
+      }
+      if (row && row.surfacedProductClassification === SURFACED_CLASSIFICATION_ADDITIONAL_BASE_YEARS) {
+        additionalBaseYearsSites += 1;
+      }
+    });
+
+    ameriFluxBase.forEach(function (site) {
+      var siteId = normalizeSiteId(site && site.site_id);
+      var baseRow;
+      if (!siteId || finalSiteIds[siteId]) {
+        return;
+      }
+      baseOnlySites += 1;
+      finalSiteIds[siteId] = true;
+      baseRow = buildAmeriFluxApiRow(site, finalRows.length, {
+        dataProduct: AMERIFLUX_BASE_PRODUCT,
+        sourceLabel: BASE_SOURCE_ONLY,
+        sourceReason: "Only available from AmeriFlux API."
+      });
+      finalRows.push(applySurfacedProductSelection(baseRow, availabilityLookups));
+    });
+
+    finalRows.forEach(function (row, idx) {
+      row._index = idx;
+      if (!row._selection_key) {
+        row._selection_key = String(row.data_hub || "unknown") + "|" + String(row.site_id || "") + "|" + String(row.download_link || "dynamic");
+      }
+      row.search_text = buildRowSearchText(row);
+    });
+
     return {
-      rows: mergedRows,
+      rows: finalRows,
       icosDirectTotalSites: icosSites.length,
       icosDirectSuppressedByShuttle: icosSuppressedByShuttle,
       icosDirectOnlySites: icosDirectOnlySites,
@@ -1685,6 +2180,10 @@
       amerifluxSitesWithYears: ameriSites.length,
       amerifluxOverlapSites: overlapSites,
       amerifluxOnlySites: ameriOnlySites,
+      ameriFluxBaseTotalSites: ameriFluxBase.length,
+      ameriFluxBaseSitesWithYears: ameriFluxBase.length,
+      baseOnlySites: baseOnlySites,
+      additionalBaseYearsSites: additionalBaseYearsSites,
       fluxnet2015TotalSites: fluxnet2015.length,
       fluxnet2015SitesWithYears: fluxnet2015.length,
       fluxnet2015OnlySites: fluxnet2015OnlySites
@@ -2316,8 +2815,12 @@
     this.trustedRuntime = !!opts.trustedRuntime;
     this.dataProduct = normalizeDownloadProduct(opts.dataProduct || AMERIFLUX_FLUXNET_PRODUCT);
     this.downloadUrl = String(opts.downloadUrl || getDownloadEndpointForProduct(this.dataProduct));
-    this.sourceLabel = String(opts.sourceLabel || "").trim() || (this.dataProduct === FLUXNET2015_PRODUCT ? FLUXNET2015_SOURCE_ONLY : AMERIFLUX_SOURCE_ONLY);
-    this.availabilityCacheKey = String(opts.availabilityCacheKey || (this.dataProduct === FLUXNET2015_PRODUCT ? FLUXNET2015_AVAILABILITY_CACHE_KEY : AMERIFLUX_FLUXNET_AVAILABILITY_CACHE_KEY));
+    this.sourceLabel = String(opts.sourceLabel || "").trim() || (this.dataProduct === FLUXNET2015_PRODUCT
+      ? FLUXNET2015_SOURCE_ONLY
+      : (this.dataProduct === AMERIFLUX_BASE_PRODUCT ? BASE_SOURCE_ONLY : AMERIFLUX_SOURCE_ONLY));
+    this.availabilityCacheKey = String(opts.availabilityCacheKey || (this.dataProduct === FLUXNET2015_PRODUCT
+      ? FLUXNET2015_AVAILABILITY_CACHE_KEY
+      : (this.dataProduct === AMERIFLUX_BASE_PRODUCT ? AMERIFLUX_BASE_AVAILABILITY_CACHE_KEY : AMERIFLUX_FLUXNET_AVAILABILITY_CACHE_KEY)));
     this.freshnessNamespace = String(opts.freshnessNamespace || this.dataProduct.toLowerCase());
     this.retryCount = parseInt(opts.retryCount, 10);
     if (!isFinite(this.retryCount)) {
@@ -2527,7 +3030,7 @@
   }
 
   function buildAttributionText(snapshotUpdatedDate) {
-    return "The FLUXNET data presented here were discovered using a metadata snapshot generated by the Q.E.D. Lab FLUXNET Data Explorer. Contact TF Keenan (trevorkeenan@berkeley.edu) with any questions or suggestions. We appreciate acknowledgement of the QED FLUXNET Data Explorer when convenient. Available data is updated as of: " + snapshotUpdatedDateDisplayText(snapshotUpdatedDate) + ".";
+    return "The FLUXNET and BASE data presented here were discovered using a metadata snapshot generated by the Q.E.D. Lab FLUXNET Data Explorer. Contact TF Keenan (trevorkeenan@berkeley.edu) with any questions or suggestions. We appreciate acknowledgement of the QED FLUXNET Data Explorer when convenient. Available data is updated as of: " + snapshotUpdatedDateDisplayText(snapshotUpdatedDate) + ".";
   }
 
   function csvEscape(value) {
@@ -2594,6 +3097,9 @@
     if (sourceLabel === ICOS_DIRECT_SOURCE_ONLY) {
       return "shuttle-explorer__source-badge--icos";
     }
+    if (sourceLabel === BASE_SOURCE_ONLY) {
+      return "shuttle-explorer__source-badge--base";
+    }
     if (sourceLabel === AMERIFLUX_SOURCE_ONLY) {
       return "shuttle-explorer__source-badge--ameriflux";
     }
@@ -2614,6 +3120,58 @@
     var klass = sourceBadgeClass(label);
     var title = sourceReason ? (" title=\"" + escapeHtml(sourceReason) + "\"") : "";
     return "<span class=\"shuttle-explorer__source-badge " + escapeHtml(klass) + "\"" + title + ">" + escapeHtml(label) + "</span>";
+  }
+
+  function renderSurfacedCoverageHtml(row) {
+    var products = getSurfacedProductsForRow(row);
+    var content;
+    var badgeHtml = "";
+
+    if (!products.length) {
+      return escapeHtml(String(row && row.years || "\u2014"));
+    }
+
+    content = products.map(function (product) {
+      return "<span class=\"shuttle-explorer__coverage-item\"><strong>" +
+        escapeHtml(productFamilyDisplayName(product && product.productFamily, false)) +
+        ":</strong> " +
+        escapeHtml(String(product && product.coverageLabel || "\u2014")) +
+        "</span>";
+    }).join("<span class=\"shuttle-explorer__coverage-sep\" aria-hidden=\"true\">\u00b7</span>");
+
+    if (row && row.surfacedProductClassification === SURFACED_CLASSIFICATION_ADDITIONAL_BASE_YEARS) {
+      badgeHtml = "<div class=\"shuttle-explorer__coverage-badge\"><span class=\"shuttle-explorer__source-badge shuttle-explorer__source-badge--base-addition\">Additional BASE years</span></div>";
+    }
+
+    return "<div class=\"shuttle-explorer__coverage-list\">" + content + "</div>" + badgeHtml;
+  }
+
+  function buildRowDownloadOptions(row, canAmeriFluxDownload) {
+    return getSurfacedProductsForRow(row).map(function (product) {
+      var dataProduct = normalizeDownloadProduct(product && product.apiDataProduct);
+      var option = {
+        product: product,
+        displayLabel: productFamilyDisplayName(product && product.productFamily, true),
+        mode: String(product && product.downloadMode || ""),
+        siteId: String(product && product.siteId || ""),
+        sourceLabel: String(product && product.sourceLabel || ""),
+        dataProduct: dataProduct,
+        downloadLink: String(product && product.downloadLink || ""),
+        isIcos: !!(product && product.isIcos),
+        title: ""
+      };
+
+      if (option.mode === "ameriflux_api") {
+        option.actionLabel = canAmeriFluxDownload ? getApiActionRequestLabel(dataProduct) : getApiActionCopyLabel(dataProduct);
+        if (!canAmeriFluxDownload) {
+          option.title = apiProductDisplayName(dataProduct) + " downloads require your own AmeriFlux identity. Click to copy a curl command template.";
+        }
+      } else {
+        option.actionLabel = option.isIcos ? "Accept ICOS license and download" : "Download";
+      }
+
+      return option;
+    });
   }
 
   function ensureStyles() {
@@ -2678,10 +3236,19 @@
       ".shuttle-explorer__table thead th{position:sticky;top:0;background:#f8fafc;z-index:1;}",
       ".shuttle-explorer__source-badge{display:inline-flex;align-items:center;padding:2px 8px;border-radius:999px;font-size:.86em;font-weight:600;line-height:1.25;}",
       ".shuttle-explorer__source-badge--icos{background:#eef7f8;border:1px solid #b7d9dc;color:#245761;}",
+      ".shuttle-explorer__source-badge--base{background:#f8f3e8;border:1px solid #d9c288;color:#755319;}",
       ".shuttle-explorer__source-badge--ameriflux{background:#edf7f0;border:1px solid #b6dcc2;color:#1f6c3f;}",
       ".shuttle-explorer__source-badge--fluxnet2015{background:#fff4e5;border:1px solid #ebc47d;color:#8a5600;}",
       ".shuttle-explorer__source-badge--ameriflux-shuttle{background:#eef3fa;border:1px solid #b8c9e4;color:#2a4f7a;}",
+      ".shuttle-explorer__source-badge--base-addition{background:#f4efe2;border:1px solid #d4bf92;color:#6f5220;}",
       ".shuttle-explorer__site-badge{margin-top:4px;}",
+      ".shuttle-explorer__coverage-list{display:flex;flex-wrap:wrap;align-items:center;gap:6px;}",
+      ".shuttle-explorer__coverage-item{display:inline-flex;align-items:center;gap:4px;}",
+      ".shuttle-explorer__coverage-sep{color:#607184;}",
+      ".shuttle-explorer__coverage-badge{margin-top:6px;}",
+      ".shuttle-explorer__download-cell{min-width:220px;}",
+      ".shuttle-explorer__download-option + .shuttle-explorer__download-option{margin-top:8px;}",
+      ".shuttle-explorer__download-option-label{margin:0 0 4px;color:#556779;font-size:.8em;font-weight:600;line-height:1.25;}",
       ".shuttle-explorer__sort{display:inline-flex;align-items:center;gap:4px;border:0;background:transparent;padding:0;margin:0;color:inherit;font:inherit;cursor:pointer;}",
       ".shuttle-explorer__sort-indicator{color:#6b7a89;font-size:.9em;}",
       ".shuttle-explorer__table-copy-btn{display:inline-flex;max-width:11rem;padding:0;margin:0;border:0;background:transparent;color:#2f5374;font:inherit;font-weight:600;line-height:1.25;text-align:left;cursor:pointer;white-space:normal;}",
@@ -2711,7 +3278,7 @@
     root.innerHTML = [
       "<div class=\"shuttle-explorer__header\">",
       "  <h2>FLUXNET Data Explorer</h2>",
-      "  <p class=\"shuttle-explorer__muted\">Explore and download a regularly refreshed snapshot of the official FLUXNET database (last updated: <span data-role=\"widget-last-updated-inline\">unavailable</span>), with observations from the various regional networks fully processed to the FLUXNET standard through the OneFlux pipeline. Search by site ID or site name, then open hub-hosted download links directly from the table. This explorer supplements sites available through the FLUXNET Shuttle with additional FLUXNET sites that are hosted elsewhere (for example via direct ICOS Carbon Portal discovery and AmeriFlux availability APIs), to provide the maximum amount of FLUXNET data possible.</p>",
+      "  <p class=\"shuttle-explorer__muted\">Explore and download a regularly refreshed snapshot of published FLUXNET (ONEFlux-derived) and AmeriFlux BASE (standardized observations) coverage (last updated: <span data-role=\"widget-last-updated-inline\">unavailable</span>). Search by site ID or site name, then open hub-hosted download links directly from the table. This explorer supplements sites available through the FLUXNET Shuttle with additional FLUXNET-family sites hosted elsewhere, and surfaces BASE alongside FLUXNET only when BASE contributes distinct temporal coverage for a site.</p>",
       "  <p class=\"shuttle-explorer__muted\">Data are provided by site teams from around the world, processed by one of three processing hubs (AmeriFlux (<a href=\"https://ameriflux.lbl.gov/\" target=\"_blank\" rel=\"noopener\">https://ameriflux.lbl.gov/</a>), ICOS (<a href=\"https://www.icos-etc.eu/icos/\" target=\"_blank\" rel=\"noopener\">https://www.icos-etc.eu/icos/</a>) or TERN (<a href=\"https://www.tern.org.au/\" target=\"_blank\" rel=\"noopener\">https://www.tern.org.au/</a>), and served via the FLUXNET Shuttle (<a href=\"https://data.fluxnet.org/\" target=\"_blank\" rel=\"noopener\">https://data.fluxnet.org/</a>).</p>",
       "</div>",
       "<p class=\"shuttle-explorer__status is-loading\" data-role=\"status\" role=\"status\" aria-live=\"polite\">Loading snapshot…</p>",
@@ -2725,8 +3292,8 @@
       "    <select id=\"shuttle-network\" data-role=\"network-filter\"><option value=\"\">All networks</option></select>",
       "  </div>",
       "  <div class=\"shuttle-explorer__field\">",
-      "    <label for=\"shuttle-source\">Source</label>",
-      "    <select id=\"shuttle-source\" data-role=\"source-filter\"><option value=\"\">All sources</option></select>",
+      "    <label for=\"shuttle-source\">Availability</label>",
+      "    <select id=\"shuttle-source\" data-role=\"source-filter\"><option value=\"\">All sites</option></select>",
       "  </div>",
       "  <div class=\"shuttle-explorer__field\">",
       "    <label for=\"shuttle-country\">Country</label>",
@@ -2785,10 +3352,10 @@
       "  </section>",
       "  <section class=\"shuttle-explorer__bulk-source shuttle-explorer__hidden\" data-role=\"ameriflux-bulk-section\" aria-labelledby=\"ameriflux-bulk-source-heading\">",
       "    <div class=\"shuttle-explorer__bulk-header\">",
-      "      <h4 id=\"ameriflux-bulk-source-heading\">Bulk download for site data available elsewhere</h4>",
+      "      <h4 id=\"ameriflux-bulk-source-heading\">Bulk download for surfaced AmeriFlux API products</h4>",
       "      <p class=\"shuttle-explorer__tiny\" data-role=\"ameriflux-selection-count\">0 sites available elsewhere selected</p>",
       "    </div>",
-      "    <p class=\"shuttle-explorer__tiny\">Applies to sites that are not available via the Shuttle but are available elsewhere (for example via direct ICOS Carbon Portal discovery or AmeriFlux APIs). This includes ICOS-direct rows, AmeriFlux FLUXNET rows, and FLUXNET2015 fallback rows.</p>",
+      "    <p class=\"shuttle-explorer__tiny\">Applies to surfaced AmeriFlux API products selected in the table. This includes AmeriFlux FLUXNET rows, BASE rows, FLUXNET2015 fallback rows, and additional BASE years for sites whose primary FLUXNET-family product is delivered elsewhere.</p>",
       "    <p class=\"shuttle-explorer__tiny\">Optional: enter your own AmeriFlux username and email. If left blank, the generated script will use default values.</p>",
       "    <div class=\"shuttle-explorer__bulk-identity-grid\">",
       "      <div class=\"shuttle-explorer__field\">",
@@ -2813,7 +3380,7 @@
       "    <ul>",
       "      <li><strong>download_all_selected.sh</strong>: wrapper script that runs the Shuttle and AmeriFlux API bulk scripts in sequence when the three generated scripts are kept in the same directory.</li>",
       "      <li><strong>Shuttle script</strong>: uses direct Shuttle URLs and retries/resume support for Shuttle-backed rows only.</li>",
-      "      <li><strong>AmeriFlux API script</strong>: requests URLs dynamically per selected AmeriFlux site, using <code>/api/v2/data_download</code> for FLUXNET and <code>/api/v1/data_download</code> for FLUXNET2015, then downloads each returned file.</li>",
+      "      <li><strong>AmeriFlux API script</strong>: requests URLs dynamically for the surfaced AmeriFlux API products selected in the table, using <code>/api/v2/data_download</code> for FLUXNET and BASE, and <code>/api/v1/data_download</code> for FLUXNET2015, then downloads each returned file.</li>",
       "      <li><strong>Show Shuttle CLI command</strong>: reveals a command template that uses <code>shuttle_selected_sites.txt</code> and your local snapshot file.</li>",
       "      <li><strong>Copy Shuttle CLI command</strong>: copies the Shuttle CLI helper command shown in the panel.</li>",
       "      <li><strong>shuttle_selected_sites.txt</strong>: one <code>site_id</code> per line for Shuttle CLI workflows.</li>",
@@ -2857,7 +3424,7 @@
       "</section>",
       "<aside class=\"shuttle-explorer__attribution\" data-role=\"attribution\">",
       "  <h3>Data Use and Attribution</h3>",
-      "  <p class=\"shuttle-explorer__tiny\">FLUXNET data are shared under a <a href=\"https://creativecommons.org/licenses/by/4.0/\" target=\"_blank\" rel=\"noopener noreferrer\">CC-BY 4.0</a> data use license, which requires attribution. Data users must follow dataset- and network-specific attribution and citation guidance included with each downloaded archive. Note that FLUXNET data that is not available via the FLUXNET Shuttle may be processed with an earlier version of the OneFlux processing code.</p>",
+      "  <p class=\"shuttle-explorer__tiny\">FLUXNET and BASE data are shared under a <a href=\"https://creativecommons.org/licenses/by/4.0/\" target=\"_blank\" rel=\"noopener noreferrer\">CC-BY 4.0</a> data use license, which requires attribution. Data users must follow dataset- and network-specific attribution and citation guidance included with each downloaded archive. Note that FLUXNET data that is not available via the FLUXNET Shuttle may be processed with an earlier version of the OneFlux processing code.</p>",
       "  <textarea readonly data-role=\"attribution-text\"></textarea>",
       "</aside>"
     ].join("");
@@ -2888,6 +3455,17 @@
       availabilityCacheKey: AMERIFLUX_FLUXNET_AVAILABILITY_CACHE_KEY,
       freshnessNamespace: "ameriflux-fluxnet"
     });
+    this.ameriFluxBaseSource = new AmeriFluxSource({
+      availabilityUrl: AMERIFLUX_BASE_AVAILABILITY_URL,
+      downloadUrl: AMERIFLUX_V2_DOWNLOAD_URL,
+      userId: ameriIdentity.userId,
+      userEmail: ameriIdentity.userEmail,
+      trustedRuntime: ameriIdentity.trustedRuntime,
+      dataProduct: AMERIFLUX_BASE_PRODUCT,
+      sourceLabel: BASE_SOURCE_ONLY,
+      availabilityCacheKey: AMERIFLUX_BASE_AVAILABILITY_CACHE_KEY,
+      freshnessNamespace: "ameriflux-base"
+    });
     this.fluxnet2015Source = new AmeriFluxSource({
       availabilityUrl: FLUXNET2015_AVAILABILITY_URL,
       downloadUrl: AMERIFLUX_V1_DOWNLOAD_URL,
@@ -2901,6 +3479,7 @@
     });
     this.ameriFluxApiSources = {};
     this.ameriFluxApiSources[AMERIFLUX_FLUXNET_PRODUCT] = this.ameriFluxSource;
+    this.ameriFluxApiSources[AMERIFLUX_BASE_PRODUCT] = this.ameriFluxBaseSource;
     this.ameriFluxApiSources[FLUXNET2015_PRODUCT] = this.fluxnet2015Source;
 
     this.state = {
@@ -4569,8 +5148,10 @@
   Explorer.prototype.handleAmeriFluxRowDownload = function (siteId, dataProduct, sourceLabel, buttonEl) {
     var self = this;
     var site = String(siteId || "").trim();
-    var product = String(dataProduct || AMERIFLUX_FLUXNET_PRODUCT).trim().toUpperCase();
-    var label = String(sourceLabel || "").trim() || (product === FLUXNET2015_PRODUCT ? FLUXNET2015_SOURCE_ONLY : AMERIFLUX_SOURCE_ONLY);
+    var product = normalizeDownloadProduct(dataProduct || AMERIFLUX_FLUXNET_PRODUCT);
+    var label = String(sourceLabel || "").trim() || (product === FLUXNET2015_PRODUCT
+      ? FLUXNET2015_SOURCE_ONLY
+      : (product === AMERIFLUX_BASE_PRODUCT ? BASE_SOURCE_ONLY : AMERIFLUX_SOURCE_ONLY));
     var apiSource = this.getAmeriFluxApiSource(product);
     var identity = this.getEffectiveAmeriFluxIdentity();
     if (!site) {
@@ -4591,7 +5172,7 @@
           if (curlCommand) {
             self.copyText(
               curlCommand,
-              (product === FLUXNET2015_PRODUCT ? "Copied FLUXNET2015 curl command for " : "Copied AmeriFlux curl command for ") + site + "."
+              "Copied " + apiProductDisplayName(product) + " curl command for " + site + "."
             );
           } else {
             self.setBulkStatus(label + " downloads require your own AmeriFlux identity.");
@@ -4887,7 +5468,7 @@
 
     if (b.sourceFilter) {
       var currentSource = this.state.selectedSource;
-      b.sourceFilter.innerHTML = "<option value=\"\">All sources</option>";
+      b.sourceFilter.innerHTML = "<option value=\"\">All sites</option>";
       uniqueSourceFilterValues(rows).forEach(function (sourceValue) {
         var option = document.createElement("option");
         option.value = sourceValue;
@@ -4995,7 +5576,7 @@
       var sourceBadgeHtml = row.source_label
         ? "<div class=\"shuttle-explorer__site-badge\">" + renderSourceBadgeHtml(row.source_label, row.source_reason) + "</div>"
         : "";
-      var dataProduct = getApiRowDataProduct(row);
+      var downloadOptions = buildRowDownloadOptions(row, canAmeriFluxDownload);
       tr.innerHTML = [
         "<td class=\"shuttle-explorer__select-cell\"><input type=\"checkbox\" data-role=\"row-select\" data-key=\"" + escapeHtml(row._selection_key) + "\"" +
           (selectedKeys[row._selection_key] ? " checked" : "") +
@@ -5005,38 +5586,52 @@
         "<td>" + (row.country ? escapeHtml(row.country) : "<span class=\"shuttle-explorer__muted\">—</span>") + "</td>",
         "<td>" + escapeHtml(row.data_hub) + "</td>",
         "<td>" + (row.vegetation_type ? escapeHtml(row.vegetation_type) : "<span class=\"shuttle-explorer__muted\">—</span>") + "</td>",
-        "<td>" + escapeHtml(row.years) + "</td>",
+        "<td>" + renderSurfacedCoverageHtml(row) + "</td>",
         "<td>" + (row.length_years == null ? "<span class=\"shuttle-explorer__muted\">—</span>" : escapeHtml(row.length_years)) + "</td>"
       ].join("");
 
       var downloadTd = document.createElement("td");
+      downloadTd.className = "shuttle-explorer__download-cell";
 
-      if (row.download_mode === "ameriflux_api") {
-        var btn = document.createElement("button");
-        btn.type = "button";
-        btn.className = "shuttle-explorer__btn shuttle-explorer__btn--small";
-        btn.setAttribute("data-role", "ameriflux-download");
-        btn.setAttribute("data-site-id", row.site_id);
-        btn.setAttribute("data-product", dataProduct);
-        btn.setAttribute("data-source-label", String(row.source_label || ""));
-        btn.textContent = canAmeriFluxDownload ? getApiActionRequestLabel(dataProduct) : getApiActionCopyLabel(dataProduct);
-        btn.setAttribute("aria-label", btn.textContent + " for " + row.site_id);
-        if (!canAmeriFluxDownload) {
-          btn.title = (dataProduct === FLUXNET2015_PRODUCT
-            ? "FLUXNET2015 downloads require your own AmeriFlux identity. Click to copy a curl command template."
-            : "AmeriFlux downloads require your own AmeriFlux identity. Click to copy a curl command template.");
+      downloadOptions.forEach(function (option) {
+        var optionWrap = document.createElement("div");
+        var label = null;
+        var control;
+        optionWrap.className = "shuttle-explorer__download-option";
+
+        if (downloadOptions.length > 1) {
+          label = document.createElement("div");
+          label.className = "shuttle-explorer__download-option-label";
+          label.textContent = option.displayLabel;
+          optionWrap.appendChild(label);
         }
-        downloadTd.appendChild(btn);
-      } else {
-        var a = document.createElement("a");
-        a.className = "shuttle-explorer__btn shuttle-explorer__btn--small";
-        a.href = row.download_link;
-        a.target = "_blank";
-        a.rel = "noopener noreferrer";
-        a.textContent = row.is_icos ? "Accept ICOS license and download" : "Download";
-        a.setAttribute("aria-label", a.textContent + " for " + row.site_id);
-        downloadTd.appendChild(a);
-      }
+
+        if (option.mode === "ameriflux_api") {
+          control = document.createElement("button");
+          control.type = "button";
+          control.className = "shuttle-explorer__btn shuttle-explorer__btn--small";
+          control.setAttribute("data-role", "ameriflux-download");
+          control.setAttribute("data-site-id", option.siteId);
+          control.setAttribute("data-product", option.dataProduct);
+          control.setAttribute("data-source-label", option.sourceLabel);
+          control.textContent = option.actionLabel;
+          control.setAttribute("aria-label", option.actionLabel + " for " + option.siteId);
+          if (option.title) {
+            control.title = option.title;
+          }
+        } else {
+          control = document.createElement("a");
+          control.className = "shuttle-explorer__btn shuttle-explorer__btn--small";
+          control.href = option.downloadLink;
+          control.target = "_blank";
+          control.rel = "noopener noreferrer";
+          control.textContent = option.actionLabel;
+          control.setAttribute("aria-label", option.actionLabel + " for " + option.siteId);
+        }
+
+        optionWrap.appendChild(control);
+        downloadTd.appendChild(optionWrap);
+      });
       tr.appendChild(downloadTd);
 
       tbody.appendChild(tr);
@@ -5198,12 +5793,17 @@
     this.trackExplorerLoadedOnce();
   };
 
-  Explorer.prototype.buildMergedSnapshotState = function (shuttleResult, icosDirectResult, ameriResult, fluxnet2015Result, ameriFluxSiteInfoResult, fluxnet2015SiteInfoResult, vegetationMetadataResult) {
+  Explorer.prototype.buildMergedSnapshotState = function (shuttleResult, icosDirectResult, ameriResult, ameriBaseResult, fluxnet2015Result, ameriFluxSiteInfoResult, fluxnet2015SiteInfoResult, vegetationMetadataResult) {
     var ameriFluxSiteInfoLookup = ameriFluxSiteInfoResult && ameriFluxSiteInfoResult.lookup ? ameriFluxSiteInfoResult.lookup : {};
     var fluxnet2015SiteInfoLookup = fluxnet2015SiteInfoResult && fluxnet2015SiteInfoResult.lookup ? fluxnet2015SiteInfoResult.lookup : {};
     var vegetationMetadataLookup = vegetationMetadataResult && vegetationMetadataResult.lookup ? vegetationMetadataResult.lookup : {};
     var enrichedAmeriFluxSites = enrichAmeriFluxSitesWithMetadata(
       ameriResult && Array.isArray(ameriResult.sites) ? ameriResult.sites : [],
+      ameriFluxSiteInfoLookup,
+      vegetationMetadataLookup
+    );
+    var enrichedAmeriFluxBaseSites = enrichAmeriFluxSitesWithMetadata(
+      ameriBaseResult && Array.isArray(ameriBaseResult.sites) ? ameriBaseResult.sites : [],
       ameriFluxSiteInfoLookup,
       vegetationMetadataLookup
     );
@@ -5216,17 +5816,19 @@
       shuttleResult && Array.isArray(shuttleResult.rows) ? shuttleResult.rows : [],
       icosDirectResult && Array.isArray(icosDirectResult.rows) ? icosDirectResult.rows : [],
       enrichedAmeriFluxSites,
-      enrichedFluxnet2015Sites
+      enrichedFluxnet2015Sites,
+      enrichedAmeriFluxBaseSites
     );
     return {
       rows: merge.rows,
       droppedRows: shuttleResult && shuttleResult.droppedRows ? shuttleResult.droppedRows : 0,
-      source: "Shuttle + ICOS + AmeriFlux + FLUXNET2015",
+      source: "Shuttle + ICOS + AmeriFlux FLUXNET + AmeriFlux BASE + FLUXNET2015",
       sourceUrl: shuttleResult && shuttleResult.sourceUrl ? shuttleResult.sourceUrl : this.jsonUrl,
       warning: combineWarnings(
         shuttleResult && shuttleResult.warning ? shuttleResult.warning : "",
         icosDirectResult && icosDirectResult.warning ? icosDirectResult.warning : "",
         ameriResult && ameriResult.warning ? ameriResult.warning : "",
+        ameriBaseResult && ameriBaseResult.warning ? ameriBaseResult.warning : "",
         fluxnet2015Result && fluxnet2015Result.warning ? fluxnet2015Result.warning : "",
         ameriFluxSiteInfoResult && ameriFluxSiteInfoResult.warning ? ameriFluxSiteInfoResult.warning : "",
         fluxnet2015SiteInfoResult && fluxnet2015SiteInfoResult.warning ? fluxnet2015SiteInfoResult.warning : "",
@@ -5271,6 +5873,7 @@
       this.shuttleSource.list_sites(),
       this.icosDirectSource.list_sites(),
       this.ameriFluxSource.list_sites(),
+      this.ameriFluxBaseSource.list_sites(),
       this.fluxnet2015Source.list_sites(),
       loadAmeriFluxSiteInfo(this.ameriFluxSiteInfoUrl),
       loadFluxnet2015SiteInfo(this.fluxnet2015SiteInfoUrl),
@@ -5280,14 +5883,16 @@
         var shuttleResult = results[0] || {};
         var icosDirectResult = results[1] || {};
         var ameriResult = results[2] || {};
-        var fluxnet2015Result = results[3] || {};
-        var ameriFluxSiteInfoResult = results[4] || {};
-        var fluxnet2015SiteInfoResult = results[5] || {};
-        var vegetationMetadataResult = results[6] || {};
+        var ameriBaseResult = results[3] || {};
+        var fluxnet2015Result = results[4] || {};
+        var ameriFluxSiteInfoResult = results[5] || {};
+        var fluxnet2015SiteInfoResult = results[6] || {};
+        var vegetationMetadataResult = results[7] || {};
         var snapshotState = self.buildMergedSnapshotState(
           shuttleResult,
           icosDirectResult,
           ameriResult,
+          ameriBaseResult,
           fluxnet2015Result,
           ameriFluxSiteInfoResult,
           fluxnet2015SiteInfoResult,
@@ -5297,6 +5902,7 @@
           "shuttle:" + buildSnapshotFreshnessKey(shuttleResult),
           "icos-direct:" + buildSnapshotFreshnessKey(icosDirectResult),
           String(ameriResult.freshnessKey || "ameriflux:none"),
+          String(ameriBaseResult.freshnessKey || "ameriflux-base:none"),
           String(fluxnet2015Result.freshnessKey || "fluxnet2015:none"),
           "ameriflux-site-info:" + buildSnapshotFreshnessKey(ameriFluxSiteInfoResult),
           "fluxnet2015-site-info:" + buildSnapshotFreshnessKey(fluxnet2015SiteInfoResult),
@@ -5398,6 +6004,7 @@
     getDownloadEndpointForProduct: getDownloadEndpointForProduct,
     buildV2DownloadPayload: buildV2DownloadPayload,
     buildV1DownloadPayload: buildV1DownloadPayload,
+    exactYearSetsMatch: exactYearSetsMatch,
     stripUrlQueryForFilename: stripUrlQueryForFilename,
     filenameFromUrl: filenameFromUrl,
     buildAmeriFluxCurlCommand: buildAmeriFluxCurlCommand,
@@ -5406,6 +6013,9 @@
     buildDownloadAllSelectedScriptText: buildDownloadAllSelectedScriptText,
     buildDownloadAllSelectedFileBundle: buildDownloadAllSelectedFileBundle,
     buildTableClipboardText: buildTableClipboardText,
+    getSurfacedProductsForRow: getSurfacedProductsForRow,
+    buildRowDownloadOptions: buildRowDownloadOptions,
+    renderSurfacedCoverageHtml: renderSurfacedCoverageHtml,
     partitionRowsByBulkSource: partitionRowsByBulkSource,
     summarizeBulkSelection: summarizeBulkSelection,
     uniqueSourceFilterValues: uniqueSourceFilterValues,

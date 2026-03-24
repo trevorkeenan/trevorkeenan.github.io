@@ -87,6 +87,22 @@ function makeCatalogRow(overrides) {
   );
 }
 
+function makeAvailabilitySite(siteId, publishYears, overrides) {
+  const years = Array.isArray(publishYears) ? publishYears.slice() : [];
+  const normalizedYears = years.slice().sort((a, b) => a - b);
+  return Object.assign(
+    {
+      site_id: siteId,
+      publish_years: normalizedYears,
+      first_year: normalizedYears.length ? normalizedYears[0] : null,
+      last_year: normalizedYears.length ? normalizedYears[normalizedYears.length - 1] : null,
+      site_name: '',
+      country: ''
+    },
+    overrides || {}
+  );
+}
+
 function expectedJqGuidancePattern() {
   if (process.platform === 'darwin') {
     return /macOS: brew install jq/;
@@ -316,6 +332,173 @@ test('Merge precedence is Shuttle > ICOS > AmeriFlux > FLUXNET2015 with no dupli
 
   assert.equal(shuttleAmeriFlux.network_display, 'AmeriFlux');
   assert.deepEqual(shuttleAmeriFlux.network_tokens, ['AmeriFlux']);
+});
+
+test('BASE-only sites surface BASE only and bulk helpers keep the BASE product', () => {
+  const merged = hooks.mergeCatalogRows(
+    [],
+    [],
+    [],
+    [],
+    [
+      makeAvailabilitySite('US-Base', [2005, 2006, 2007], {
+        site_name: 'Base Site',
+        country: 'US'
+      })
+    ]
+  );
+  const row = merged.rows[0];
+  const partition = hooks.partitionRowsByBulkSource([row]);
+
+  assert.equal(merged.baseOnlySites, 1);
+  assert.equal(row.surfacedProductClassification, 'base_only');
+  assert.equal(row.source_filter, 'BASE only');
+  assert.equal(row.source_label, 'BASE');
+  assert.equal(row.years, 'BASE: 2005-2007');
+  assert.equal(row.length_years, 3);
+  assert.deepEqual(
+    row.surfacedProducts.map((product) => product.productFamily),
+    ['BASE']
+  );
+  assert.equal(row.surfacedProducts[0].apiDataProduct, 'BASE-BADM');
+  assert.equal(partition.shuttleRows.length, 0);
+  assert.equal(partition.ameriFluxRows.length, 1);
+  assert.equal(partition.ameriFluxRows[0].api_data_product, 'BASE-BADM');
+  assert.match(
+    hooks.buildAmeriFluxSelectedSitesText(partition.ameriFluxRows),
+    /US-Base\tBASE-BADM\tBASE/
+  );
+});
+
+test('Identical FLUXNET and BASE exact year sets suppress BASE from surfaced products', () => {
+  const merged = hooks.mergeCatalogRows(
+    [
+      makeCatalogRow({
+        site_id: 'US-Same',
+        site_name: 'Same Site',
+        country: 'US',
+        data_hub: 'AmeriFlux',
+        network: 'AmeriFlux',
+        source_network: 'AmeriFlux',
+        network_display: 'AmeriFlux',
+        network_tokens: ['AmeriFlux'],
+        first_year: 2010,
+        last_year: 2012,
+        years: '2010-2012',
+        download_link: 'https://example.org/us-same-fluxnet.zip',
+        source_label: '',
+        source_reason: '',
+        source_origin: 'shuttle'
+      })
+    ],
+    [],
+    [makeAvailabilitySite('US-Same', [2010, 2011, 2012])],
+    [],
+    [makeAvailabilitySite('US-Same', [2010, 2011, 2012])]
+  );
+  const row = merged.rows[0];
+  const partition = hooks.partitionRowsByBulkSource([row]);
+
+  assert.equal(row.surfacedProductClassification, 'processed_only');
+  assert.equal(row.source_filter, 'FLUXNET available');
+  assert.equal(row.surfacedProducts.length, 1);
+  assert.equal(row.surfacedProducts[0].productFamily, 'FLUXNET');
+  assert.equal(row.ameriFluxBaseProduct.productFamily, 'BASE');
+  assert.equal(partition.shuttleRows.length, 1);
+  assert.equal(partition.ameriFluxRows.length, 0);
+});
+
+test('Sites with additional BASE years surface both products and bulk helpers keep both download targets', () => {
+  const merged = hooks.mergeCatalogRows(
+    [
+      makeCatalogRow({
+        site_id: 'US-Ext',
+        site_name: 'Extended Site',
+        country: 'US',
+        data_hub: 'AmeriFlux',
+        network: 'AmeriFlux',
+        source_network: 'AmeriFlux',
+        network_display: 'AmeriFlux',
+        network_tokens: ['AmeriFlux'],
+        first_year: 1999,
+        last_year: 2014,
+        years: '1999-2014',
+        download_link: 'https://example.org/us-ext-fluxnet.zip',
+        source_label: '',
+        source_reason: '',
+        source_origin: 'shuttle'
+      })
+    ],
+    [],
+    [makeAvailabilitySite('US-Ext', Array.from({ length: 16 }, (_, index) => 1999 + index))],
+    [],
+    [makeAvailabilitySite('US-Ext', Array.from({ length: 27 }, (_, index) => 1999 + index))]
+  );
+  const row = merged.rows[0];
+  const partition = hooks.partitionRowsByBulkSource([row]);
+  const optionLabels = hooks.buildRowDownloadOptions(row, true).map((option) => option.displayLabel);
+  const coverageHtml = hooks.renderSurfacedCoverageHtml(row);
+
+  assert.equal(merged.additionalBaseYearsSites, 1);
+  assert.equal(row.surfacedProductClassification, 'additional_base_years');
+  assert.equal(row.source_filter, 'Additional BASE years');
+  assert.deepEqual(
+    row.surfacedProducts.map((product) => product.productFamily),
+    ['FLUXNET', 'BASE']
+  );
+  assert.equal(row.years, 'FLUXNET: 1999-2014 · BASE: 1999-2025');
+  assert.equal(partition.shuttleRows.length, 1);
+  assert.equal(partition.ameriFluxRows.length, 1);
+  assert.equal(partition.ameriFluxRows[0].api_data_product, 'BASE-BADM');
+  assert.deepEqual(
+    optionLabels,
+    ['FLUXNET (ONEFlux-derived)', 'BASE (standardized observations)']
+  );
+  assert.match(coverageHtml, /FLUXNET:/);
+  assert.match(coverageHtml, /BASE:/);
+  assert.match(coverageHtml, /Additional BASE years/);
+});
+
+test('Exact year-set comparison surfaces both products when coverage differs internally, not only at the endpoints', () => {
+  const merged = hooks.mergeCatalogRows(
+    [
+      makeCatalogRow({
+        site_id: 'US-Gap',
+        site_name: 'Gap Site',
+        country: 'US',
+        data_hub: 'AmeriFlux',
+        network: 'AmeriFlux',
+        source_network: 'AmeriFlux',
+        network_display: 'AmeriFlux',
+        network_tokens: ['AmeriFlux'],
+        first_year: 1999,
+        last_year: 2004,
+        years: '1999-2004',
+        download_link: 'https://example.org/us-gap-fluxnet.zip',
+        source_label: '',
+        source_reason: '',
+        source_origin: 'shuttle'
+      })
+    ],
+    [],
+    [makeAvailabilitySite('US-Gap', [1999, 2000, 2002, 2004])],
+    [],
+    [makeAvailabilitySite('US-Gap', [1999, 2001, 2002, 2004])]
+  );
+  const row = merged.rows[0];
+
+  assert.equal(
+    hooks.exactYearSetsMatch([1999, 2000, 2002, 2004], [1999, 2001, 2002, 2004]),
+    false
+  );
+  assert.equal(row.surfacedProductClassification, 'additional_base_years');
+  assert.equal(row.surfacedProducts.length, 2);
+  assert.deepEqual(row.surfacedProducts[0].exactYears, [1999, 2000, 2002, 2004]);
+  assert.deepEqual(row.surfacedProducts[1].exactYears, [1999, 2001, 2002, 2004]);
+  assert.equal(
+    row.years,
+    'FLUXNET: 1999-2000, 2002, 2004 · BASE: 1999, 2001-2002, 2004'
+  );
 });
 
 test('Coverage length helper counts inclusive years and returns null for incomplete ranges', () => {
@@ -556,9 +739,13 @@ test('API-only rows do not fabricate vegetation when authoritative metadata is a
   assert.equal(merged.rows[0].search_text.includes('gra'), false);
 });
 
-test('AmeriFlux download helpers route FLUXNET to v2 and FLUXNET2015 to v1', () => {
+test('AmeriFlux download helpers route FLUXNET and BASE to v2, and FLUXNET2015 to v1', () => {
   assert.equal(
     hooks.getDownloadEndpointForProduct('FLUXNET'),
+    'https://amfcdn.lbl.gov/api/v2/data_download'
+  );
+  assert.equal(
+    hooks.getDownloadEndpointForProduct('BASE-BADM'),
     'https://amfcdn.lbl.gov/api/v2/data_download'
   );
   assert.equal(
@@ -578,6 +765,16 @@ test('AmeriFlux download helpers route FLUXNET to v2 and FLUXNET2015 to v1', () 
   assert.equal(Object.prototype.hasOwnProperty.call(v2Payload, 'agree_policy'), false);
   assert.equal(Object.prototype.hasOwnProperty.call(v2Payload, 'is_test'), false);
 
+  const basePayload = hooks.buildV2DownloadPayload(
+    ['US-Base'],
+    'FULLSET',
+    'CCBY4.0',
+    { user_id: 'user', user_email: 'user@example.org' },
+    'BASE-BADM'
+  );
+  assert.equal(basePayload.data_product, 'BASE-BADM');
+  assert.equal(basePayload.intended_use, 'other_research');
+
   const v1Payload = hooks.buildV1DownloadPayload(
     ['CL-Old'],
     'FULLSET',
@@ -596,6 +793,77 @@ test('Bulk tools action helper only activates for multi-site selections', () => 
   assert.equal(hooks.shouldEnableBulkToolsActions(2), true);
   assert.equal(hooks.formatSelectedSiteCount(1), '1 selected site');
   assert.equal(hooks.formatSelectedSiteCount(3), '3 selected sites');
+});
+
+test('Single-product and dual-product row download helpers stay explicit without duplicating site rows', () => {
+  const singleDirectOptions = hooks.buildRowDownloadOptions(
+    makeCatalogRow({
+      site_id: 'US-Dir',
+      site_name: 'Direct Site',
+      data_hub: 'AmeriFlux',
+      network: 'AmeriFlux',
+      source_network: 'AmeriFlux',
+      network_display: 'AmeriFlux',
+      network_tokens: ['AmeriFlux'],
+      surfacedProducts: [
+        {
+          productFamily: 'FLUXNET',
+          siteId: 'US-Dir',
+          coverageLabel: '2012-2014',
+          exactYears: [2012, 2013, 2014],
+          downloadMode: 'direct',
+          downloadLink: 'https://example.org/us-dir.zip',
+          sourceLabel: 'AmeriFlux-shuttle',
+          source_label: 'AmeriFlux-shuttle',
+          apiDataProduct: 'FLUXNET',
+          api_data_product: 'FLUXNET'
+        }
+      ]
+    }),
+    true
+  );
+
+  assert.equal(singleDirectOptions.length, 1);
+  assert.equal(singleDirectOptions[0].displayLabel, 'FLUXNET (ONEFlux-derived)');
+  assert.equal(singleDirectOptions[0].actionLabel, 'Download');
+
+  const merged = hooks.mergeCatalogRows(
+    [
+      makeCatalogRow({
+        site_id: 'US-Dual',
+        site_name: 'Dual Site',
+        country: 'US',
+        data_hub: 'AmeriFlux',
+        network: 'AmeriFlux',
+        source_network: 'AmeriFlux',
+        network_display: 'AmeriFlux',
+        network_tokens: ['AmeriFlux'],
+        first_year: 2018,
+        last_year: 2020,
+        years: '2018-2020',
+        download_link: 'https://example.org/us-dual-fluxnet.zip',
+        source_label: '',
+        source_reason: '',
+        source_origin: 'shuttle'
+      })
+    ],
+    [],
+    [makeAvailabilitySite('US-Dual', [2018, 2019, 2020])],
+    [],
+    [makeAvailabilitySite('US-Dual', [2018, 2019, 2020, 2021])]
+  );
+  const dualRow = merged.rows[0];
+  const dualOptions = hooks.buildRowDownloadOptions(dualRow, true);
+
+  assert.equal(dualRow.surfacedProducts.length, 2);
+  assert.deepEqual(
+    dualOptions.map((option) => option.displayLabel),
+    ['FLUXNET (ONEFlux-derived)', 'BASE (standardized observations)']
+  );
+  assert.deepEqual(
+    dualOptions.map((option) => option.actionLabel),
+    ['Download', 'Request BASE URL']
+  );
 });
 
 test('Table clipboard export includes visible headers, preserves row order, and normalizes cell text', () => {
@@ -727,15 +995,20 @@ test('Bulk section visibility helper reflects selected source mix', () => {
   assert.equal(noneSelected.showAmeriFluxSection, false);
 });
 
-test('Source filter options include Shuttle, AmeriFlux, AmeriFlux-shuttle, and FLUXNET2015', () => {
+test('Availability filter options reflect surfaced product classifications', () => {
   const values = hooks.uniqueSourceFilterValues([
-    { source_label: '' },
-    { source_label: 'AmeriFlux' },
-    { source_label: 'AmeriFlux-shuttle' },
-    { source_label: 'FLUXNET2015' }
+    {
+      surfacedProductClassification: 'processed_only',
+      primaryProcessedProduct: { productFamily: 'FLUXNET' }
+    },
+    { surfacedProductClassification: 'base_only' },
+    {
+      surfacedProductClassification: 'additional_base_years',
+      primaryProcessedProduct: { productFamily: 'FLUXNET' }
+    }
   ]);
 
-  assert.deepEqual(values, ['AmeriFlux', 'AmeriFlux-shuttle', 'FLUXNET2015', 'Shuttle']);
+  assert.deepEqual(values, ['FLUXNET available', 'BASE only', 'Additional BASE years']);
 });
 
 test('Vegetation filter values include only canonical codes after mixed-source normalization', () => {
@@ -1189,20 +1462,23 @@ test('AmeriFlux curl command generator uses effective identity override when pro
   assert.match(customCommand, /"user_email": "custom@example\.org"/);
 });
 
-test('AmeriFlux selected-sites export includes source label and data product', () => {
+test('AmeriFlux selected-sites export includes source label and keeps multiple products for one site', () => {
   const text = hooks.buildAmeriFluxSelectedSitesText([
     { site_id: 'AR-Bal', data_product: 'FLUXNET', source_label: 'AmeriFlux' },
+    { site_id: 'AR-Bal', data_product: 'BASE-BADM', source_label: 'BASE' },
     { site_id: 'CL-Old', data_product: 'FLUXNET2015', source_label: 'FLUXNET2015' }
   ]);
 
   assert.match(text, /^# site_id\tdata_product\tsource_label/m);
   assert.match(text, /^AR-Bal\tFLUXNET\tAmeriFlux$/m);
+  assert.match(text, /^AR-Bal\tBASE-BADM\tBASE$/m);
   assert.match(text, /^CL-Old\tFLUXNET2015\tFLUXNET2015$/m);
 });
 
 test('AmeriFlux bulk script generator supports mixed FLUXNET and FLUXNET2015 products and filename cleanup', () => {
   const script = hooks.buildAmeriFluxBulkScriptText([
     { site_id: 'AR-Bal', data_product: 'FLUXNET', source_label: 'AmeriFlux' },
+    { site_id: 'AR-Bal', data_product: 'BASE-BADM', source_label: 'BASE' },
     { site_id: 'CL-Old', data_product: 'FLUXNET2015', source_label: 'FLUXNET2015' }
   ], {
     defaultUserId: 'custom-user',
@@ -1211,6 +1487,7 @@ test('AmeriFlux bulk script generator supports mixed FLUXNET and FLUXNET2015 pro
 
   assert.equal(script.includes('# site_id\tdata_product\tsource_label'), true);
   assert.equal(script.includes('AR-Bal\tFLUXNET\tAmeriFlux'), true);
+  assert.equal(script.includes('AR-Bal\tBASE-BADM\tBASE'), true);
   assert.equal(script.includes('CL-Old\tFLUXNET2015\tFLUXNET2015'), true);
   assert.equal(script.includes('USER_ID="${AMERIFLUX_USER_ID:-custom-user}"'), true);
   assert.equal(script.includes('USER_EMAIL="${AMERIFLUX_USER_EMAIL:-custom@example.org}"'), true);
@@ -1318,7 +1595,7 @@ test('Download-all wrapper script delegates to both child scripts when both sour
   });
 
   assert.equal(script.includes('# Shuttle is preferred for overlap sites (AmeriFlux-shuttle).'), true);
-  assert.equal(script.includes('# AmeriFlux API-backed sites (AmeriFlux and FLUXNET2015) are downloaded via the AmeriFlux API.'), true);
+  assert.equal(script.includes('# AmeriFlux API-backed surfaced products (FLUXNET, BASE, and FLUXNET2015) are downloaded via the AmeriFlux API.'), true);
   assert.equal(script.includes('if [ -f "./download_shuttle_selected.sh" ]; then'), true);
   assert.equal(script.includes('bash "./download_shuttle_selected.sh" || {'), true);
   assert.equal(script.includes('if [ -f "./download_ameriflux_selected.sh" ]; then'), true);
