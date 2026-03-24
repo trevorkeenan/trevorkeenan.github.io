@@ -12,8 +12,8 @@
   var MAX_PAGE_BUTTONS = 7;
   var SEARCH_DEBOUNCE_MS = 180;
   var STYLE_ID = "shuttle-explorer-inline-styles";
-  var SNAPSHOT_CACHE_SCHEMA_VERSION = 6;
-  var SNAPSHOT_CACHE_STORAGE_PREFIX = "shuttle-explorer:snapshot-cache:v6";
+  var SNAPSHOT_CACHE_SCHEMA_VERSION = 7;
+  var SNAPSHOT_CACHE_STORAGE_PREFIX = "shuttle-explorer:snapshot-cache:v7";
   var AMERIFLUX_FLUXNET_AVAILABILITY_URL = "https://amfcdn.lbl.gov/api/v2/data_availability/AmeriFlux/FLUXNET/CCBY4.0";
   var AMERIFLUX_BASE_AVAILABILITY_URL = "https://amfcdn.lbl.gov/api/v2/data_availability/AmeriFlux/BASE-BADM/CCBY4.0";
   var FLUXNET2015_AVAILABILITY_URL = "https://amfcdn.lbl.gov/api/v2/data_availability/FLUXNET/FLUXNET2015/CCBY4.0";
@@ -33,8 +33,26 @@
   var AMERIFLUX_SOURCE_ONLY = "AmeriFlux";
   var BASE_SOURCE_ONLY = "BASE";
   var FLUXNET2015_SOURCE_ONLY = "FLUXNET2015";
-  var AMERIFLUX_SHUTTLE = "AmeriFlux-shuttle";
+  var AMERIFLUX_SHUTTLE = "AmeriFlux-Shuttle";
   var SHUTTLE_SOURCE = "Shuttle";
+  var SOURCE_FILTER_TAG_AMERIFLUX = "AmeriFlux";
+  var SOURCE_FILTER_TAG_AMERIFLUX_SHUTTLE = "AmeriFlux-Shuttle";
+  var SOURCE_FILTER_TAG_FLUXNET_2015 = "FLUXNET-2015";
+  var SOURCE_FILTER_TAG_FLUXNET_SHUTTLE = "FLUXNET-Shuttle";
+  var SOURCE_FILTER_TAG_ICOS = "ICOS";
+  var SOURCE_FILTER_TAG_ICOS_SHUTTLE = "ICOS-Shuttle";
+  var SOURCE_FILTER_TAG_TERN = "TERN";
+  var SOURCE_FILTER_TAG_TERN_SHUTTLE = "TERN-Shuttle";
+  var SOURCE_FILTER_OPTIONS = [
+    SOURCE_FILTER_TAG_AMERIFLUX,
+    SOURCE_FILTER_TAG_AMERIFLUX_SHUTTLE,
+    SOURCE_FILTER_TAG_FLUXNET_2015,
+    SOURCE_FILTER_TAG_FLUXNET_SHUTTLE,
+    SOURCE_FILTER_TAG_ICOS,
+    SOURCE_FILTER_TAG_ICOS_SHUTTLE,
+    SOURCE_FILTER_TAG_TERN,
+    SOURCE_FILTER_TAG_TERN_SHUTTLE
+  ];
   var SHUTTLE_SOURCE_ORIGIN = "shuttle";
   var ICOS_DIRECT_SOURCE_ORIGIN = "icos_direct";
   var AMERIFLUX_API_SOURCE_ORIGIN = "ameriflux_api";
@@ -746,6 +764,7 @@
     var surfacedSummary = buildSurfacedCoverageSummary(row && row.surfacedProducts);
     var classification = String(row && row.surfacedProductClassification || "").trim();
     var availabilityLabels = Array.isArray(row && row.availability_filter_labels) ? row.availability_filter_labels.join(" ") : "";
+    var sourceTags = Array.isArray(row && row.source_filter_tags) ? row.source_filter_tags.join(" ") : "";
     return (
       String(row && row.site_id || "") + " " +
       String(row && row.site_name || "") + " " +
@@ -754,12 +773,26 @@
       String(row && row.source_network || "") + " " +
       String(row && row.vegetation_type || "") + " " +
       String(row && row.source_label || "") + " " +
+      String(row && row.primarySourceLabel || "") + " " +
       String(row && row.source_filter || "") + " " +
+      sourceTags + " " +
       availabilityLabels + " " +
       String(row && row.years || "") + " " +
       surfacedSummary + " " +
       classification
     ).toLowerCase();
+  }
+
+  function applyRowSourceFilterState(row) {
+    if (!row || typeof row !== "object") {
+      return row;
+    }
+    row.primarySourceLabel = primarySourceLabel(row);
+    row.source_provenance_filter = row.primarySourceLabel;
+    row.source_filter = row.primarySourceLabel;
+    row.source_filter_tags = computeSourceFilterTags(row);
+    row.availability_filter_labels = availabilityFilterLabels(row);
+    return row;
   }
 
   function finalizeRowComputedState(row) {
@@ -775,8 +808,7 @@
     normalizeNetworkDisplay(row);
     row.source_origin = resolveSourceOrigin(row);
     row.source_priority = resolveSourcePriority(row);
-    row.source_filter = sourceFilterValue(row);
-    row.availability_filter_labels = availabilityFilterLabels(row);
+    applyRowSourceFilterState(row);
     row.is_icos = isIcosRow(row);
     row.has_coordinates = parseCoordinate(row.latitude, -90, 90) != null &&
       parseCoordinate(row.longitude, -180, 180) != null;
@@ -812,33 +844,165 @@
       .replace(/`/g, "\\`");
   }
 
-  function sourceFilterValue(row) {
-    var explicit = String(row && row.source_provenance_filter || "").trim();
-    var label;
-    var dataProduct;
+  function rowNetworkTokens(row) {
+    var seen = {};
+    var tokens = [];
+
+    function addTokens(value) {
+      normalizeNetworkTokens(value).forEach(function (token) {
+        var key = String(token || "").toLowerCase();
+        if (!token || seen[key]) {
+          return;
+        }
+        seen[key] = true;
+        tokens.push(token);
+      });
+    }
+
+    if (Array.isArray(row && row.network_tokens)) {
+      row.network_tokens.forEach(function (token) {
+        addTokens(token);
+      });
+    }
+    addTokens(row && row.network_display);
+    addTokens(row && row.network);
+    addTokens(row && row.source_network);
+    return tokens;
+  }
+
+  function rowHasNetworkToken(row, expected) {
+    var target = String(expected || "").trim().toLowerCase();
+    if (!target) {
+      return false;
+    }
+    return rowNetworkTokens(row).some(function (token) {
+      return String(token || "").toLowerCase() === target;
+    });
+  }
+
+  function isFluxnet2015SupplementalRow(row) {
+    var sourceLabel = String(row && row.source_label || "").trim();
+    var dataProduct = getApiRowDataProduct(row);
+    return sourceLabel === FLUXNET2015_SOURCE_ONLY ||
+      dataProduct === FLUXNET2015_PRODUCT ||
+      rowHasNetworkToken(row, FLUXNET2015_SOURCE_ONLY);
+  }
+
+  function isAmeriFluxNetworkRow(row) {
+    var sourceLabel = String(row && row.source_label || "").trim();
+    var sourceOrigin = resolveSourceOrigin(row);
+    var dataHub = String(row && row.data_hub || "").trim().toLowerCase();
+    var dataProduct = getApiRowDataProduct(row);
+    if (
+      sourceLabel === AMERIFLUX_SOURCE_ONLY ||
+      sourceLabel === AMERIFLUX_SHUTTLE ||
+      sourceLabel === BASE_SOURCE_ONLY ||
+      dataProduct === AMERIFLUX_BASE_PRODUCT ||
+      rowHasNetworkToken(row, AMERIFLUX_SOURCE_ONLY)
+    ) {
+      return true;
+    }
+    if (isFluxnet2015SupplementalRow(row)) {
+      return false;
+    }
+    return dataHub === "ameriflux" || sourceOrigin === AMERIFLUX_API_SOURCE_ORIGIN;
+  }
+
+  function isIcosNetworkRow(row) {
+    return rowHasNetworkToken(row, ICOS_DIRECT_SOURCE_ONLY) ||
+      String(row && row.source_label || "").trim() === ICOS_DIRECT_SOURCE_ONLY ||
+      String(row && row.data_hub || "").trim().toLowerCase() === "icos" ||
+      isIcosRow(row);
+  }
+
+  function isTernNetworkRow(row) {
+    return rowHasNetworkToken(row, SOURCE_FILTER_TAG_TERN) ||
+      String(row && row.source_label || "").trim() === SOURCE_FILTER_TAG_TERN ||
+      String(row && row.data_hub || "").trim().toLowerCase() === "tern";
+  }
+
+  function computeSourceFilterTags(row) {
+    var tags = [];
+    var seen = {};
+    var shuttleAvailable = isShuttleCatalogRow(row);
+    var ameriFluxNetwork = isAmeriFluxNetworkRow(row);
+    var icosNetwork = isIcosNetworkRow(row);
+    var ternNetwork = isTernNetworkRow(row);
+    var fluxnet2015Supplemental = isFluxnet2015SupplementalRow(row);
+
+    function addTag(tag) {
+      if (!tag || seen[tag]) {
+        return;
+      }
+      seen[tag] = true;
+      tags.push(tag);
+    }
+
+    if (ameriFluxNetwork) {
+      addTag(SOURCE_FILTER_TAG_AMERIFLUX);
+      if (shuttleAvailable) {
+        addTag(SOURCE_FILTER_TAG_AMERIFLUX_SHUTTLE);
+      }
+    }
+    if (icosNetwork) {
+      addTag(SOURCE_FILTER_TAG_ICOS);
+      if (shuttleAvailable) {
+        addTag(SOURCE_FILTER_TAG_ICOS_SHUTTLE);
+      }
+    }
+    if (ternNetwork) {
+      addTag(SOURCE_FILTER_TAG_TERN);
+      if (shuttleAvailable) {
+        addTag(SOURCE_FILTER_TAG_TERN_SHUTTLE);
+      }
+    }
+    if (fluxnet2015Supplemental) {
+      addTag(SOURCE_FILTER_TAG_FLUXNET_2015);
+    }
+    if (shuttleAvailable) {
+      addTag(SOURCE_FILTER_TAG_FLUXNET_SHUTTLE);
+    }
+    return tags;
+  }
+
+  function sourceFilterTags(row) {
+    if (Array.isArray(row && row.source_filter_tags) && row.source_filter_tags.length) {
+      return row.source_filter_tags.slice();
+    }
+    return computeSourceFilterTags(row);
+  }
+
+  function primarySourceLabel(row) {
+    var explicit = String(row && (row.primarySourceLabel || row.source_provenance_filter) || "").trim();
+    var shuttleAvailable;
     if (explicit) {
       return explicit;
     }
-    label = String(row && row.source_label || "").trim();
-    dataProduct = getApiRowDataProduct(row);
-    if (label === BASE_SOURCE_ONLY || dataProduct === AMERIFLUX_BASE_PRODUCT) {
-      return AMERIFLUX_SOURCE_ONLY;
+    shuttleAvailable = isShuttleCatalogRow(row);
+    if (isAmeriFluxNetworkRow(row)) {
+      return shuttleAvailable ? SOURCE_FILTER_TAG_AMERIFLUX_SHUTTLE : SOURCE_FILTER_TAG_AMERIFLUX;
     }
-    return label || SHUTTLE_SOURCE;
+    if (isFluxnet2015SupplementalRow(row)) {
+      return SOURCE_FILTER_TAG_FLUXNET_2015;
+    }
+    if (isIcosNetworkRow(row)) {
+      return shuttleAvailable ? SOURCE_FILTER_TAG_ICOS_SHUTTLE : SOURCE_FILTER_TAG_ICOS;
+    }
+    if (isTernNetworkRow(row)) {
+      return shuttleAvailable ? SOURCE_FILTER_TAG_TERN_SHUTTLE : SOURCE_FILTER_TAG_TERN;
+    }
+    if (shuttleAvailable) {
+      return SOURCE_FILTER_TAG_FLUXNET_SHUTTLE;
+    }
+    return String(row && row.source_label || "").trim() || SHUTTLE_SOURCE;
   }
 
-  function uniqueSourceFilterValues(rows) {
-    var seen = {};
-    var values = [];
-    (rows || []).forEach(function (row) {
-      var value = sourceFilterValue(row);
-      if (!value || seen[value]) {
-        return;
-      }
-      seen[value] = true;
-      values.push(value);
-    });
-    return values.sort();
+  function sourceFilterValue(row) {
+    return primarySourceLabel(row);
+  }
+
+  function uniqueSourceFilterValues() {
+    return SOURCE_FILTER_OPTIONS.slice();
   }
 
   function hasProcessedProduct(row) {
@@ -899,7 +1063,7 @@
     if (selectedNetwork && (!row || row.network_tokens.indexOf(selectedNetwork) === -1)) {
       return false;
     }
-    if (selectedSource && sourceFilterValue(row) !== selectedSource) {
+    if (selectedSource && sourceFilterTags(row).indexOf(selectedSource) === -1) {
       return false;
     }
     if (!availabilityFilterMatches(row, selectedAvailability)) {
@@ -1396,7 +1560,7 @@
       "set -euo pipefail",
       "",
       "# Bulk download wrapper for surfaced products from selected FLUXNET sites",
-      "# Shuttle is preferred for overlap sites (AmeriFlux-shuttle).",
+      "# Shuttle is preferred for overlap sites (AmeriFlux-Shuttle).",
       "# AmeriFlux API-backed surfaced products (FLUXNET, BASE, and FLUXNET2015) are downloaded via the AmeriFlux API.",
       "",
       "SCRIPT_DIR=\"$(cd \"$(dirname \"${BASH_SOURCE[0]}\")\" && pwd)\"",
@@ -1990,7 +2154,6 @@
   function applySurfacedProductsToRow(row, primaryProcessedProduct, ameriFluxBaseProduct, surfacedProducts, classification) {
     var products = Array.isArray(surfacedProducts) ? surfacedProducts.slice() : [];
     var unionYears = buildSurfacedYearUnion(products);
-    var provenanceSource = sourceFilterValue(primaryProcessedProduct || row);
 
     row.primaryProcessedProduct = primaryProcessedProduct || null;
     row.ameriFluxBaseProduct = ameriFluxBaseProduct || null;
@@ -1998,7 +2161,6 @@
     row.surfacedProductClassification = String(classification || "");
     row.hasProcessedProduct = !!primaryProcessedProduct;
     row.hasFluxnetAvailable = row.hasProcessedProduct;
-    row.source_provenance_filter = provenanceSource;
 
     if (unionYears.length) {
       row.first_year = unionYears[0];
@@ -2010,8 +2172,7 @@
       row.length_years = calculateCoverageLength(row.first_year, row.last_year);
     }
 
-    row.source_filter = sourceFilterValue(row);
-    row.availability_filter_labels = availabilityFilterLabels(row);
+    applyRowSourceFilterState(row);
     row.search_text = buildRowSearchText(row);
     return row;
   }
@@ -6124,6 +6285,7 @@
     renderSurfacedCoverageHtml: renderSurfacedCoverageHtml,
     partitionRowsByBulkSource: partitionRowsByBulkSource,
     summarizeBulkSelection: summarizeBulkSelection,
+    computeSourceFilterTags: computeSourceFilterTags,
     uniqueSourceFilterValues: uniqueSourceFilterValues,
     uniqueAvailabilityFilterValues: uniqueAvailabilityFilterValues,
     rowMatchesExplorerFilters: rowMatchesExplorerFilters,

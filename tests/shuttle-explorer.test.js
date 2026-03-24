@@ -297,7 +297,8 @@ test('Merge precedence is Shuttle > ICOS > AmeriFlux > FLUXNET2015 with no dupli
   assert.equal(merged.rows.filter((row) => row.site_id === 'BE-Bra').length, 1);
   assert.equal(merged.rows.filter((row) => row.site_id === 'BR-New').length, 1);
 
-  assert.equal(overlap.source_label, 'AmeriFlux-shuttle');
+  assert.equal(overlap.source_label, 'AmeriFlux-Shuttle');
+  assert.deepEqual(overlap.source_filter_tags, ['AmeriFlux', 'AmeriFlux-Shuttle', 'FLUXNET-Shuttle']);
   assert.equal(overlap.download_mode, 'direct');
   assert.equal(overlap.download_link, 'https://data.fluxnet.org/shuttle/ar-bal.zip');
   assert.equal(overlap.country, 'Argentina');
@@ -309,6 +310,7 @@ test('Merge precedence is Shuttle > ICOS > AmeriFlux > FLUXNET2015 with no dupli
   assert.equal(ameriOnly.data_hub, 'AmeriFlux');
   assert.equal(ameriOnly.api_data_product, 'FLUXNET');
   assert.equal(ameriOnly.length_years, 1);
+  assert.deepEqual(ameriOnly.source_filter_tags, ['AmeriFlux']);
 
   assert.equal(icosOnly.source_label, 'ICOS');
   assert.equal(icosOnly.download_mode, 'direct');
@@ -319,6 +321,7 @@ test('Merge precedence is Shuttle > ICOS > AmeriFlux > FLUXNET2015 with no dupli
   assert.equal(icosOnly.source_priority, 300);
   assert.equal(icosOnly.is_icos, true);
   assert.equal(icosOnly.country, 'Belgium');
+  assert.deepEqual(icosOnly.source_filter_tags, ['ICOS']);
 
   assert.equal(fluxnet2015Only.source_label, 'FLUXNET2015');
   assert.equal(fluxnet2015Only.download_mode, 'ameriflux_api');
@@ -329,9 +332,11 @@ test('Merge precedence is Shuttle > ICOS > AmeriFlux > FLUXNET2015 with no dupli
   assert.equal(fluxnet2015Only.network_display, 'FLUXNET2015');
   assert.deepEqual(fluxnet2015Only.network_tokens, ['FLUXNET2015']);
   assert.equal(fluxnet2015Only.length_years, 1);
+  assert.deepEqual(fluxnet2015Only.source_filter_tags, ['FLUXNET-2015']);
 
   assert.equal(shuttleAmeriFlux.network_display, 'AmeriFlux');
   assert.deepEqual(shuttleAmeriFlux.network_tokens, ['AmeriFlux']);
+  assert.deepEqual(shuttleAmeriFlux.source_filter_tags, ['AmeriFlux', 'AmeriFlux-Shuttle', 'FLUXNET-Shuttle']);
 });
 
 test('BASE-only sites surface BASE only and bulk helpers keep the BASE product', () => {
@@ -402,7 +407,8 @@ test('Identical FLUXNET and BASE exact year sets suppress BASE from surfaced pro
   const partition = hooks.partitionRowsByBulkSource([row]);
 
   assert.equal(row.surfacedProductClassification, 'processed_only');
-  assert.equal(row.source_filter, 'AmeriFlux-shuttle');
+  assert.equal(row.source_filter, 'AmeriFlux-Shuttle');
+  assert.deepEqual(row.source_filter_tags, ['AmeriFlux', 'AmeriFlux-Shuttle', 'FLUXNET-Shuttle']);
   assert.equal(row.hasProcessedProduct, true);
   assert.deepEqual(row.availability_filter_labels, ['FLUXNET available']);
   assert.equal(row.surfacedProducts.length, 1);
@@ -445,7 +451,8 @@ test('Sites with additional BASE years surface both products and bulk helpers ke
 
   assert.equal(merged.additionalBaseYearsSites, 1);
   assert.equal(row.surfacedProductClassification, 'additional_base_years');
-  assert.equal(row.source_filter, 'AmeriFlux-shuttle');
+  assert.equal(row.source_filter, 'AmeriFlux-Shuttle');
+  assert.deepEqual(row.source_filter_tags, ['AmeriFlux', 'AmeriFlux-Shuttle', 'FLUXNET-Shuttle']);
   assert.equal(row.hasProcessedProduct, true);
   assert.deepEqual(
     row.availability_filter_labels,
@@ -693,7 +700,7 @@ test('FLUXNET2015 API-only rows keep backfilled vegetation through merge and sea
   assert.equal(merged.rows[0].search_text.includes('sav'), true);
 });
 
-test('AmeriFlux-shuttle overlap keeps Shuttle vegetation unchanged when API metadata also exists', () => {
+test('AmeriFlux-Shuttle overlap keeps Shuttle vegetation unchanged when API metadata also exists', () => {
   const merged = hooks.mergeCatalogRows(
     [
       makeCatalogRow({
@@ -724,7 +731,7 @@ test('AmeriFlux-shuttle overlap keeps Shuttle vegetation unchanged when API meta
     []
   );
 
-  assert.equal(merged.rows[0].source_label, 'AmeriFlux-shuttle');
+  assert.equal(merged.rows[0].source_label, 'AmeriFlux-Shuttle');
   assert.equal(merged.rows[0].vegetation_type, 'CRO');
 });
 
@@ -822,8 +829,8 @@ test('Single-product and dual-product row download helpers stay explicit without
           exactYears: [2012, 2013, 2014],
           downloadMode: 'direct',
           downloadLink: 'https://example.org/us-dir.zip',
-          sourceLabel: 'AmeriFlux-shuttle',
-          source_label: 'AmeriFlux-shuttle',
+          sourceLabel: 'AmeriFlux-Shuttle',
+          source_label: 'AmeriFlux-Shuttle',
           apiDataProduct: 'FLUXNET',
           api_data_product: 'FLUXNET'
         }
@@ -965,7 +972,7 @@ test('Attribution text includes the contact sentence and uses the shared snapsho
 test('Bulk partition routes overlap rows to Shuttle and AmeriFlux API rows to the AmeriFlux bulk set', () => {
   const selectedRows = [
     { site_id: 'US-Ton', download_mode: 'direct', source_label: '' },
-    { site_id: 'AR-Bal', download_mode: 'direct', source_label: 'AmeriFlux-shuttle' },
+    { site_id: 'AR-Bal', download_mode: 'direct', source_label: 'AmeriFlux-Shuttle' },
     { site_id: 'BR-New', download_mode: 'ameriflux_api', source_label: 'AmeriFlux', api_data_product: 'FLUXNET' },
     { site_id: 'CL-Old', download_mode: 'ameriflux_api', source_label: 'FLUXNET2015', api_data_product: 'FLUXNET2015' }
   ];
@@ -1004,13 +1011,13 @@ test('Bulk section visibility helper reflects selected source mix', () => {
   assert.equal(noneSelected.showAmeriFluxSection, false);
 });
 
-test('Source filter options preserve provenance while availability options reflect surfaced products', () => {
+test('Source filter options expose the full overlapping source tag list while availability options reflect surfaced products', () => {
   const sourceValues = hooks.uniqueSourceFilterValues([
-    { source_label: '' },
-    { source_label: 'AmeriFlux' },
-    { source_label: 'AmeriFlux-shuttle' },
-    { source_label: 'FLUXNET2015' },
-    { source_label: 'BASE', api_data_product: 'BASE-BADM' }
+    { source_filter_tags: ['AmeriFlux'] },
+    { source_filter_tags: ['AmeriFlux', 'AmeriFlux-Shuttle', 'FLUXNET-Shuttle'] },
+    { source_filter_tags: ['FLUXNET-2015'] },
+    { source_filter_tags: ['ICOS'] },
+    { source_filter_tags: ['TERN', 'TERN-Shuttle', 'FLUXNET-Shuttle'] }
   ]);
   const availabilityValues = hooks.uniqueAvailabilityFilterValues([
     {
@@ -1026,11 +1033,105 @@ test('Source filter options preserve provenance while availability options refle
     }
   ]);
 
-  assert.deepEqual(sourceValues, ['AmeriFlux', 'AmeriFlux-shuttle', 'FLUXNET2015', 'Shuttle']);
+  assert.deepEqual(sourceValues, [
+    'AmeriFlux',
+    'AmeriFlux-Shuttle',
+    'FLUXNET-2015',
+    'FLUXNET-Shuttle',
+    'ICOS',
+    'ICOS-Shuttle',
+    'TERN',
+    'TERN-Shuttle'
+  ]);
   assert.deepEqual(
     availabilityValues,
     ['FLUXNET available', 'Only BASE available', 'Sites with FLUXNET + additional BASE years']
   );
+});
+
+test('Rows compute overlapping source filter tags from network membership and Shuttle availability', () => {
+  const merged = hooks.mergeCatalogRows(
+    [
+      makeCatalogRow({
+        site_id: 'US-Shu',
+        site_name: 'AmeriFlux Shuttle',
+        country: 'US',
+        data_hub: 'AmeriFlux',
+        network: 'AmeriFlux',
+        source_network: 'AmeriFlux',
+        network_display: 'AmeriFlux',
+        network_tokens: ['AmeriFlux'],
+        source_label: '',
+        source_reason: '',
+        source_origin: 'shuttle'
+      }),
+      makeCatalogRow({
+        site_id: 'BE-Shu',
+        site_name: 'ICOS Shuttle',
+        country: 'BE',
+        data_hub: 'ICOS',
+        network: 'FLX',
+        source_network: 'FLX',
+        network_display: 'FLX',
+        network_tokens: ['FLX'],
+        source_label: '',
+        source_reason: '',
+        source_origin: 'shuttle'
+      }),
+      makeCatalogRow({
+        site_id: 'AU-Ter',
+        site_name: 'TERN Shuttle',
+        country: 'AU',
+        data_hub: 'TERN',
+        network: 'TERN',
+        source_network: 'TERN',
+        network_display: 'TERN',
+        network_tokens: ['TERN'],
+        source_label: '',
+        source_reason: '',
+        source_origin: 'shuttle'
+      })
+    ],
+    [
+      makeCatalogRow({
+        site_id: 'SE-Ico',
+        site_name: 'ICOS Direct',
+        country: 'SE',
+        data_hub: 'ICOS',
+        network: 'FLX',
+        source_network: 'FLX',
+        network_display: 'FLX',
+        network_tokens: ['FLX'],
+        source_label: 'ICOS',
+        source_reason: '',
+        source_origin: 'icos_direct'
+      })
+    ],
+    [
+      makeAvailabilitySite('US-Shu', [2010, 2011]),
+      makeAvailabilitySite('BR-Amf', [2020], {
+        site_name: 'AmeriFlux API',
+        country: 'BR'
+      })
+    ],
+    [
+      makeAvailabilitySite('CL-Leg', [2001], {
+        site_name: 'Legacy Site',
+        country: 'CL'
+      })
+    ]
+  );
+  const bySite = Object.fromEntries(merged.rows.map((row) => [row.site_id, row]));
+
+  assert.deepEqual(bySite['BR-Amf'].source_filter_tags, ['AmeriFlux']);
+  assert.deepEqual(bySite['US-Shu'].source_filter_tags, ['AmeriFlux', 'AmeriFlux-Shuttle', 'FLUXNET-Shuttle']);
+  assert.deepEqual(bySite['BE-Shu'].source_filter_tags, ['ICOS', 'ICOS-Shuttle', 'FLUXNET-Shuttle']);
+  assert.deepEqual(bySite['SE-Ico'].source_filter_tags, ['ICOS']);
+  assert.deepEqual(bySite['AU-Ter'].source_filter_tags, ['TERN', 'TERN-Shuttle', 'FLUXNET-Shuttle']);
+  assert.deepEqual(bySite['CL-Leg'].source_filter_tags, ['FLUXNET-2015']);
+  assert.equal(bySite['CL-Leg'].source_filter_tags.includes('AmeriFlux'), false);
+  assert.equal(bySite['CL-Leg'].source_filter_tags.includes('ICOS'), false);
+  assert.equal(bySite['CL-Leg'].source_filter_tags.includes('TERN'), false);
 });
 
 test('Source and Availability controls both exist in the explorer markup', () => {
@@ -1126,6 +1227,86 @@ test('Source and Availability filters compose for AmeriFlux provenance with FLUX
     .sort();
 
   assert.deepEqual(matchingSiteIds, ['US-Add', 'US-Pro']);
+});
+
+test('FLUXNET-Shuttle source filtering includes Shuttle-available AmeriFlux, ICOS, and TERN rows', () => {
+  const merged = hooks.mergeCatalogRows(
+    [
+      makeCatalogRow({
+        site_id: 'US-Shu',
+        site_name: 'AmeriFlux Shuttle',
+        country: 'US',
+        data_hub: 'AmeriFlux',
+        network: 'AmeriFlux',
+        source_network: 'AmeriFlux',
+        network_display: 'AmeriFlux',
+        network_tokens: ['AmeriFlux'],
+        source_label: '',
+        source_reason: '',
+        source_origin: 'shuttle'
+      }),
+      makeCatalogRow({
+        site_id: 'BE-Shu',
+        site_name: 'ICOS Shuttle',
+        country: 'BE',
+        data_hub: 'ICOS',
+        network: 'FLX',
+        source_network: 'FLX',
+        network_display: 'FLX',
+        network_tokens: ['FLX'],
+        source_label: '',
+        source_reason: '',
+        source_origin: 'shuttle'
+      }),
+      makeCatalogRow({
+        site_id: 'AU-Ter',
+        site_name: 'TERN Shuttle',
+        country: 'AU',
+        data_hub: 'TERN',
+        network: 'TERN',
+        source_network: 'TERN',
+        network_display: 'TERN',
+        network_tokens: ['TERN'],
+        source_label: '',
+        source_reason: '',
+        source_origin: 'shuttle'
+      })
+    ],
+    [
+      makeCatalogRow({
+        site_id: 'SE-Ico',
+        site_name: 'ICOS Direct',
+        country: 'SE',
+        data_hub: 'ICOS',
+        network: 'FLX',
+        source_network: 'FLX',
+        network_display: 'FLX',
+        network_tokens: ['FLX'],
+        source_label: 'ICOS',
+        source_reason: '',
+        source_origin: 'icos_direct'
+      })
+    ],
+    [
+      makeAvailabilitySite('US-Shu', [2010, 2011])
+    ],
+    [
+      makeAvailabilitySite('CL-Leg', [2001], {
+        site_name: 'Legacy Site',
+        country: 'CL'
+      })
+    ]
+  );
+
+  const matchingSiteIds = merged.rows
+    .filter((row) => hooks.rowMatchesExplorerFilters(row, {
+      selectedSource: 'FLUXNET-Shuttle',
+      selectedAvailability: ''
+    }))
+    .map((row) => row.site_id)
+    .sort();
+
+  assert.deepEqual(matchingSiteIds, ['AU-Ter', 'BE-Shu', 'US-Shu']);
 });
 
 test('Vegetation filter values include only canonical codes after mixed-source normalization', () => {
@@ -1711,7 +1892,7 @@ test('Download-all wrapper script delegates to both child scripts when both sour
     includeAmeriFlux: true
   });
 
-  assert.equal(script.includes('# Shuttle is preferred for overlap sites (AmeriFlux-shuttle).'), true);
+  assert.equal(script.includes('# Shuttle is preferred for overlap sites (AmeriFlux-Shuttle).'), true);
   assert.equal(script.includes('# AmeriFlux API-backed surfaced products (FLUXNET, BASE, and FLUXNET2015) are downloaded via the AmeriFlux API.'), true);
   assert.equal(script.includes('if [ -f "./download_shuttle_selected.sh" ]; then'), true);
   assert.equal(script.includes('bash "./download_shuttle_selected.sh" || {'), true);
