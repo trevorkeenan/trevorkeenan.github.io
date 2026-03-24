@@ -37,6 +37,7 @@
   var SHUTTLE_SOURCE = "Shuttle";
   var SOURCE_FILTER_TAG_AMERIFLUX = "AmeriFlux";
   var SOURCE_FILTER_TAG_AMERIFLUX_SHUTTLE = "AmeriFlux-Shuttle";
+  var SOURCE_FILTER_TAG_CHINAFLUX = "ChinaFlux";
   var SOURCE_FILTER_TAG_FLUXNET_2015 = "FLUXNET-2015";
   var SOURCE_FILTER_TAG_FLUXNET_SHUTTLE = "FLUXNET-Shuttle";
   var SOURCE_FILTER_TAG_ICOS = "ICOS";
@@ -46,6 +47,7 @@
   var SOURCE_FILTER_OPTIONS = [
     SOURCE_FILTER_TAG_AMERIFLUX,
     SOURCE_FILTER_TAG_AMERIFLUX_SHUTTLE,
+    SOURCE_FILTER_TAG_CHINAFLUX,
     SOURCE_FILTER_TAG_FLUXNET_2015,
     SOURCE_FILTER_TAG_FLUXNET_SHUTTLE,
     SOURCE_FILTER_TAG_ICOS,
@@ -53,6 +55,32 @@
     SOURCE_FILTER_TAG_TERN,
     SOURCE_FILTER_TAG_TERN_SHUTTLE
   ];
+  var FLUXNET2015_COUNTRY_ALIAS_NORMALIZATIONS = {
+    "russian federation": "russia",
+    "people s republic of china": "china",
+    "peoples republic of china": "china",
+    "pr china": "china"
+  };
+  var FLUXNET2015_AMERICAS_COUNTRY_CODES = [
+    "AG", "AI", "AR", "AW", "BB", "BL", "BM", "BO", "BQ", "BR", "BS", "BZ",
+    "CA", "CL", "CO", "CR", "CU", "CW", "DM", "DO", "EC", "FK", "GD", "GF",
+    "GL", "GP", "GT", "GY", "HN", "HT", "JM", "KN", "KY", "LC", "MF", "MQ",
+    "MS", "MX", "NI", "PA", "PE", "PM", "PR", "PY", "SR", "SV", "SX", "TC",
+    "TT", "US", "UY", "VC", "VE", "VG", "VI"
+  ];
+  var FLUXNET2015_ICOS_COUNTRY_CODES = [
+    "AD", "AL", "AO", "AT", "BE", "BF", "BG", "BI", "BJ", "BW", "BY", "CD",
+    "CF", "CG", "CH", "CI", "CM", "CV", "CY", "CZ", "DE", "DJ", "DK", "DZ",
+    "EE", "EG", "EH", "ER", "ES", "ET", "FI", "FO", "FR", "GA", "GB", "GH",
+    "GI", "GM", "GN", "GQ", "GR", "GW", "HR", "HU", "IE", "IM", "IS", "IT",
+    "KE", "KM", "XK", "LI", "LR", "LS", "LT", "LU", "LV", "LY", "MA", "MC",
+    "MD", "ME", "MG", "MK", "ML", "MT", "MU", "MW", "MZ", "NA", "NE", "NG",
+    "NL", "NO", "PL", "PT", "RE", "RO", "RS", "RU", "RW", "SC", "SD", "SE",
+    "SH", "SI", "SJ", "SK", "SL", "SM", "SN", "SO", "SS", "ST", "SZ", "TD",
+    "TG", "TN", "TZ", "UA", "UG", "UK", "VA", "YT", "ZA", "ZM", "ZW"
+  ];
+  var FLUXNET2015_TERN_COUNTRY_CODES = ["AU", "NZ"];
+  var FLUXNET2015_CHINA_COUNTRY_CODES = ["CN"];
   var SHUTTLE_SOURCE_ORIGIN = "shuttle";
   var ICOS_DIRECT_SOURCE_ORIGIN = "icos_direct";
   var AMERIFLUX_API_SOURCE_ORIGIN = "ameriflux_api";
@@ -297,6 +325,60 @@
       return COUNTRY_NAME_ALIASES[aliasKey];
     }
     return mapped || raw;
+  }
+
+  function countryLookupKey(value) {
+    var normalized = normalizeCountryName(value);
+    var key = String(normalized || value || "")
+      .trim()
+      .toLowerCase()
+      .replace(/&/g, " and ")
+      .replace(/\./g, "")
+      .replace(/[^a-z]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    return FLUXNET2015_COUNTRY_ALIAS_NORMALIZATIONS[key] || key;
+  }
+
+  function buildCountryLookup(codes) {
+    var lookup = {};
+    (Array.isArray(codes) ? codes : []).forEach(function (code) {
+      var rawCode = String(code || "").trim().toUpperCase();
+      var normalizedName = countryLookupKey(rawCode);
+      if (!rawCode) {
+        return;
+      }
+      lookup[rawCode.toLowerCase()] = true;
+      if (normalizedName) {
+        lookup[normalizedName] = true;
+      }
+    });
+    return lookup;
+  }
+
+  var FLUXNET2015_AMERICAS_COUNTRY_LOOKUP = buildCountryLookup(FLUXNET2015_AMERICAS_COUNTRY_CODES);
+  var FLUXNET2015_ICOS_COUNTRY_LOOKUP = buildCountryLookup(FLUXNET2015_ICOS_COUNTRY_CODES);
+  var FLUXNET2015_TERN_COUNTRY_LOOKUP = buildCountryLookup(FLUXNET2015_TERN_COUNTRY_CODES);
+  var FLUXNET2015_CHINA_COUNTRY_LOOKUP = buildCountryLookup(FLUXNET2015_CHINA_COUNTRY_CODES);
+
+  function inferFluxnet2015NetworkFromCountry(country) {
+    var key = countryLookupKey(country);
+    if (!key) {
+      return null;
+    }
+    if (FLUXNET2015_CHINA_COUNTRY_LOOKUP[key]) {
+      return SOURCE_FILTER_TAG_CHINAFLUX;
+    }
+    if (FLUXNET2015_TERN_COUNTRY_LOOKUP[key]) {
+      return SOURCE_FILTER_TAG_TERN;
+    }
+    if (FLUXNET2015_AMERICAS_COUNTRY_LOOKUP[key]) {
+      return SOURCE_FILTER_TAG_AMERIFLUX;
+    }
+    if (FLUXNET2015_ICOS_COUNTRY_LOOKUP[key]) {
+      return SOURCE_FILTER_TAG_ICOS;
+    }
+    return null;
   }
 
   function buildSiteInfoEntry(siteId, raw) {
@@ -633,6 +715,8 @@
     var sourceLabel = String(row.source_label || "").trim();
     var dataProduct = String(row.api_data_product || "").trim().toUpperCase();
     var networkDisplay = String(row.network_display || row.network || row.source_network || "").trim();
+    var reliableFluxnet2015Tokens;
+    var inferredFluxnet2015Network;
     if (
       sourceLabel === FLUXNET2015_SOURCE_ONLY ||
       dataProduct === FLUXNET2015_PRODUCT ||
@@ -640,9 +724,15 @@
       hasNetworkTag(row.network, FLUXNET2015_SOURCE_ONLY) ||
       hasNetworkTag(row.source_network, FLUXNET2015_SOURCE_ONLY)
     ) {
-      row.network = FLUXNET2015_SOURCE_ONLY;
-      row.source_network = FLUXNET2015_SOURCE_ONLY;
-      networkDisplay = FLUXNET2015_SOURCE_ONLY;
+      reliableFluxnet2015Tokens = rowNetworkTokens(row).filter(function (token) {
+        return String(token || "").trim() && String(token || "").trim() !== FLUXNET2015_SOURCE_ONLY;
+      });
+      inferredFluxnet2015Network = inferFluxnet2015NetworkFromCountry(row.country);
+      networkDisplay = reliableFluxnet2015Tokens.length
+        ? reliableFluxnet2015Tokens.join(";")
+        : (inferredFluxnet2015Network || "");
+      row.network = networkDisplay;
+      row.source_network = networkDisplay;
     } else if (
       sourceLabel === BASE_SOURCE_ONLY ||
       dataProduct === AMERIFLUX_BASE_PRODUCT ||
@@ -685,10 +775,10 @@
   }
 
   function isIcosRow(row) {
-    var hub = String(row.data_hub || "").toLowerCase();
-    var network = String(row.network || "").toLowerCase();
     var url = String(row.download_link || "").toLowerCase();
-    return hub === "icos" || network.indexOf("icos") !== -1 || /data\.icos-cp\.eu\/licence_accept/.test(url);
+    return resolveSourceOrigin(row) === ICOS_DIRECT_SOURCE_ORIGIN ||
+      String(row && row.source_label || "").trim() === ICOS_DIRECT_SOURCE_ONLY ||
+      /data\.icos-cp\.eu\/licence_accept/.test(url);
   }
 
   function resolveSourceOrigin(row) {
@@ -921,11 +1011,18 @@
       String(row && row.data_hub || "").trim().toLowerCase() === "tern";
   }
 
+  function isChinaFluxNetworkRow(row) {
+    return rowHasNetworkToken(row, SOURCE_FILTER_TAG_CHINAFLUX) ||
+      String(row && row.source_label || "").trim() === SOURCE_FILTER_TAG_CHINAFLUX ||
+      String(row && row.data_hub || "").trim().toLowerCase() === "chinaflux";
+  }
+
   function computeSourceFilterTags(row) {
     var tags = [];
     var seen = {};
     var shuttleAvailable = isShuttleCatalogRow(row);
     var ameriFluxNetwork = isAmeriFluxNetworkRow(row);
+    var chinaFluxNetwork = isChinaFluxNetworkRow(row);
     var icosNetwork = isIcosNetworkRow(row);
     var ternNetwork = isTernNetworkRow(row);
     var fluxnet2015Supplemental = isFluxnet2015SupplementalRow(row);
@@ -943,6 +1040,9 @@
       if (shuttleAvailable) {
         addTag(SOURCE_FILTER_TAG_AMERIFLUX_SHUTTLE);
       }
+    }
+    if (chinaFluxNetwork) {
+      addTag(SOURCE_FILTER_TAG_CHINAFLUX);
     }
     if (icosNetwork) {
       addTag(SOURCE_FILTER_TAG_ICOS);
@@ -982,14 +1082,17 @@
     if (isAmeriFluxNetworkRow(row)) {
       return shuttleAvailable ? SOURCE_FILTER_TAG_AMERIFLUX_SHUTTLE : SOURCE_FILTER_TAG_AMERIFLUX;
     }
-    if (isFluxnet2015SupplementalRow(row)) {
-      return SOURCE_FILTER_TAG_FLUXNET_2015;
+    if (isChinaFluxNetworkRow(row)) {
+      return SOURCE_FILTER_TAG_CHINAFLUX;
     }
     if (isIcosNetworkRow(row)) {
       return shuttleAvailable ? SOURCE_FILTER_TAG_ICOS_SHUTTLE : SOURCE_FILTER_TAG_ICOS;
     }
     if (isTernNetworkRow(row)) {
       return shuttleAvailable ? SOURCE_FILTER_TAG_TERN_SHUTTLE : SOURCE_FILTER_TAG_TERN;
+    }
+    if (isFluxnet2015SupplementalRow(row)) {
+      return SOURCE_FILTER_TAG_FLUXNET_2015;
     }
     if (shuttleAvailable) {
       return SOURCE_FILTER_TAG_FLUXNET_SHUTTLE;
@@ -1902,7 +2005,9 @@
     if (dataProduct !== FLUXNET2015_PRODUCT && dataProduct !== AMERIFLUX_BASE_PRODUCT) {
       dataProduct = AMERIFLUX_FLUXNET_PRODUCT;
     }
-    networkLabel = dataProduct === FLUXNET2015_PRODUCT ? FLUXNET2015_SOURCE_ONLY : AMERIFLUX_SOURCE_ONLY;
+    networkLabel = dataProduct === FLUXNET2015_PRODUCT
+      ? (inferFluxnet2015NetworkFromCountry(country) || "")
+      : AMERIFLUX_SOURCE_ONLY;
     var sourceLabel = String(opts.sourceLabel || "").trim() || (dataProduct === FLUXNET2015_PRODUCT
       ? FLUXNET2015_SOURCE_ONLY
       : (dataProduct === AMERIFLUX_BASE_PRODUCT ? BASE_SOURCE_ONLY : AMERIFLUX_SOURCE_ONLY));
@@ -1919,7 +2024,7 @@
       network: networkLabel,
       source_network: networkLabel,
       network_display: networkLabel,
-      network_tokens: [networkLabel],
+      network_tokens: networkLabel ? [networkLabel] : [],
       vegetation_type: firstDefinedString(site, ["vegetation_type", "igbp", "veg_type"]),
       first_year: firstYear,
       last_year: lastYear,
@@ -6254,6 +6359,7 @@
     mergeShuttleAndAmeriFluxRows: mergeShuttleAndAmeriFluxRows,
     countryCodeToName: countryCodeToName,
     normalizeCountryName: normalizeCountryName,
+    inferFluxnet2015NetworkFromCountry: inferFluxnet2015NetworkFromCountry,
     deriveCountry: deriveCountry,
     normalizeNetworkToken: normalizeNetworkToken,
     normalizeNetworkTokens: normalizeNetworkTokens,

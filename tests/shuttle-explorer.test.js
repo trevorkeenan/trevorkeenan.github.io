@@ -327,12 +327,12 @@ test('Merge precedence is Shuttle > ICOS > AmeriFlux > FLUXNET2015 with no dupli
   assert.equal(fluxnet2015Only.download_mode, 'ameriflux_api');
   assert.equal(fluxnet2015Only.api_data_product, 'FLUXNET2015');
   assert.equal(fluxnet2015Only.data_hub, 'AmeriFlux');
-  assert.equal(fluxnet2015Only.network, 'FLUXNET2015');
-  assert.equal(fluxnet2015Only.source_network, 'FLUXNET2015');
-  assert.equal(fluxnet2015Only.network_display, 'FLUXNET2015');
-  assert.deepEqual(fluxnet2015Only.network_tokens, ['FLUXNET2015']);
+  assert.equal(fluxnet2015Only.network, 'AmeriFlux');
+  assert.equal(fluxnet2015Only.source_network, 'AmeriFlux');
+  assert.equal(fluxnet2015Only.network_display, 'AmeriFlux');
+  assert.deepEqual(fluxnet2015Only.network_tokens, ['AmeriFlux']);
   assert.equal(fluxnet2015Only.length_years, 1);
-  assert.deepEqual(fluxnet2015Only.source_filter_tags, ['FLUXNET-2015']);
+  assert.deepEqual(fluxnet2015Only.source_filter_tags, ['AmeriFlux', 'FLUXNET-2015']);
 
   assert.equal(shuttleAmeriFlux.network_display, 'AmeriFlux');
   assert.deepEqual(shuttleAmeriFlux.network_tokens, ['AmeriFlux']);
@@ -532,6 +532,14 @@ test('Country helpers map ISO-2 codes case-insensitively and preserve full names
   assert.equal(hooks.normalizeCountryName('Argentina'), 'Argentina');
   assert.equal(hooks.deriveCountry('CN-Du3', ''), 'China');
   assert.equal(hooks.deriveCountry('ZZ-Test', ''), 'ZZ');
+  assert.equal(hooks.inferFluxnet2015NetworkFromCountry('Brazil'), 'AmeriFlux');
+  assert.equal(hooks.inferFluxnet2015NetworkFromCountry('Germany'), 'ICOS');
+  assert.equal(hooks.inferFluxnet2015NetworkFromCountry('Russian Federation'), 'ICOS');
+  assert.equal(hooks.inferFluxnet2015NetworkFromCountry('South Africa'), 'ICOS');
+  assert.equal(hooks.inferFluxnet2015NetworkFromCountry('Australia'), 'TERN');
+  assert.equal(hooks.inferFluxnet2015NetworkFromCountry('New Zealand'), 'TERN');
+  assert.equal(hooks.inferFluxnet2015NetworkFromCountry('China'), 'ChinaFlux');
+  assert.equal(hooks.inferFluxnet2015NetworkFromCountry('ZZ'), null);
 });
 
 test('Network helpers normalize selected short codes to display names and dedupe mixed tokens', () => {
@@ -696,8 +704,12 @@ test('FLUXNET2015 API-only rows keep backfilled vegetation through merge and sea
   );
 
   assert.equal(merged.rows[0].source_label, 'FLUXNET2015');
+  assert.equal(merged.rows[0].network_display, 'AmeriFlux');
+  assert.deepEqual(merged.rows[0].network_tokens, ['AmeriFlux']);
+  assert.deepEqual(merged.rows[0].source_filter_tags, ['AmeriFlux', 'FLUXNET-2015']);
   assert.equal(merged.rows[0].vegetation_type, 'SAV');
   assert.equal(merged.rows[0].search_text.includes('sav'), true);
+  assert.equal(merged.rows[0].search_text.includes('ameriflux'), true);
 });
 
 test('AmeriFlux-Shuttle overlap keeps Shuttle vegetation unchanged when API metadata also exists', () => {
@@ -1015,6 +1027,7 @@ test('Source filter options expose the full overlapping source tag list while av
   const sourceValues = hooks.uniqueSourceFilterValues([
     { source_filter_tags: ['AmeriFlux'] },
     { source_filter_tags: ['AmeriFlux', 'AmeriFlux-Shuttle', 'FLUXNET-Shuttle'] },
+    { source_filter_tags: ['ChinaFlux', 'FLUXNET-2015'] },
     { source_filter_tags: ['FLUXNET-2015'] },
     { source_filter_tags: ['ICOS'] },
     { source_filter_tags: ['TERN', 'TERN-Shuttle', 'FLUXNET-Shuttle'] }
@@ -1036,6 +1049,7 @@ test('Source filter options expose the full overlapping source tag list while av
   assert.deepEqual(sourceValues, [
     'AmeriFlux',
     'AmeriFlux-Shuttle',
+    'ChinaFlux',
     'FLUXNET-2015',
     'FLUXNET-Shuttle',
     'ICOS',
@@ -1128,10 +1142,68 @@ test('Rows compute overlapping source filter tags from network membership and Sh
   assert.deepEqual(bySite['BE-Shu'].source_filter_tags, ['ICOS', 'ICOS-Shuttle', 'FLUXNET-Shuttle']);
   assert.deepEqual(bySite['SE-Ico'].source_filter_tags, ['ICOS']);
   assert.deepEqual(bySite['AU-Ter'].source_filter_tags, ['TERN', 'TERN-Shuttle', 'FLUXNET-Shuttle']);
-  assert.deepEqual(bySite['CL-Leg'].source_filter_tags, ['FLUXNET-2015']);
-  assert.equal(bySite['CL-Leg'].source_filter_tags.includes('AmeriFlux'), false);
+  assert.equal(bySite['CL-Leg'].network_display, 'AmeriFlux');
+  assert.deepEqual(bySite['CL-Leg'].network_tokens, ['AmeriFlux']);
+  assert.deepEqual(bySite['CL-Leg'].source_filter_tags, ['AmeriFlux', 'FLUXNET-2015']);
+  assert.equal(bySite['CL-Leg'].source_filter_tags.includes('AmeriFlux'), true);
   assert.equal(bySite['CL-Leg'].source_filter_tags.includes('ICOS'), false);
   assert.equal(bySite['CL-Leg'].source_filter_tags.includes('TERN'), false);
+});
+
+test('FLUXNET2015 supplemental rows infer regional networks from country while retaining FLUXNET-2015 source tags', () => {
+  const merged = hooks.mergeCatalogRows(
+    [],
+    [],
+    [],
+    [
+      makeAvailabilitySite('BR-Leg', [2001], { site_name: 'Brazil Legacy', country: 'Brazil' }),
+      makeAvailabilitySite('DE-Leg', [2002], { site_name: 'Germany Legacy', country: 'Germany' }),
+      makeAvailabilitySite('RU-Leg', [2003], { site_name: 'Russia Legacy', country: 'Russia' }),
+      makeAvailabilitySite('ZA-Leg', [2004], { site_name: 'South Africa Legacy', country: 'South Africa' }),
+      makeAvailabilitySite('AU-Leg', [2005], { site_name: 'Australia Legacy', country: 'Australia' }),
+      makeAvailabilitySite('NZ-Leg', [2006], { site_name: 'New Zealand Legacy', country: 'New Zealand' }),
+      makeAvailabilitySite('CN-Leg', [2007], { site_name: 'China Legacy', country: 'China' }),
+      makeAvailabilitySite('XX-Leg', [2008], { site_name: 'Unknown Legacy', country: 'Unknownland' })
+    ]
+  );
+  const bySite = Object.fromEntries(merged.rows.map((row) => [row.site_id, row]));
+
+  assert.equal(bySite['BR-Leg'].network_display, 'AmeriFlux');
+  assert.deepEqual(bySite['BR-Leg'].source_filter_tags, ['AmeriFlux', 'FLUXNET-2015']);
+  assert.equal(hooks.rowMatchesExplorerFilters(bySite['BR-Leg'], { selectedSource: 'AmeriFlux' }), true);
+  assert.equal(hooks.rowMatchesExplorerFilters(bySite['BR-Leg'], { selectedSource: 'FLUXNET-2015' }), true);
+
+  assert.equal(bySite['DE-Leg'].network_display, 'ICOS');
+  assert.deepEqual(bySite['DE-Leg'].source_filter_tags, ['ICOS', 'FLUXNET-2015']);
+  assert.equal(bySite['DE-Leg'].is_icos, false);
+  assert.equal(hooks.rowMatchesExplorerFilters(bySite['DE-Leg'], { selectedSource: 'ICOS' }), true);
+  assert.equal(hooks.rowMatchesExplorerFilters(bySite['DE-Leg'], { selectedSource: 'FLUXNET-2015' }), true);
+
+  assert.equal(bySite['RU-Leg'].network_display, 'ICOS');
+  assert.deepEqual(bySite['RU-Leg'].source_filter_tags, ['ICOS', 'FLUXNET-2015']);
+
+  assert.equal(bySite['ZA-Leg'].network_display, 'ICOS');
+  assert.deepEqual(bySite['ZA-Leg'].source_filter_tags, ['ICOS', 'FLUXNET-2015']);
+
+  assert.equal(bySite['AU-Leg'].network_display, 'TERN');
+  assert.deepEqual(bySite['AU-Leg'].source_filter_tags, ['TERN', 'FLUXNET-2015']);
+
+  assert.equal(bySite['NZ-Leg'].network_display, 'TERN');
+  assert.deepEqual(bySite['NZ-Leg'].source_filter_tags, ['TERN', 'FLUXNET-2015']);
+
+  assert.equal(bySite['CN-Leg'].network_display, 'ChinaFlux');
+  assert.deepEqual(bySite['CN-Leg'].network_tokens, ['ChinaFlux']);
+  assert.deepEqual(bySite['CN-Leg'].source_filter_tags, ['ChinaFlux', 'FLUXNET-2015']);
+  assert.equal(hooks.rowMatchesExplorerFilters(bySite['CN-Leg'], { selectedSource: 'ChinaFlux' }), true);
+  assert.equal(hooks.rowMatchesExplorerFilters(bySite['CN-Leg'], { selectedSource: 'FLUXNET-2015' }), true);
+
+  assert.equal(bySite['XX-Leg'].network_display, '');
+  assert.deepEqual(bySite['XX-Leg'].network_tokens, []);
+  assert.deepEqual(bySite['XX-Leg'].source_filter_tags, ['FLUXNET-2015']);
+  assert.equal(hooks.rowMatchesExplorerFilters(bySite['XX-Leg'], { selectedSource: 'AmeriFlux' }), false);
+  assert.equal(hooks.rowMatchesExplorerFilters(bySite['XX-Leg'], { selectedSource: 'ICOS' }), false);
+  assert.equal(hooks.rowMatchesExplorerFilters(bySite['XX-Leg'], { selectedSource: 'ChinaFlux' }), false);
+  assert.equal(hooks.rowMatchesExplorerFilters(bySite['XX-Leg'], { selectedSource: 'FLUXNET-2015' }), true);
 });
 
 test('Source and Availability controls both exist in the explorer markup', () => {
