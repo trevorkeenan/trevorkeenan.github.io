@@ -3546,7 +3546,7 @@
       "  </div>",
       "  <div class=\"shuttle-explorer__field\">",
       "    <div class=\"shuttle-explorer__label-row\">",
-      "      <label for=\"shuttle-vegetation\">Vegetation type</label>",
+      "      <label for=\"shuttle-vegetation\">Veg. type</label>",
       "      <span class=\"shuttle-explorer__tooltip-wrap\" data-role=\"vegetation-info-wrap\">",
       "        <button type=\"button\" class=\"shuttle-explorer__tooltip-toggle\" data-role=\"vegetation-info-toggle\" aria-label=\"About IGBP vegetation codes\" aria-describedby=\"shuttle-vegetation-tooltip\" aria-expanded=\"false\">i</button>",
       "        <span class=\"shuttle-explorer__tooltip\" id=\"shuttle-vegetation-tooltip\" role=\"tooltip\">Vegetation codes follow IGBP classifications as outlined <a href=\"https://fluxnet.org/data/badm-data-templates/igbp-classification/\" target=\"_blank\" rel=\"noopener noreferrer\">here</a></span>",
@@ -5924,7 +5924,7 @@
     var total = this.state.rows.length;
     var filtered = this.state.filteredRows.length;
     if (this.bindings.summary) {
-      this.bindings.summary.textContent = "Showing " + filtered + " of " + total + " records.";
+      this.bindings.summary.textContent = "Showing " + filtered + " of " + total + " sites.";
     }
   };
 

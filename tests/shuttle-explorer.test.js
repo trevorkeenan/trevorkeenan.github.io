@@ -1143,6 +1143,13 @@ test('Source and Availability controls both exist in the explorer markup', () =>
   assert.equal(explorerJs.includes('data-role=\\"availability-filter\\"><option value=\\"\\">All sites</option>'), true);
 });
 
+test('Explorer summary copy refers to sites rather than records', () => {
+  const explorerJs = fs.readFileSync(path.join(__dirname, '..', 'assets', 'shuttle-explorer.js'), 'utf8');
+
+  assert.equal(explorerJs.includes('Showing " + filtered + " of " + total + " sites.'), true);
+  assert.equal(explorerJs.includes('Showing " + filtered + " of " + total + " records.'), false);
+});
+
 test('FLUXNET available matches processed-only and additional-base-years rows, but excludes BASE-only rows', () => {
   const merged = hooks.mergeCatalogRows(
     [],
@@ -1970,6 +1977,7 @@ test('Vegetation filter markup includes an IGBP info tooltip and external refere
   const explorerJs = fs.readFileSync(path.join(__dirname, '..', 'assets', 'shuttle-explorer.js'), 'utf8');
   const explorerCss = fs.readFileSync(path.join(__dirname, '..', 'assets', 'shuttle-explorer.css'), 'utf8');
 
+  assert.equal(explorerJs.includes('label for=\\"shuttle-vegetation\\">Veg. type</label>'), true);
   assert.equal(explorerJs.includes('data-role=\\"vegetation-info-wrap\\"'), true);
   assert.equal(explorerJs.includes('data-role=\\"vegetation-info-toggle\\"'), true);
   assert.equal(explorerJs.includes('aria-label=\\"About IGBP vegetation codes\\"'), true);
