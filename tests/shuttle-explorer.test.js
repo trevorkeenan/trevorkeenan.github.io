@@ -1208,11 +1208,14 @@ test('FLUXNET2015 supplemental rows infer regional networks from country while r
 
 test('Source and Availability controls both exist in the explorer markup', () => {
   const explorerJs = fs.readFileSync(path.join(__dirname, '..', 'assets', 'shuttle-explorer.js'), 'utf8');
+  const sourceIndex = explorerJs.indexOf('label for=\\"shuttle-source\\">Source</label>');
+  const availabilityIndex = explorerJs.indexOf('label for=\\"shuttle-availability\\">Availability</label>');
 
   assert.equal(explorerJs.includes('label for=\\"shuttle-source\\">Source</label>'), true);
   assert.equal(explorerJs.includes('data-role=\\"source-filter\\"><option value=\\"\\">All sources</option>'), true);
   assert.equal(explorerJs.includes('label for=\\"shuttle-availability\\">Availability</label>'), true);
   assert.equal(explorerJs.includes('data-role=\\"availability-filter\\"><option value=\\"\\">All sites</option>'), true);
+  assert.equal(availabilityIndex < sourceIndex, true);
 });
 
 test('Explorer summary copy refers to sites rather than records', () => {
