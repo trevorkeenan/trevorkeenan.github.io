@@ -2058,9 +2058,10 @@ test('Data Notes box appears between the map and attribution sections with share
   assert.equal(notesIndex > mapIndex, true);
   assert.equal(attributionIndex > notesIndex, true);
   assert.equal(explorerJs.includes('These notes highlight how the explorer labels datasets and how the bulk tools behave.'), true);
-  assert.equal(explorerJs.includes('choose <code>FLUXNET available</code> in the <code>Availability</code> filter.'), true);
-  assert.equal(explorerJs.includes('Choose <code>FLUXNET-Shuttle</code> in the <code>Source</code> filter'), true);
-  assert.equal(explorerJs.includes('The bulk-download scripts may require <code>jq</code> if neither <code>jq</code> nor <code>python3</code> is already installed.'), true);
+  assert.equal(explorerJs.includes('choose the Availability filter option (FLUXNET available).'), true);
+  assert.equal(explorerJs.includes('Choose the Source filter option (FLUXNET-Shuttle)'), true);
+  assert.equal(explorerJs.includes('The explorer includes both gap-filled and partitioned data (FLUXNET) and non-gap-filled, non-partitioned observations (BASE).'), true);
+  assert.equal(explorerJs.includes('The bulk-download scripts may require jq if neither jq nor python3 is already installed.'), true);
   assert.equal(explorerCss.includes('.shuttle-explorer__attribution ul {'), true);
   assert.equal(explorerCss.includes('.shuttle-explorer__attribution li + li {'), true);
 });
