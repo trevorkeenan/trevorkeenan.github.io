@@ -2048,6 +2048,23 @@ test('Browser-facing explorer markup does not include hardcoded AmeriFlux identi
   assert.equal(explorerJs.includes('value="trevorkeenan@berkeley.edu"'), false);
 });
 
+test('Data Notes box appears between the map and attribution sections with shared box styling', () => {
+  const explorerJs = fs.readFileSync(path.join(__dirname, '..', 'assets', 'shuttle-explorer.js'), 'utf8');
+  const explorerCss = fs.readFileSync(path.join(__dirname, '..', 'assets', 'shuttle-explorer.css'), 'utf8');
+  const mapIndex = explorerJs.indexOf('data-role=\\"map-panel\\"');
+  const notesIndex = explorerJs.indexOf('<h3>Data Notes</h3>');
+  const attributionIndex = explorerJs.indexOf('<h3>Data Use and Attribution</h3>');
+
+  assert.equal(notesIndex > mapIndex, true);
+  assert.equal(attributionIndex > notesIndex, true);
+  assert.equal(explorerJs.includes('These notes highlight how the explorer labels datasets and how the bulk tools behave.'), true);
+  assert.equal(explorerJs.includes('choose <code>FLUXNET available</code> in the <code>Availability</code> filter.'), true);
+  assert.equal(explorerJs.includes('Choose <code>FLUXNET-Shuttle</code> in the <code>Source</code> filter'), true);
+  assert.equal(explorerJs.includes('The bulk-download scripts may require <code>jq</code> if neither <code>jq</code> nor <code>python3</code> is already installed.'), true);
+  assert.equal(explorerCss.includes('.shuttle-explorer__attribution ul {'), true);
+  assert.equal(explorerCss.includes('.shuttle-explorer__attribution li + li {'), true);
+});
+
 test('Vegetation filter markup includes an IGBP info tooltip and external reference link', () => {
   const explorerJs = fs.readFileSync(path.join(__dirname, '..', 'assets', 'shuttle-explorer.js'), 'utf8');
   const explorerCss = fs.readFileSync(path.join(__dirname, '..', 'assets', 'shuttle-explorer.css'), 'utf8');

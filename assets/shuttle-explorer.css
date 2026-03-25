@@ -758,6 +758,15 @@
   margin: 0 0 8px 0;
 }
 
+.shuttle-explorer__attribution ul {
+  margin: 8px 0 0 18px;
+  padding: 0;
+}
+
+.shuttle-explorer__attribution li + li {
+  margin-top: 6px;
+}
+
 .shuttle-explorer__attribution textarea {
   width: 100%;
   min-height: 96px;
