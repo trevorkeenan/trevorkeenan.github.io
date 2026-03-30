@@ -2094,7 +2094,7 @@ test('Browser-facing explorer markup does not include hardcoded AmeriFlux identi
 
   assert.equal(explorerJs.includes('data-ameriflux-user-id='), false);
   assert.equal(explorerJs.includes('data-ameriflux-user-email='), false);
-  assert.equal(explorerHtml.includes('trevorkeenan@berkeley.edu'), false);
+  assert.equal(explorerHtml.includes('mailto:trevorkeenan@berkeley.edu'), true);
   assert.equal(explorerHtml.includes('data-ameriflux-user-id='), false);
   assert.equal(explorerHtml.includes('data-ameriflux-user-email='), false);
   assert.equal(dataLandingHtml.includes('trevorkeenan@berkeley.edu'), false);

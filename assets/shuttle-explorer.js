@@ -3713,9 +3713,6 @@
       ".shuttle-explorer__attribution h3{margin:0 0 6px;font-size:.95em;}",
       ".shuttle-explorer__attribution ul{margin:8px 0 0 18px;padding:0;}",
       ".shuttle-explorer__attribution li + li{margin-top:6px;}",
-      ".shuttle-explorer__attribution-textbox{width:100%;padding:8px;border:1px solid #b7c1ce;border-radius:6px;font:inherit;line-height:1.35;background:#fdfefe;word-break:break-word;}",
-      ".shuttle-explorer__attribution-textbox a{color:#2f5374;}",
-      ".shuttle-explorer__attribution-textbox a:hover,.shuttle-explorer__attribution-textbox a:focus{text-decoration:underline;}",
       ".shuttle-explorer__attribution-row{display:flex;justify-content:space-between;align-items:center;gap:10px;margin:8px 0 0;}",
       ".shuttle-explorer__tiny{font-size:.82em;color:#556779;}",
       "@media (max-width: 860px){.shuttle-explorer__controls{grid-template-columns:1fr;}.shuttle-explorer__row{flex-direction:column;align-items:flex-start;}.shuttle-explorer__bulk-identity-grid{grid-template-columns:1fr;}}"
@@ -3892,7 +3889,6 @@
       "<aside class=\"shuttle-explorer__attribution\" data-role=\"attribution\">",
       "  <h3>Data Use and Attribution</h3>",
       "  <p class=\"shuttle-explorer__tiny\">The flux data surfaced here are shared under a <a href=\"https://creativecommons.org/licenses/by/4.0/\" target=\"_blank\" rel=\"noopener noreferrer\">CC-BY 4.0</a> data use license, which requires attribution. Data users must follow dataset- and network-specific attribution and citation guidance included with each downloaded archive. Note that FLUXNET data that is not available via the FLUXNET Shuttle may be processed with an earlier version of the OneFlux processing code.</p>",
-      "  <div class=\"shuttle-explorer__attribution-textbox shuttle-explorer__tiny\" data-role=\"attribution-text\"></div>",
       "</aside>"
     ].join("");
   }
@@ -4409,16 +4405,10 @@
   };
 
   Explorer.prototype.setAttributionText = function (text, html) {
-    var attributionText = this.bindings.attributionText;
-    if (attributionText) {
-      attributionText.setAttribute("data-plain-text", String(text || ""));
-      if (typeof attributionText.value === "string") {
-        attributionText.value = text;
-        attributionText.style.height = "auto";
-        attributionText.style.height = attributionText.scrollHeight + "px";
-      } else {
-        attributionText.innerHTML = html || escapeHtml(String(text || ""));
-      }
+    var pageAttributionNote = document.getElementById("shuttle-attribution-note");
+    if (pageAttributionNote) {
+      pageAttributionNote.setAttribute("data-plain-text", String(text || ""));
+      pageAttributionNote.innerHTML = html || escapeHtml(String(text || ""));
     }
   };
 
