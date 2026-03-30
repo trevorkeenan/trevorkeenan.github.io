@@ -1670,6 +1670,57 @@ test('FLUXNET2015 site info lookup accepts mysitename/lon/lat columns and enrich
   assert.equal(enriched[1].vegetation_type, undefined);
 });
 
+test('Site-name metadata fills blank names and refreshes search text', () => {
+  const [enriched] = hooks.enrichRowsWithSiteNameLookup(
+    [makeCatalogRow({ site_id: 'AR-Bal', site_name: '   ' })],
+    { 'AR-BAL': 'Balcarce BA' }
+  );
+
+  assert.equal(enriched.site_name, 'Balcarce BA');
+  assert.equal(hooks.rowMatchesExplorerFilters(enriched, { search: 'balcarce' }), true);
+});
+
+test('Site-name metadata fills names when the current value is only the site code', () => {
+  const [enriched] = hooks.enrichRowsWithSiteNameLookup(
+    [makeCatalogRow({ site_id: 'BE-Bra', site_name: ' BE-Bra ' })],
+    { 'BE-BRA': 'Brasschaat' }
+  );
+
+  assert.equal(enriched.site_name, 'Brasschaat');
+});
+
+test('Site-name metadata preserves existing descriptive names even when metadata differs', () => {
+  const [enriched] = hooks.enrichRowsWithSiteNameLookup(
+    [makeCatalogRow({ site_id: 'AR-Bal', site_name: 'Existing Explorer Name' })],
+    { 'AR-BAL': 'Balcarce BA' }
+  );
+
+  assert.equal(enriched.site_name, 'Existing Explorer Name');
+});
+
+test('Site-name metadata safely leaves rows unchanged when no metadata match exists', () => {
+  const [enriched] = hooks.enrichRowsWithSiteNameLookup(
+    [makeCatalogRow({ site_id: 'ZZ-NoMatch', site_name: '' })],
+    { 'AR-BAL': 'Balcarce BA' }
+  );
+
+  assert.equal(enriched.site_name, '');
+  assert.equal(hooks.rowMatchesExplorerFilters(enriched, { search: 'balcarce' }), false);
+});
+
+test('Site-name metadata lookup keeps the first non-empty duplicate deterministically', () => {
+  const lookup = hooks.buildSiteNameMetadataLookup([
+    { site_id: 'CN-Cha', site_name: '   ' },
+    { site_id: ' CN-Cha ', site_name: 'Changsha(Paddy Rice)' },
+    { site_id: 'CN-CHA', site_name: 'Changwu(Wheat)' },
+    { site_id: '', site_name: 'Ignored Missing Site ID' }
+  ]);
+
+  assert.deepEqual(lookup, {
+    'CN-CHA': 'Changsha(Paddy Rice)'
+  });
+});
+
 test('Vegetation metadata lookup builds canonical site-id keys from CSV-like rows', () => {
   const lookup = hooks.buildVegetationMetadataLookup([
     { site_id: ' us-new ', vegetation_type: 'Grasslands' },
@@ -2058,10 +2109,10 @@ test('Data Notes box appears between the map and attribution sections with share
   assert.equal(notesIndex > mapIndex, true);
   assert.equal(attributionIndex > notesIndex, true);
   assert.equal(explorerJs.includes('These notes highlight how the explorer labels datasets and how the bulk tools behave.'), true);
-  assert.equal(explorerJs.includes('choose the Availability filter option (FLUXNET available).'), true);
-  assert.equal(explorerJs.includes('Choose the Source filter option (FLUXNET-Shuttle)'), true);
-  assert.equal(explorerJs.includes('The explorer includes both gap-filled and partitioned data (FLUXNET) and non-gap-filled, non-partitioned observations (BASE).'), true);
-  assert.equal(explorerJs.includes('The bulk-download scripts may require jq if neither jq nor python3 is already installed.'), true);
+  assert.equal(explorerJs.includes('choose the Availability filter option [FLUXNET available].'), true);
+  assert.equal(explorerJs.includes('Choose the Source filter option [FLUXNET-Shuttle]'), true);
+  assert.equal(explorerJs.includes('The explorer includes both gap-filled and partitioned data [FLUXNET] and non-gap-filled, non-partitioned observations [BASE].'), true);
+  assert.equal(explorerJs.includes('The bulk-download scripts may require users to install a jq package if neither jq nor python3 are already installed.'), true);
   assert.equal(explorerCss.includes('.shuttle-explorer__attribution ul {'), true);
   assert.equal(explorerCss.includes('.shuttle-explorer__attribution li + li {'), true);
 });
