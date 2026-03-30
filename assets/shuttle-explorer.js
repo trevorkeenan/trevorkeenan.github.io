@@ -3874,6 +3874,7 @@
       "  <h3>Data Notes</h3>",
       "  <p class=\"shuttle-explorer__tiny\">These notes highlight how the explorer labels datasets and how the bulk tools behave.</p>",
       "  <ul class=\"shuttle-explorer__tiny\">",
+      "    <li>FLUXNET data are contributed by site teams around the world and distributed through one of three processing hubs: AmeriFlux (<a href=\"https://ameriflux.lbl.gov/\" target=\"_blank\" rel=\"noopener noreferrer\">https://ameriflux.lbl.gov/</a>), ICOS (<a href=\"https://www.icos-etc.eu/icos/\" target=\"_blank\" rel=\"noopener noreferrer\">https://www.icos-etc.eu/icos/</a>), or TERN (<a href=\"https://www.tern.org.au/\" target=\"_blank\" rel=\"noopener noreferrer\">https://www.tern.org.au/</a>).</li>",
       "    <li>If a site has different versions of its dataset published at different times, the explorer surfaces the most recently processed dataset.</li>",
       "    <li>Data labeled as FLUXNET in the year column have been gap-filled and partitioned with the ONEFlux processing pipeline. To locate all ONEFlux-processed datasets in the explorer, choose the Availability filter option [FLUXNET available].</li>",
       "    <li>The FLUXNET Shuttle serves data processed with the most recent ONEFlux version and should generally be treated as the highest-quality processed product available here. Choose the Source filter option [FLUXNET-Shuttle] to view the subset of FLUXNET-format datasets generated with this most up-to-date processing.</li>",
@@ -3885,6 +3886,7 @@
       "<aside class=\"shuttle-explorer__attribution\" data-role=\"attribution\">",
       "  <h3>Data Use and Attribution</h3>",
       "  <p class=\"shuttle-explorer__tiny\">FLUXNET and BASE data are shared under a <a href=\"https://creativecommons.org/licenses/by/4.0/\" target=\"_blank\" rel=\"noopener noreferrer\">CC-BY 4.0</a> data use license, which requires attribution. Data users must follow dataset- and network-specific attribution and citation guidance included with each downloaded archive. Note that FLUXNET data that is not available via the FLUXNET Shuttle may be processed with an earlier version of the OneFlux processing code.</p>",
+      "  <p class=\"shuttle-explorer__tiny\">Contact TF Keenan (<a href=\"mailto:trevorkeenan@berkeley.edu\">trevorkeenan@berkeley.edu</a>) with any questions or suggestions.</p>",
       "  <textarea readonly data-role=\"attribution-text\"></textarea>",
       "</aside>"
     ].join("");

@@ -967,6 +967,9 @@ test('Snapshot updated date helper prefers committed metadata fields and falls b
 });
 
 test('Attribution text includes the contact sentence and uses the shared snapshot date source', () => {
+  const explorerJs = fs.readFileSync(path.join(__dirname, '..', 'assets', 'shuttle-explorer.js'), 'utf8');
+
+  assert.equal(explorerJs.includes('href=\\"mailto:trevorkeenan@berkeley.edu\\"'), true);
   assert.match(
     hooks.buildAttributionText('2026-03-11'),
     /Contact TF Keenan \(trevorkeenan@berkeley\.edu\) with any questions/
