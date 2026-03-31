@@ -64,6 +64,18 @@ jobs:
           if missing:
             raise RuntimeError(f"Refusing to write snapshot: missing required columns: {missing}")
 
+          if "processing_lineage" not in fieldnames:
+            if "product_source_network" in fieldnames:
+              insert_at = fieldnames.index("product_source_network") + 1
+            elif "network" in fieldnames:
+              insert_at = fieldnames.index("network") + 1
+            else:
+              insert_at = len(fieldnames)
+            fieldnames = fieldnames[:insert_at] + ["processing_lineage"] + fieldnames[insert_at:]
+
+          for row in rows:
+            row["processing_lineage"] = "oneflux"
+
           rows.sort(
             key=lambda r: (
               r.get("data_hub", ""),

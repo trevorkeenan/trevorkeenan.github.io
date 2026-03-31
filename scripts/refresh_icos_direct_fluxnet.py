@@ -26,6 +26,7 @@ PRODUCT_SPEC_URI = "http://meta.icos-cp.eu/resources/cpmeta/miscFluxnetProduct"
 ICOS_SOURCE = "ICOS"
 ICOS_SOURCE_ORIGIN = "icos_direct"
 ICOS_SOURCE_PRIORITY = 300
+PROCESSING_LINEAGE_ONEFLUX = "oneflux"
 DEFAULT_TIMEOUT_SECONDS = 60
 DEFAULT_RETRIES = 5
 DEFAULT_RETRY_DELAY_SECONDS = 2.0
@@ -69,6 +70,7 @@ OUTPUT_COLUMNS: Sequence[str] = (
     "data_hub",
     "network",
     "source_network",
+    "processing_lineage",
     "vegetation_type",
     "first_year",
     "last_year",
@@ -514,6 +516,7 @@ def build_candidate(binding: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         "data_hub": ICOS_SOURCE,
         "network": network,
         "source_network": network,
+        "processing_lineage": PROCESSING_LINEAGE_ONEFLUX,
         "vegetation_type": "",
         "first_year": first_year,
         "last_year": last_year,

@@ -106,7 +106,7 @@
   var PRODUCT_FAMILY_FLUXNET = "FLUXNET";
   var PRODUCT_FAMILY_BASE = "BASE";
   var PROCESSING_LINEAGE_ONEFLUX = "oneflux";
-  var PROCESSING_LINEAGE_OTHER = "other";
+  var PROCESSING_LINEAGE_OTHER = "other_processed";
   var SURFACED_CLASSIFICATION_FLUXNET_PROCESSED = "fluxnet_processed";
   var SURFACED_CLASSIFICATION_OTHER_PROCESSED = "other_processed";
   var SURFACED_CLASSIFICATION_FLUXNET_AND_OTHER = "fluxnet_and_other_processed";
@@ -930,6 +930,7 @@
     normalizeNetworkDisplay(row);
     row.source_origin = resolveSourceOrigin(row);
     row.source_priority = resolveSourcePriority(row);
+    row.processing_lineage = resolveProcessingLineage(row);
     applyRowSourceFilterState(row);
     row.is_icos = isIcosRow(row);
     row.has_coordinates = parseCoordinate(row.latitude, -90, 90) != null &&
@@ -1151,13 +1152,15 @@
     if (normalized === PROCESSING_LINEAGE_ONEFLUX) {
       return PROCESSING_LINEAGE_ONEFLUX;
     }
-    if (normalized === PROCESSING_LINEAGE_OTHER) {
+    if (normalized === PROCESSING_LINEAGE_OTHER || normalized === "other") {
       return PROCESSING_LINEAGE_OTHER;
     }
     return "";
   }
 
   function resolveProcessingLineage(fields) {
+    // Prefer explicit snapshot lineage. The source/product checks below are a
+    // temporary compatibility fallback for legacy payloads that predate the field.
     var explicit = normalizeProcessingLineage(fields && (fields.processingLineage || fields.processing_lineage));
     var sourceOrigin = String(fields && (fields.sourceOrigin || fields.source_origin || fields.source) || "").trim();
     var sourceLabel = String(fields && (fields.sourceLabel || fields.source_label) || "").trim();
@@ -2163,6 +2166,9 @@
     var sourceReason = String(opts.sourceReason || "").trim() || (sourceLabel === FLUXNET2015_SOURCE_ONLY
       ? "Only available from AmeriFlux API FLUXNET2015 fallback."
       : "Only available from AmeriFlux API.");
+    var processingLineage = dataProduct === AMERIFLUX_BASE_PRODUCT
+      ? PROCESSING_LINEAGE_OTHER
+      : PROCESSING_LINEAGE_ONEFLUX;
     var row = {
       _index: index,
       _selection_key: "ameriflux_api|" + dataProduct + "|" + siteId + "|" + keySuffix,
@@ -2183,6 +2189,7 @@
       longitude: longitude,
       download_link: "",
       download_mode: "ameriflux_api",
+      processing_lineage: processingLineage,
       source_label: sourceLabel,
       source_reason: sourceReason,
       source_origin: AMERIFLUX_API_SOURCE_ORIGIN,
@@ -2365,6 +2372,7 @@
     }
     return buildSurfacedProductMetadata({
       productFamily: PRODUCT_FAMILY_BASE,
+      processingLineage: PROCESSING_LINEAGE_OTHER,
       source: AMERIFLUX_API_SOURCE_ORIGIN,
       sourceLabel: BASE_SOURCE_ONLY,
       siteId: site.site_id,
@@ -6768,6 +6776,7 @@
     buildV2DownloadPayload: buildV2DownloadPayload,
     buildV1DownloadPayload: buildV1DownloadPayload,
     exactYearSetsMatch: exactYearSetsMatch,
+    resolveProcessingLineage: resolveProcessingLineage,
     stripUrlQueryForFilename: stripUrlQueryForFilename,
     filenameFromUrl: filenameFromUrl,
     buildAmeriFluxCurlCommand: buildAmeriFluxCurlCommand,

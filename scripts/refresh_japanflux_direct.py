@@ -22,6 +22,7 @@ ADS_DATASET_BASE = "https://ads.nipr.ac.jp/dataset"
 JAPANFLUX_SOURCE = "JapanFlux"
 JAPANFLUX_SOURCE_ORIGIN = "japanflux_direct"
 JAPANFLUX_SOURCE_PRIORITY = 250
+PROCESSING_LINEAGE_OTHER_PROCESSED = "other_processed"
 DEFAULT_TIMEOUT_SECONDS = 60
 DEFAULT_RETRIES = 5
 DEFAULT_RETRY_DELAY_SECONDS = 2.0
@@ -35,6 +36,7 @@ OUTPUT_COLUMNS: Sequence[str] = (
     "data_hub",
     "network",
     "source_network",
+    "processing_lineage",
     "vegetation_type",
     "first_year",
     "last_year",
@@ -578,6 +580,7 @@ def build_site_row(
         "data_hub": JAPANFLUX_SOURCE,
         "network": JAPANFLUX_SOURCE,
         "source_network": JAPANFLUX_SOURCE,
+        "processing_lineage": PROCESSING_LINEAGE_OTHER_PROCESSED,
         "vegetation_type": str(inventory_record["vegetation_type"]),
         "first_year": first_year,
         "last_year": last_year,

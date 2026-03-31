@@ -14,7 +14,7 @@ This repo includes a GitHub Actions workflow at `.github/workflows/update-shuttl
 - Source: `fluxnet/shuttle` installed from GitHub during the workflow run
 - ICOS direct source: `scripts/refresh_icos_direct_fluxnet.py` discovers candidate FLUXNET files from the official ICOS Carbon Portal SPARQL metadata endpoint, then hydrates the chosen per-site rows from the ICOS object JSON endpoint so the build does not depend on timeout-prone metadata joins
 - JapanFlux direct source: `scripts/refresh_japanflux_direct.py` queries the ADS REST API for the published JapanFlux2024 inventory, validates direct ZIP candidates when possible, and otherwise falls back to the ADS dataset landing page
-- JSON format: compact browser payload with normalized `snake_case` column names (`{"columns":[...],"rows":[...]}`), keeping key discovery/download fields
+- JSON format: compact browser payload with normalized `snake_case` column names (`{"columns":[...],"rows":[...]}`), keeping key discovery/download fields including explicit `processing_lineage`
 - Safety behavior: the workflow only stages/commits the generated snapshot files, and it refuses to overwrite the Shuttle CSV snapshot if `listall()` returns zero rows
 
 This supports a no-backend GitHub Pages setup where the site reads stable snapshot paths directly.
@@ -50,6 +50,15 @@ Merge behavior:
 
 The ICOS-direct snapshot is discovered from ICOS Carbon Portal metadata rather than HTML scraping or a DOI subset. The ICOS per-row UX remains a direct `licence_accept` link with the existing button text `Accept ICOS license and download`.
 JapanFlux-direct rows remain labeled as `JapanFlux` rather than `FLUXNET-Shuttle` so the explorer does not imply the JapanFlux2024 archive came from the FLUXNET Shuttle.
+
+### Processing lineage
+
+Generated explorer rows now carry an explicit `processing_lineage` field so availability filters can classify processing provenance without inferring it from source labels or hub names.
+
+- `oneflux`: Shuttle snapshot rows, ICOS-direct FLUXNET rows, AmeriFlux FLUXNET rows, and FLUXNET2015 rows
+- `other_processed`: AmeriFlux BASE rows and JapanFlux-direct rows
+
+The frontend still keeps a small compatibility fallback for legacy rows that predate this field, but current generators should stamp lineage directly into their row payloads.
 
 AmeriFlux availability is cached in browser localStorage with separate keys for AmeriFlux FLUXNET and FLUXNET2015 availability refreshes, so the app does not call those endpoints on every page load.
 

@@ -45,6 +45,7 @@ class RefreshJapanFluxDirectTests(unittest.TestCase):
         self.assertEqual(row["download_mode"], "landing_page")
         self.assertEqual(row["download_link"], "https://ads.nipr.ac.jp/dataset/A20240722-001")
         self.assertEqual(row["direct_download_url"], "")
+        self.assertEqual(row["processing_lineage"], "other_processed")
 
     def test_validate_direct_download_url_returns_first_resolved_candidate(self):
         with mock.patch.object(module, "probe_direct_download_url", side_effect=[None, "", "https://example.org/japanflux.zip"]):

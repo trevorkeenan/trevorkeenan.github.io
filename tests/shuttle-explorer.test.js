@@ -79,6 +79,7 @@ function makeCatalogRow(overrides) {
       years: '2010-2011',
       download_link: 'https://example.org/test.zip',
       download_mode: 'direct',
+      processing_lineage: 'oneflux',
       source_label: 'ICOS',
       source_reason: 'Available directly from the ICOS Carbon Portal FLUXNET archive.',
       source_origin: 'icos_direct'
@@ -104,6 +105,7 @@ function makeJapanFluxRow(overrides) {
       years: '2015-2017',
       download_link: 'https://ads.nipr.ac.jp/dataset/A20240722-001',
       download_mode: 'landing_page',
+      processing_lineage: 'other_processed',
       source_label: 'JapanFlux',
       source_reason: 'Available from the JapanFlux2024 ADS landing page.',
       source_origin: 'japanflux_direct'
@@ -382,6 +384,7 @@ test('BASE-only sites surface BASE only and bulk helpers keep the BASE product',
 
   assert.equal(merged.baseOnlySites, 1);
   assert.equal(row.surfacedProductClassification, 'other_processed');
+  assert.equal(row.processing_lineage, 'other_processed');
   assert.equal(row.source_filter, 'AmeriFlux');
   assert.equal(row.hasProcessedProduct, false);
   assert.deepEqual(row.availability_filter_labels, ['Other processed']);
@@ -391,6 +394,10 @@ test('BASE-only sites surface BASE only and bulk helpers keep the BASE product',
   assert.deepEqual(
     row.surfacedProducts.map((product) => product.productFamily),
     ['BASE']
+  );
+  assert.deepEqual(
+    row.surfacedProducts.map((product) => product.processing_lineage),
+    ['other_processed']
   );
   assert.equal(row.surfacedProducts[0].apiDataProduct, 'BASE-BADM');
   assert.equal(partition.shuttleRows.length, 0);
@@ -432,12 +439,14 @@ test('Identical FLUXNET and BASE exact year sets suppress BASE from surfaced pro
   const partition = hooks.partitionRowsByBulkSource([row]);
 
   assert.equal(row.surfacedProductClassification, 'fluxnet_processed');
+  assert.equal(row.processing_lineage, 'oneflux');
   assert.equal(row.source_filter, 'AmeriFlux-Shuttle');
   assert.deepEqual(row.source_filter_tags, ['AmeriFlux', 'AmeriFlux-Shuttle', 'FLUXNET-Shuttle']);
   assert.equal(row.hasProcessedProduct, true);
   assert.deepEqual(row.availability_filter_labels, ['FLUXNET processed']);
   assert.equal(row.surfacedProducts.length, 1);
   assert.equal(row.surfacedProducts[0].productFamily, 'FLUXNET');
+  assert.equal(row.surfacedProducts[0].processing_lineage, 'oneflux');
   assert.equal(row.ameriFluxBaseProduct.productFamily, 'BASE');
   assert.equal(partition.shuttleRows.length, 1);
   assert.equal(partition.ameriFluxRows.length, 0);
@@ -1296,10 +1305,36 @@ test('JapanFlux-only rows classify as other processed without changing JapanFlux
   const row = merged.rows[0];
 
   assert.equal(row.surfacedProductClassification, 'other_processed');
+  assert.equal(row.processing_lineage, 'other_processed');
   assert.deepEqual(row.availability_filter_labels, ['Other processed']);
   assert.equal(row.source_filter, 'JapanFlux');
   assert.deepEqual(row.source_filter_tags, ['JapanFlux']);
   assert.equal(row.source_label, 'JapanFlux');
+});
+
+test('Explicit processing_lineage wins over legacy source fallback, and missing lineage still falls back for older rows', () => {
+  assert.equal(
+    hooks.resolveProcessingLineage({
+      processing_lineage: 'oneflux',
+      source_origin: 'japanflux_direct',
+      source_label: 'JapanFlux'
+    }),
+    'oneflux'
+  );
+  assert.equal(
+    hooks.resolveProcessingLineage({
+      source_origin: 'japanflux_direct',
+      source_label: 'JapanFlux'
+    }),
+    'other_processed'
+  );
+  assert.equal(
+    hooks.resolveProcessingLineage({
+      source_label: 'BASE',
+      api_data_product: 'BASE-BADM'
+    }),
+    'other_processed'
+  );
 });
 
 test('JapanFlux landing-page rows stay out of direct bulk downloads and keep explicit row actions', () => {
@@ -1307,8 +1342,8 @@ test('JapanFlux landing-page rows stay out of direct bulk downloads and keep exp
     surfacedProducts: [
       {
         productFamily: 'FLUXNET',
-        processingLineage: 'other',
-        processing_lineage: 'other',
+        processingLineage: 'other_processed',
+        processing_lineage: 'other_processed',
         siteId: 'JP-Lnd',
         coverageLabel: '2015-2017',
         exactYears: [2015, 2016, 2017],
@@ -1355,6 +1390,7 @@ test('FLUXNET2015 supplemental rows infer regional networks from country while r
 
   assert.equal(bySite['BR-Leg'].network_display, 'AmeriFlux');
   assert.deepEqual(bySite['BR-Leg'].source_filter_tags, ['AmeriFlux', 'FLUXNET-2015']);
+  assert.equal(bySite['BR-Leg'].processing_lineage, 'oneflux');
   assert.equal(hooks.rowMatchesExplorerFilters(bySite['BR-Leg'], { selectedSource: 'AmeriFlux' }), true);
   assert.equal(hooks.rowMatchesExplorerFilters(bySite['BR-Leg'], { selectedSource: 'FLUXNET-2015' }), true);
 
@@ -1452,6 +1488,8 @@ test('FLUXNET processed matches ONEFlux-only rows, while hybrid and other-proces
   assert.equal(bySite['US-Pro'].surfacedProductClassification, 'fluxnet_processed');
   assert.equal(bySite['US-Add'].surfacedProductClassification, 'fluxnet_and_other_processed');
   assert.equal(bySite['US-Base'].surfacedProductClassification, 'other_processed');
+  assert.equal(bySite['US-Pro'].processing_lineage, 'oneflux');
+  assert.equal(bySite['US-Base'].processing_lineage, 'other_processed');
 });
 
 test('Source and Availability filters compose for AmeriFlux provenance with FLUXNET-processed availability', () => {
