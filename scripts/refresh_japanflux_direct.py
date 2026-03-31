@@ -28,6 +28,7 @@ DEFAULT_RETRIES = 5
 DEFAULT_RETRY_DELAY_SECONDS = 2.0
 DIRECT_DOWNLOAD_PROBE_TIMEOUT_SECONDS = 5
 USER_AGENT = "trevorkeenan.github.io/fluxnet-explorer-japanflux-refresh"
+DIRECT_DOWNLOAD_PATH = "data/zip/DATA"
 
 OUTPUT_COLUMNS: Sequence[str] = (
     "site_id",
@@ -59,16 +60,6 @@ JAPANFLUX_FILE_RE = re.compile(
     r"^FLX_(?P<site_id>[^_]+)_JapanFLUX2024_(?P<product>[^_]+)_(?P<resolution>[^_]+)_(?P<first>\d{4})-(?P<last>\d{4})_(?P<version>[^.]+)\.csv$",
     re.IGNORECASE,
 )
-
-DIRECT_DOWNLOAD_CANDIDATES: Sequence[str] = (
-    "https://ads.nipr.ac.jp/data/download?path={path}",
-    "https://ads.nipr.ac.jp/data/download/{path}",
-    "https://ads.nipr.ac.jp/download?path={path}",
-    "https://ads.nipr.ac.jp/ads_download?path={path}",
-    "https://ads.nipr.ac.jp/dataset/{metadata_id}/download",
-    "https://ads.nipr.ac.jp/dataset/{metadata_id}?download=1",
-)
-DIRECT_DOWNLOAD_TEMPLATE_STATUS: Dict[str, bool] = {}
 
 SITE_INVENTORY_TSV = """metadata_id\tsite_id\tsite_name\tigbp\tlatitude\tlongitude
 A20240722-001\tJP-Ozm\tOizumi Urban Park\tURB\t34.563470\t135.533484
@@ -376,20 +367,6 @@ def list_directory(
     return [entry for entry in payload if isinstance(entry, dict)]
 
 
-def load_file_info(
-    metadata_id: str,
-    version: str,
-    timeout: int,
-    retries: int,
-    retry_delay: float,
-) -> Dict[str, Any]:
-    url = f"{ADS_API_BASE}/metadata/{quote(metadata_id)}/{quote(version)}/file_info/DATA_ZIP"
-    payload = request_json(url, timeout, retries, retry_delay, f"{metadata_id} {version} file_info DATA_ZIP")
-    if not isinstance(payload, dict):
-        raise RuntimeError(f"Unexpected file_info payload for {metadata_id} {version}: {type(payload).__name__}")
-    return payload
-
-
 def parse_japanflux_filename(file_name: str) -> Optional[Dict[str, Any]]:
     match = JAPANFLUX_FILE_RE.match(str(file_name or "").strip())
     if not match:
@@ -427,6 +404,10 @@ def collect_measurement_years(allvars_entries: Iterable[Dict[str, Any]], site_id
 
 def landing_page_url(metadata_id: str) -> str:
     return f"{ADS_DATASET_BASE}/{metadata_id}"
+
+
+def build_direct_download_url(metadata_id: str, version: str) -> str:
+    return f"{ADS_API_BASE}/metadata/{quote(metadata_id)}/{quote(version)}/{DIRECT_DOWNLOAD_PATH}"
 
 
 def probe_direct_download_url(url: str, timeout: int) -> Optional[str]:
@@ -486,27 +467,9 @@ def probe_direct_download_url(url: str, timeout: int) -> Optional[str]:
 def validate_direct_download_url(
     metadata_id: str,
     version: str,
-    file_info_path: str,
     timeout: int,
 ) -> str:
-    path_value = str(file_info_path or "").strip().lstrip("/")
-    if not path_value:
-        return ""
-    encoded_path = quote(path_value, safe="/")
-    for pattern in DIRECT_DOWNLOAD_CANDIDATES:
-        if DIRECT_DOWNLOAD_TEMPLATE_STATUS.get(pattern) is False:
-            continue
-        candidate = pattern.format(
-            metadata_id=quote(metadata_id),
-            version=quote(version),
-            path=encoded_path,
-        )
-        resolved = probe_direct_download_url(candidate, timeout=timeout)
-        if resolved:
-            DIRECT_DOWNLOAD_TEMPLATE_STATUS[pattern] = True
-            return resolved
-        DIRECT_DOWNLOAD_TEMPLATE_STATUS[pattern] = False
-    return ""
+    return probe_direct_download_url(build_direct_download_url(metadata_id, version), timeout=timeout) or ""
 
 
 def normalize_csv_value(value: Any) -> str:
@@ -640,16 +603,11 @@ def fetch_site_row(
     first_year, last_year = collect_measurement_years(allvars_entries, site_id)
 
     direct_download_url = ""
-    try:
-        file_info = load_file_info(metadata_id, version, timeout, retries, retry_delay)
-        direct_download_url = validate_direct_download_url(
-            metadata_id,
-            version,
-            str(file_info.get("path") or ""),
-            timeout=max(1, min(timeout, DIRECT_DOWNLOAD_PROBE_TIMEOUT_SECONDS)),
-        )
-    except RuntimeError as err:
-        print(f"  {site_id}: DATA_ZIP probe unavailable ({err})", flush=True)
+    direct_download_url = validate_direct_download_url(
+        metadata_id,
+        version,
+        timeout=max(1, min(timeout, DIRECT_DOWNLOAD_PROBE_TIMEOUT_SECONDS)),
+    )
 
     return build_site_row(inventory_record, version, first_year, last_year, direct_download_url)
 

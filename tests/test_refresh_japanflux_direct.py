@@ -5,9 +5,6 @@ from scripts import refresh_japanflux_direct as module
 
 
 class RefreshJapanFluxDirectTests(unittest.TestCase):
-    def setUp(self):
-        module.DIRECT_DOWNLOAD_TEMPLATE_STATUS.clear()
-
     def test_parse_site_inventory_has_expected_size(self):
         inventory = module.parse_site_inventory()
         self.assertEqual(len(inventory), 83)
@@ -47,23 +44,60 @@ class RefreshJapanFluxDirectTests(unittest.TestCase):
         self.assertEqual(row["direct_download_url"], "")
         self.assertEqual(row["processing_lineage"], "other_processed")
 
-    def test_validate_direct_download_url_returns_first_resolved_candidate(self):
-        with mock.patch.object(module, "probe_direct_download_url", side_effect=[None, "", "https://example.org/japanflux.zip"]):
+    def test_build_direct_download_url_uses_confirmed_ads_zip_endpoint(self):
+        direct_url = module.build_direct_download_url("A20240722-001", "1.00")
+
+        self.assertEqual(
+            direct_url,
+            "https://ads.nipr.ac.jp/api/v1/metadata/A20240722-001/1.00/data/zip/DATA",
+        )
+
+    def test_build_site_row_prefers_validated_direct_url(self):
+        row = module.build_site_row(
+            {
+                "metadata_id": "A20240722-001",
+                "site_id": "JP-Ozm",
+                "site_name": "Oizumi Urban Park",
+                "country": "JP",
+                "vegetation_type": "URB",
+                "latitude": 34.56347,
+                "longitude": 135.533484,
+            },
+            "1.00",
+            2015,
+            2017,
+            "https://ads.nipr.ac.jp/api/v1/metadata/A20240722-001/1.00/data/zip/DATA",
+        )
+
+        self.assertEqual(row["download_mode"], "direct")
+        self.assertEqual(
+            row["download_link"],
+            "https://ads.nipr.ac.jp/api/v1/metadata/A20240722-001/1.00/data/zip/DATA",
+        )
+        self.assertEqual(
+            row["landing_page_url"],
+            "https://ads.nipr.ac.jp/dataset/A20240722-001",
+        )
+
+    def test_validate_direct_download_url_uses_confirmed_endpoint(self):
+        with mock.patch.object(module, "probe_direct_download_url", return_value="https://example.org/japanflux.zip") as probe:
             resolved = module.validate_direct_download_url(
                 "A20240722-001",
                 "1.00",
-                "JapanFlux/A20240722-001/v100/dataset_zip",
                 timeout=5,
             )
 
         self.assertEqual(resolved, "https://example.org/japanflux.zip")
+        probe.assert_called_once_with(
+            "https://ads.nipr.ac.jp/api/v1/metadata/A20240722-001/1.00/data/zip/DATA",
+            timeout=5,
+        )
 
-    def test_validate_direct_download_url_falls_back_when_no_candidate_resolves(self):
+    def test_validate_direct_download_url_falls_back_when_probe_fails(self):
         with mock.patch.object(module, "probe_direct_download_url", return_value=None):
             resolved = module.validate_direct_download_url(
                 "A20240722-001",
                 "1.00",
-                "JapanFlux/A20240722-001/v100/dataset_zip",
                 timeout=5,
             )
 

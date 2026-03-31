@@ -1370,6 +1370,43 @@ test('JapanFlux landing-page rows stay out of direct bulk downloads and keep exp
   assert.equal(option.actionLabel, 'Open landing page');
 });
 
+test('JapanFlux direct ZIP rows participate in direct bulk downloads', () => {
+  const row = makeJapanFluxRow({
+    download_link: 'https://ads.nipr.ac.jp/api/v1/metadata/A20240722-001/1.00/data/zip/DATA',
+    download_mode: 'direct',
+    direct_download_url: 'https://ads.nipr.ac.jp/api/v1/metadata/A20240722-001/1.00/data/zip/DATA',
+    source_reason: 'Available from the JapanFlux2024 ADS archive; direct ZIP URL validated automatically.',
+    surfacedProducts: [
+      {
+        productFamily: 'FLUXNET',
+        processingLineage: 'other_processed',
+        processing_lineage: 'other_processed',
+        siteId: 'JP-Dir',
+        coverageLabel: '2015-2017',
+        exactYears: [2015, 2016, 2017],
+        downloadMode: 'direct',
+        download_mode: 'direct',
+        downloadLink: 'https://ads.nipr.ac.jp/api/v1/metadata/A20240722-001/1.00/data/zip/DATA',
+        download_link: 'https://ads.nipr.ac.jp/api/v1/metadata/A20240722-001/1.00/data/zip/DATA',
+        sourceLabel: 'JapanFlux',
+        source_label: 'JapanFlux',
+        sourceOrigin: 'japanflux_direct',
+        source_origin: 'japanflux_direct',
+        apiDataProduct: 'FLUXNET',
+        api_data_product: 'FLUXNET'
+      }
+    ]
+  });
+  const partition = hooks.partitionRowsByBulkSource([row]);
+  const option = hooks.buildRowDownloadOptions(row, true)[0];
+
+  assert.deepEqual(partition.shuttleRows.map((item) => item.site_id || item.siteId), ['JP-Dir']);
+  assert.deepEqual(partition.shuttleDownloadRows.map((item) => item.site_id || item.siteId), ['JP-Dir']);
+  assert.deepEqual(partition.manualLandingPageRows, []);
+  assert.equal(option.displayLabel, 'JapanFlux2024');
+  assert.equal(option.actionLabel, 'Download');
+});
+
 test('FLUXNET2015 supplemental rows infer regional networks from country while retaining FLUXNET-2015 source tags', () => {
   const merged = hooks.mergeCatalogRows(
     [],
