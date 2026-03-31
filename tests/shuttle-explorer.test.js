@@ -87,6 +87,31 @@ function makeCatalogRow(overrides) {
   );
 }
 
+function makeJapanFluxRow(overrides) {
+  return makeCatalogRow(Object.assign(
+    {
+      site_id: 'JP-Test',
+      site_name: 'JapanFlux Site',
+      country: 'JP',
+      data_hub: 'JapanFlux',
+      network: 'JapanFlux',
+      source_network: 'JapanFlux',
+      network_display: 'JapanFlux',
+      network_tokens: ['JapanFlux'],
+      vegetation_type: 'URB',
+      first_year: 2015,
+      last_year: 2017,
+      years: '2015-2017',
+      download_link: 'https://ads.nipr.ac.jp/dataset/A20240722-001',
+      download_mode: 'landing_page',
+      source_label: 'JapanFlux',
+      source_reason: 'Available from the JapanFlux2024 ADS landing page.',
+      source_origin: 'japanflux_direct'
+    },
+    overrides || {}
+  ));
+}
+
 function makeAvailabilitySite(siteId, publishYears, overrides) {
   const years = Array.isArray(publishYears) ? publishYears.slice() : [];
   const normalizedYears = years.slice().sort((a, b) => a - b);
@@ -1033,6 +1058,7 @@ test('Source filter options expose the full overlapping source tag list while av
     { source_filter_tags: ['ChinaFlux', 'FLUXNET-2015'] },
     { source_filter_tags: ['FLUXNET-2015'] },
     { source_filter_tags: ['ICOS'] },
+    { source_filter_tags: ['JapanFlux'] },
     { source_filter_tags: ['TERN', 'TERN-Shuttle', 'FLUXNET-Shuttle'] }
   ]);
   const availabilityValues = hooks.uniqueAvailabilityFilterValues([
@@ -1057,6 +1083,7 @@ test('Source filter options expose the full overlapping source tag list while av
     'FLUXNET-Shuttle',
     'ICOS',
     'ICOS-Shuttle',
+    'JapanFlux',
     'TERN',
     'TERN-Shuttle'
   ]);
@@ -1151,6 +1178,134 @@ test('Rows compute overlapping source filter tags from network membership and Sh
   assert.equal(bySite['CL-Leg'].source_filter_tags.includes('AmeriFlux'), true);
   assert.equal(bySite['CL-Leg'].source_filter_tags.includes('ICOS'), false);
   assert.equal(bySite['CL-Leg'].source_filter_tags.includes('TERN'), false);
+});
+
+test('JapanFlux source tags apply only to JapanFlux-direct rows, not Shuttle rows from the JPF network', () => {
+  const shuttleJpf = makeCatalogRow({
+    site_id: 'JP-Shu',
+    site_name: 'JPF Shuttle',
+    country: 'JP',
+    data_hub: 'ICOS',
+    network: 'JPF',
+    source_network: 'JPF',
+    network_display: 'JapanFlux',
+    network_tokens: ['JapanFlux'],
+    source_label: '',
+    source_reason: '',
+    source_origin: 'shuttle'
+  });
+  const japanFluxRow = makeJapanFluxRow({
+    site_id: 'JP-Jpf',
+    download_mode: 'direct',
+    download_link: 'https://example.org/japanflux.zip',
+    source_reason: 'Available from the JapanFlux2024 ADS archive; direct ZIP URL validated automatically.'
+  });
+
+  assert.equal(hooks.computeSourceFilterTags(shuttleJpf).includes('JapanFlux'), false);
+  assert.deepEqual(hooks.computeSourceFilterTags(japanFluxRow), ['JapanFlux']);
+  assert.equal(hooks.rowMatchesExplorerFilters(japanFluxRow, { selectedSource: 'JapanFlux' }), true);
+});
+
+test('JapanFlux rows merge after ICOS precedence and keep JapanFlux provenance fields', () => {
+  const merged = hooks.mergeCatalogRows(
+    [
+      makeCatalogRow({
+        site_id: 'JP-Shu',
+        site_name: 'Shuttle Site',
+        country: 'JP',
+        data_hub: 'ICOS',
+        network: 'FLX',
+        source_network: 'FLX',
+        network_display: 'FLX',
+        network_tokens: ['FLX'],
+        download_link: 'https://example.org/shuttle.zip',
+        source_label: '',
+        source_reason: '',
+        source_origin: 'shuttle'
+      })
+    ],
+    [
+      makeCatalogRow({
+        site_id: 'JP-Ico',
+        site_name: 'ICOS Site',
+        country: 'JP',
+        data_hub: 'ICOS',
+        network: 'FLX',
+        source_network: 'FLX',
+        network_display: 'FLX',
+        network_tokens: ['FLX'],
+        download_link: 'https://example.org/icos.zip',
+        source_label: 'ICOS',
+        source_reason: '',
+        source_origin: 'icos_direct'
+      })
+    ],
+    [
+      makeJapanFluxRow({
+        site_id: 'JP-Shu',
+        site_name: 'Suppressed by Shuttle',
+        download_mode: 'direct',
+        download_link: 'https://example.org/japanflux-shuttle.zip'
+      }),
+      makeJapanFluxRow({
+        site_id: 'JP-Ico',
+        site_name: 'Suppressed by ICOS',
+        download_mode: 'direct',
+        download_link: 'https://example.org/japanflux-icos.zip'
+      }),
+      makeJapanFluxRow({
+        site_id: 'JP-New',
+        site_name: 'JapanFlux Only',
+        download_mode: 'direct',
+        download_link: 'https://example.org/japanflux-new.zip'
+      })
+    ],
+    [],
+    [],
+    []
+  );
+  const bySite = Object.fromEntries(merged.rows.map((row) => [row.site_id, row]));
+
+  assert.equal(merged.japanFluxOnlySites, 1);
+  assert.equal(merged.japanFluxSuppressedByHigherPrecedence, 2);
+  assert.equal(Object.prototype.hasOwnProperty.call(bySite, 'JP-New'), true);
+  assert.equal(bySite['JP-New'].data_hub, 'JapanFlux');
+  assert.equal(bySite['JP-New'].source_origin, 'japanflux_direct');
+  assert.equal(bySite['JP-New'].source_filter, 'JapanFlux');
+  assert.deepEqual(bySite['JP-New'].source_filter_tags, ['JapanFlux']);
+  assert.equal(Object.prototype.hasOwnProperty.call(bySite, 'JP-Shu'), true);
+  assert.equal(bySite['JP-Shu'].data_hub, 'ICOS');
+});
+
+test('JapanFlux landing-page rows stay out of direct bulk downloads and keep explicit row actions', () => {
+  const row = makeJapanFluxRow({
+    surfacedProducts: [
+      {
+        productFamily: 'FLUXNET',
+        siteId: 'JP-Lnd',
+        coverageLabel: '2015-2017',
+        exactYears: [2015, 2016, 2017],
+        downloadMode: 'landing_page',
+        download_mode: 'landing_page',
+        downloadLink: 'https://ads.nipr.ac.jp/dataset/A20240722-001',
+        download_link: 'https://ads.nipr.ac.jp/dataset/A20240722-001',
+        sourceLabel: 'JapanFlux',
+        source_label: 'JapanFlux',
+        sourceOrigin: 'japanflux_direct',
+        source_origin: 'japanflux_direct',
+        apiDataProduct: 'FLUXNET',
+        api_data_product: 'FLUXNET'
+      }
+    ]
+  });
+  const partition = hooks.partitionRowsByBulkSource([row]);
+  const option = hooks.buildRowDownloadOptions(row, true)[0];
+
+  assert.deepEqual(partition.shuttleRows.map((item) => item.site_id || item.siteId), ['JP-Lnd']);
+  assert.deepEqual(partition.shuttleDownloadRows, []);
+  assert.deepEqual(partition.manualLandingPageRows.map((item) => item.site_id || item.siteId), ['JP-Lnd']);
+  assert.equal(option.displayLabel, 'JapanFlux2024');
+  assert.equal(option.actionLabel, 'Open landing page');
 });
 
 test('FLUXNET2015 supplemental rows infer regional networks from country while retaining FLUXNET-2015 source tags', () => {
@@ -2028,7 +2183,7 @@ test('Download-all wrapper script delegates to both child scripts when both sour
     includeAmeriFlux: true
   });
 
-  assert.equal(script.includes('# Shuttle is preferred for overlap sites (AmeriFlux-Shuttle).'), true);
+  assert.equal(script.includes('# Validated direct links are handled by download_shuttle_selected.sh.'), true);
   assert.equal(script.includes('# AmeriFlux API-backed surfaced products (FLUXNET, BASE, and FLUXNET2015) are downloaded via the AmeriFlux API.'), true);
   assert.equal(script.includes('if [ -f "./download_shuttle_selected.sh" ]; then'), true);
   assert.equal(script.includes('bash "./download_shuttle_selected.sh" || {'), true);
