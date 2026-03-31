@@ -381,10 +381,10 @@ test('BASE-only sites surface BASE only and bulk helpers keep the BASE product',
   const partition = hooks.partitionRowsByBulkSource([row]);
 
   assert.equal(merged.baseOnlySites, 1);
-  assert.equal(row.surfacedProductClassification, 'base_only');
+  assert.equal(row.surfacedProductClassification, 'other_processed');
   assert.equal(row.source_filter, 'AmeriFlux');
   assert.equal(row.hasProcessedProduct, false);
-  assert.deepEqual(row.availability_filter_labels, ['Only BASE available']);
+  assert.deepEqual(row.availability_filter_labels, ['Other processed']);
   assert.equal(row.source_label, 'BASE');
   assert.equal(row.years, 'BASE: 2005-2007');
   assert.equal(row.length_years, 3);
@@ -431,11 +431,11 @@ test('Identical FLUXNET and BASE exact year sets suppress BASE from surfaced pro
   const row = merged.rows[0];
   const partition = hooks.partitionRowsByBulkSource([row]);
 
-  assert.equal(row.surfacedProductClassification, 'processed_only');
+  assert.equal(row.surfacedProductClassification, 'fluxnet_processed');
   assert.equal(row.source_filter, 'AmeriFlux-Shuttle');
   assert.deepEqual(row.source_filter_tags, ['AmeriFlux', 'AmeriFlux-Shuttle', 'FLUXNET-Shuttle']);
   assert.equal(row.hasProcessedProduct, true);
-  assert.deepEqual(row.availability_filter_labels, ['FLUXNET available']);
+  assert.deepEqual(row.availability_filter_labels, ['FLUXNET processed']);
   assert.equal(row.surfacedProducts.length, 1);
   assert.equal(row.surfacedProducts[0].productFamily, 'FLUXNET');
   assert.equal(row.ameriFluxBaseProduct.productFamily, 'BASE');
@@ -475,13 +475,13 @@ test('Sites with additional BASE years surface both products and bulk helpers ke
   const coverageHtml = hooks.renderSurfacedCoverageHtml(row);
 
   assert.equal(merged.additionalBaseYearsSites, 1);
-  assert.equal(row.surfacedProductClassification, 'additional_base_years');
+  assert.equal(row.surfacedProductClassification, 'fluxnet_and_other_processed');
   assert.equal(row.source_filter, 'AmeriFlux-Shuttle');
   assert.deepEqual(row.source_filter_tags, ['AmeriFlux', 'AmeriFlux-Shuttle', 'FLUXNET-Shuttle']);
   assert.equal(row.hasProcessedProduct, true);
   assert.deepEqual(
     row.availability_filter_labels,
-    ['FLUXNET available', 'Sites with FLUXNET + additional BASE years']
+    ['Sites with both FLUXNET and additional processed years']
   );
   assert.deepEqual(
     row.surfacedProducts.map((product) => product.productFamily),
@@ -497,7 +497,7 @@ test('Sites with additional BASE years surface both products and bulk helpers ke
   );
   assert.match(coverageHtml, /FLUXNET:/);
   assert.match(coverageHtml, /BASE:/);
-  assert.match(coverageHtml, /additional years in BASE/);
+  assert.match(coverageHtml, /Sites with both FLUXNET and additional processed years/);
 });
 
 test('Exact year-set comparison surfaces both products when coverage differs internally, not only at the endpoints', () => {
@@ -532,7 +532,7 @@ test('Exact year-set comparison surfaces both products when coverage differs int
     hooks.exactYearSetsMatch([1999, 2000, 2002, 2004], [1999, 2001, 2002, 2004]),
     false
   );
-  assert.equal(row.surfacedProductClassification, 'additional_base_years');
+  assert.equal(row.surfacedProductClassification, 'fluxnet_and_other_processed');
   assert.equal(row.surfacedProducts.length, 2);
   assert.deepEqual(row.surfacedProducts[0].exactYears, [1999, 2000, 2002, 2004]);
   assert.deepEqual(row.surfacedProducts[1].exactYears, [1999, 2001, 2002, 2004]);
@@ -1063,13 +1063,13 @@ test('Source filter options expose the full overlapping source tag list while av
   ]);
   const availabilityValues = hooks.uniqueAvailabilityFilterValues([
     {
-      surfacedProductClassification: 'processed_only',
+      surfacedProductClassification: 'fluxnet_processed',
       hasProcessedProduct: true,
       primaryProcessedProduct: { productFamily: 'FLUXNET' }
     },
-    { surfacedProductClassification: 'base_only', hasProcessedProduct: false },
+    { surfacedProductClassification: 'other_processed', hasProcessedProduct: false },
     {
-      surfacedProductClassification: 'additional_base_years',
+      surfacedProductClassification: 'fluxnet_and_other_processed',
       hasProcessedProduct: true,
       primaryProcessedProduct: { productFamily: 'FLUXNET' }
     }
@@ -1089,7 +1089,7 @@ test('Source filter options expose the full overlapping source tag list while av
   ]);
   assert.deepEqual(
     availabilityValues,
-    ['FLUXNET available', 'Only BASE available', 'Sites with FLUXNET + additional BASE years']
+    ['FLUXNET processed', 'Other processed', 'Sites with both FLUXNET and additional processed years']
   );
 });
 
@@ -1277,11 +1277,38 @@ test('JapanFlux rows merge after ICOS precedence and keep JapanFlux provenance f
   assert.equal(bySite['JP-Shu'].data_hub, 'ICOS');
 });
 
+test('JapanFlux-only rows classify as other processed without changing JapanFlux source provenance', () => {
+  const merged = hooks.mergeCatalogRows(
+    [],
+    [],
+    [
+      makeJapanFluxRow({
+        site_id: 'JP-Only',
+        site_name: 'JapanFlux Only',
+        download_mode: 'direct',
+        download_link: 'https://example.org/japanflux-only.zip'
+      })
+    ],
+    [],
+    [],
+    []
+  );
+  const row = merged.rows[0];
+
+  assert.equal(row.surfacedProductClassification, 'other_processed');
+  assert.deepEqual(row.availability_filter_labels, ['Other processed']);
+  assert.equal(row.source_filter, 'JapanFlux');
+  assert.deepEqual(row.source_filter_tags, ['JapanFlux']);
+  assert.equal(row.source_label, 'JapanFlux');
+});
+
 test('JapanFlux landing-page rows stay out of direct bulk downloads and keep explicit row actions', () => {
   const row = makeJapanFluxRow({
     surfacedProducts: [
       {
         productFamily: 'FLUXNET',
+        processingLineage: 'other',
+        processing_lineage: 'other',
         siteId: 'JP-Lnd',
         coverageLabel: '2015-2017',
         exactYears: [2015, 2016, 2017],
@@ -1383,7 +1410,7 @@ test('Explorer summary copy refers to sites rather than records', () => {
   assert.equal(explorerJs.includes('Showing " + filtered + " of " + total + " records.'), false);
 });
 
-test('FLUXNET available matches processed-only and additional-base-years rows, but excludes BASE-only rows', () => {
+test('FLUXNET processed matches ONEFlux-only rows, while hybrid and other-processed rows use their own availability labels', () => {
   const merged = hooks.mergeCatalogRows(
     [],
     [
@@ -1417,15 +1444,17 @@ test('FLUXNET available matches processed-only and additional-base-years rows, b
   );
   const bySite = Object.fromEntries(merged.rows.map((row) => [row.site_id, row]));
 
-  assert.equal(hooks.rowMatchesExplorerFilters(bySite['US-Pro'], { selectedAvailability: 'FLUXNET available' }), true);
-  assert.equal(hooks.rowMatchesExplorerFilters(bySite['US-Add'], { selectedAvailability: 'FLUXNET available' }), true);
-  assert.equal(hooks.rowMatchesExplorerFilters(bySite['US-Base'], { selectedAvailability: 'FLUXNET available' }), false);
-  assert.equal(bySite['US-Pro'].surfacedProductClassification, 'processed_only');
-  assert.equal(bySite['US-Add'].surfacedProductClassification, 'additional_base_years');
-  assert.equal(bySite['US-Base'].surfacedProductClassification, 'base_only');
+  assert.equal(hooks.rowMatchesExplorerFilters(bySite['US-Pro'], { selectedAvailability: 'FLUXNET processed' }), true);
+  assert.equal(hooks.rowMatchesExplorerFilters(bySite['US-Add'], { selectedAvailability: 'FLUXNET processed' }), false);
+  assert.equal(hooks.rowMatchesExplorerFilters(bySite['US-Base'], { selectedAvailability: 'FLUXNET processed' }), false);
+  assert.equal(hooks.rowMatchesExplorerFilters(bySite['US-Add'], { selectedAvailability: 'Sites with both FLUXNET and additional processed years' }), true);
+  assert.equal(hooks.rowMatchesExplorerFilters(bySite['US-Base'], { selectedAvailability: 'Other processed' }), true);
+  assert.equal(bySite['US-Pro'].surfacedProductClassification, 'fluxnet_processed');
+  assert.equal(bySite['US-Add'].surfacedProductClassification, 'fluxnet_and_other_processed');
+  assert.equal(bySite['US-Base'].surfacedProductClassification, 'other_processed');
 });
 
-test('Source and Availability filters compose for AmeriFlux provenance with FLUXNET availability', () => {
+test('Source and Availability filters compose for AmeriFlux provenance with FLUXNET-processed availability', () => {
   const merged = hooks.mergeCatalogRows(
     [],
     [
@@ -1461,12 +1490,37 @@ test('Source and Availability filters compose for AmeriFlux provenance with FLUX
   const matchingSiteIds = merged.rows
     .filter((row) => hooks.rowMatchesExplorerFilters(row, {
       selectedSource: 'AmeriFlux',
-      selectedAvailability: 'FLUXNET available'
+      selectedAvailability: 'FLUXNET processed'
     }))
     .map((row) => row.site_id)
     .sort();
 
-  assert.deepEqual(matchingSiteIds, ['US-Add', 'US-Pro']);
+  assert.deepEqual(matchingSiteIds, ['US-Pro']);
+});
+
+test('Hybrid availability filter isolates sites with FLUXNET and additional processed years', () => {
+  const merged = hooks.mergeCatalogRows(
+    [],
+    [],
+    [
+      makeAvailabilitySite('US-Pro', [2010, 2011]),
+      makeAvailabilitySite('US-Add', [2015, 2016])
+    ],
+    [],
+    [
+      makeAvailabilitySite('US-Add', [2015, 2016, 2017]),
+      makeAvailabilitySite('US-Base', [2020, 2021])
+    ]
+  );
+
+  const matchingSiteIds = merged.rows
+    .filter((row) => hooks.rowMatchesExplorerFilters(row, {
+      selectedAvailability: 'Sites with both FLUXNET and additional processed years'
+    }))
+    .map((row) => row.site_id)
+    .sort();
+
+  assert.deepEqual(matchingSiteIds, ['US-Add']);
 });
 
 test('FLUXNET-Shuttle source filtering includes Shuttle-available AmeriFlux, ICOS, and TERN rows', () => {
@@ -2267,7 +2321,7 @@ test('Data Notes box appears between the map and attribution sections with share
   assert.equal(notesIndex > mapIndex, true);
   assert.equal(attributionIndex > notesIndex, true);
   assert.equal(explorerJs.includes('These notes highlight how the explorer labels datasets and how the bulk tools behave.'), true);
-  assert.equal(explorerJs.includes('choose the Availability filter option [FLUXNET available].'), true);
+  assert.equal(explorerJs.includes('Use the Availability filter options [FLUXNET processed], [Other processed], and [Sites with both FLUXNET and additional processed years]'), true);
   assert.equal(explorerJs.includes('Choose the Source filter option [FLUXNET-Shuttle]'), true);
   assert.equal(explorerJs.includes('The explorer includes both gap-filled and partitioned data [FLUXNET] and non-gap-filled, non-partitioned observations [BASE].'), true);
   assert.equal(explorerJs.includes('The bulk-download scripts may require users to install a jq package if neither jq nor python3 are already installed.'), true);

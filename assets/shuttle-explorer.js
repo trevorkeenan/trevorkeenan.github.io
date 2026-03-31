@@ -105,13 +105,15 @@
   var AMERIFLUX_AVAILABILITY_CACHE_MAX_AGE_MS = 6 * 60 * 60 * 1000;
   var PRODUCT_FAMILY_FLUXNET = "FLUXNET";
   var PRODUCT_FAMILY_BASE = "BASE";
-  var SURFACED_CLASSIFICATION_PROCESSED_ONLY = "processed_only";
-  var SURFACED_CLASSIFICATION_BASE_ONLY = "base_only";
-  var SURFACED_CLASSIFICATION_ADDITIONAL_BASE_YEARS = "additional_base_years";
-  var FILTER_LABEL_FLUXNET_AVAILABLE = "FLUXNET available";
-  var FILTER_LABEL_BASE_ONLY = "Only BASE available";
-  var FILTER_LABEL_ADDITIONAL_BASE_YEARS = "Sites with FLUXNET + additional BASE years";
-  var TABLE_LABEL_ADDITIONAL_BASE_YEARS = "additional years in BASE";
+  var PROCESSING_LINEAGE_ONEFLUX = "oneflux";
+  var PROCESSING_LINEAGE_OTHER = "other";
+  var SURFACED_CLASSIFICATION_FLUXNET_PROCESSED = "fluxnet_processed";
+  var SURFACED_CLASSIFICATION_OTHER_PROCESSED = "other_processed";
+  var SURFACED_CLASSIFICATION_FLUXNET_AND_OTHER = "fluxnet_and_other_processed";
+  var FILTER_LABEL_FLUXNET_PROCESSED = "FLUXNET processed";
+  var FILTER_LABEL_OTHER_PROCESSED = "Other processed";
+  var FILTER_LABEL_FLUXNET_AND_OTHER = "Sites with both FLUXNET and additional processed years";
+  var TABLE_LABEL_FLUXNET_AND_OTHER = "Sites with both FLUXNET and additional processed years";
   var MAX_HTTP_RETRIES = 3;
   var RETRY_BASE_DELAY_MS = 500;
   var COPY_TABLE_BUTTON_LABEL = "Copy table to clipboard";
@@ -1144,23 +1146,109 @@
     return SOURCE_FILTER_OPTIONS.slice();
   }
 
-  function hasProcessedProduct(row) {
-    return !!(row && (row.hasProcessedProduct || row.hasFluxnetAvailable || row.primaryProcessedProduct));
+  function normalizeProcessingLineage(lineage) {
+    var normalized = String(lineage || "").trim().toLowerCase();
+    if (normalized === PROCESSING_LINEAGE_ONEFLUX) {
+      return PROCESSING_LINEAGE_ONEFLUX;
+    }
+    if (normalized === PROCESSING_LINEAGE_OTHER) {
+      return PROCESSING_LINEAGE_OTHER;
+    }
+    return "";
+  }
+
+  function resolveProcessingLineage(fields) {
+    var explicit = normalizeProcessingLineage(fields && (fields.processingLineage || fields.processing_lineage));
+    var sourceOrigin = String(fields && (fields.sourceOrigin || fields.source_origin || fields.source) || "").trim();
+    var sourceLabel = String(fields && (fields.sourceLabel || fields.source_label) || "").trim();
+    var dataHub = String(fields && (fields.dataHub || fields.data_hub) || "").trim();
+    var dataProduct = normalizeDownloadProduct(fields && (fields.apiDataProduct || fields.api_data_product));
+    var productFamily = String(fields && (fields.productFamily || fields.product_family) || "").trim().toUpperCase();
+    if (explicit) {
+      return explicit;
+    }
+    if (
+      sourceOrigin === JAPANFLUX_DIRECT_SOURCE_ORIGIN ||
+      sourceLabel === SOURCE_FILTER_TAG_JAPANFLUX ||
+      dataHub === SOURCE_FILTER_TAG_JAPANFLUX ||
+      dataProduct === AMERIFLUX_BASE_PRODUCT ||
+      productFamily === PRODUCT_FAMILY_BASE
+    ) {
+      return PROCESSING_LINEAGE_OTHER;
+    }
+    return PROCESSING_LINEAGE_ONEFLUX;
+  }
+
+  function processingLineageForProduct(product) {
+    return normalizeProcessingLineage(product && (product.processingLineage || product.processing_lineage)) ||
+      resolveProcessingLineage(product || {});
+  }
+
+  function buildProductYearLookup(products, targetLineage) {
+    var years = {};
+    (Array.isArray(products) ? products : []).forEach(function (product) {
+      if (processingLineageForProduct(product) !== targetLineage) {
+        return;
+      }
+      normalizedExactYears(
+        product && (product.exactYears || product.exact_years),
+        product && (product.firstYear || product.first_year),
+        product && (product.lastYear || product.last_year)
+      ).forEach(function (year) {
+        years[year] = true;
+      });
+    });
+    return years;
+  }
+
+  function hasAdditionalOtherProcessedYears(products) {
+    var oneFluxYears = buildProductYearLookup(products, PROCESSING_LINEAGE_ONEFLUX);
+    var otherYears = buildProductYearLookup(products, PROCESSING_LINEAGE_OTHER);
+    var hasOneFlux = Object.keys(oneFluxYears).length > 0;
+    var hasOther = Object.keys(otherYears).length > 0;
+    if (!hasOneFlux || !hasOther) {
+      return false;
+    }
+    return Object.keys(otherYears).some(function (year) {
+      return !oneFluxYears[year];
+    });
+  }
+
+  function classifySurfacedProducts(products) {
+    var lineages = {};
+    (Array.isArray(products) ? products : []).forEach(function (product) {
+      var lineage = processingLineageForProduct(product);
+      if (lineage) {
+        lineages[lineage] = true;
+      }
+    });
+
+    if (lineages[PROCESSING_LINEAGE_ONEFLUX] && lineages[PROCESSING_LINEAGE_OTHER]) {
+      return hasAdditionalOtherProcessedYears(products)
+        ? SURFACED_CLASSIFICATION_FLUXNET_AND_OTHER
+        : SURFACED_CLASSIFICATION_FLUXNET_PROCESSED;
+    }
+    if (lineages[PROCESSING_LINEAGE_ONEFLUX]) {
+      return SURFACED_CLASSIFICATION_FLUXNET_PROCESSED;
+    }
+    if (lineages[PROCESSING_LINEAGE_OTHER]) {
+      return SURFACED_CLASSIFICATION_OTHER_PROCESSED;
+    }
+    return "";
   }
 
   function availabilityFilterLabels(row) {
-    var labels = [];
     var classification = String(row && row.surfacedProductClassification || "").trim();
-    if (hasProcessedProduct(row)) {
-      labels.push(FILTER_LABEL_FLUXNET_AVAILABLE);
+    if (classification === SURFACED_CLASSIFICATION_FLUXNET_PROCESSED) {
+      return [FILTER_LABEL_FLUXNET_PROCESSED];
     }
-    if (classification === SURFACED_CLASSIFICATION_BASE_ONLY) {
-      labels.push(FILTER_LABEL_BASE_ONLY);
+    if (classification === SURFACED_CLASSIFICATION_OTHER_PROCESSED) {
+      return [FILTER_LABEL_OTHER_PROCESSED];
     }
-    if (classification === SURFACED_CLASSIFICATION_ADDITIONAL_BASE_YEARS) {
-      labels.push(FILTER_LABEL_ADDITIONAL_BASE_YEARS);
+    if (classification === SURFACED_CLASSIFICATION_FLUXNET_AND_OTHER) {
+      return [FILTER_LABEL_FLUXNET_AND_OTHER];
     }
-    return labels;
+    return [];
   }
 
   function uniqueAvailabilityFilterValues(rows) {
@@ -1171,9 +1259,9 @@
       });
     });
     return [
-      FILTER_LABEL_FLUXNET_AVAILABLE,
-      FILTER_LABEL_BASE_ONLY,
-      FILTER_LABEL_ADDITIONAL_BASE_YEARS
+      FILTER_LABEL_FLUXNET_PROCESSED,
+      FILTER_LABEL_OTHER_PROCESSED,
+      FILTER_LABEL_FLUXNET_AND_OTHER
     ].filter(function (label) {
       return !!available[label];
     });
@@ -2148,9 +2236,11 @@
     var network = String(fields && fields.network || "").trim();
     var sourceNetwork = String(fields && (fields.sourceNetwork || fields.source_network) || "").trim();
     var networkDisplay = String(fields && (fields.networkDisplay || fields.network_display) || network || sourceNetwork).trim();
+    var processingLineage = resolveProcessingLineage(fields || {});
 
     return {
       productFamily: productFamily === PRODUCT_FAMILY_BASE ? PRODUCT_FAMILY_BASE : PRODUCT_FAMILY_FLUXNET,
+      processingLineage: processingLineage,
       source: sourceOrigin || resolveSourceOrigin(fields || {}),
       sourceLabel: sourceLabel,
       siteId: siteId || canonicalSiteId,
@@ -2180,6 +2270,7 @@
       network: network,
       sourceNetwork: sourceNetwork,
       networkDisplay: networkDisplay,
+      processing_lineage: processingLineage,
       site_id: siteId || canonicalSiteId,
       source_label: sourceLabel,
       download_mode: downloadMode,
@@ -2321,13 +2412,15 @@
   function applySurfacedProductsToRow(row, primaryProcessedProduct, ameriFluxBaseProduct, surfacedProducts, classification) {
     var products = Array.isArray(surfacedProducts) ? surfacedProducts.slice() : [];
     var unionYears = buildSurfacedYearUnion(products);
+    var rowClassification = String(classification || "").trim() || classifySurfacedProducts(products);
 
     row.primaryProcessedProduct = primaryProcessedProduct || null;
     row.ameriFluxBaseProduct = ameriFluxBaseProduct || null;
     row.surfacedProducts = products;
-    row.surfacedProductClassification = String(classification || "");
+    row.surfacedProductClassification = rowClassification;
     row.hasProcessedProduct = !!primaryProcessedProduct;
-    row.hasFluxnetAvailable = row.hasProcessedProduct;
+    row.hasFluxnetAvailable = rowClassification === SURFACED_CLASSIFICATION_FLUXNET_PROCESSED ||
+      rowClassification === SURFACED_CLASSIFICATION_FLUXNET_AND_OTHER;
 
     if (unionYears.length) {
       row.first_year = unionYears[0];
@@ -2365,14 +2458,11 @@
       ? buildAmeriFluxBaseProduct(lookups.ameriFluxBase[siteId])
       : null;
     var surfacedProducts;
-    var classification;
 
     if (!primaryProcessedProduct && ameriFluxBaseProduct) {
       surfacedProducts = [ameriFluxBaseProduct];
-      classification = SURFACED_CLASSIFICATION_BASE_ONLY;
     } else if (primaryProcessedProduct && !ameriFluxBaseProduct) {
       surfacedProducts = [primaryProcessedProduct];
-      classification = SURFACED_CLASSIFICATION_PROCESSED_ONLY;
     } else if (primaryProcessedProduct && ameriFluxBaseProduct && exactYearSetsMatch(
       primaryProcessedProduct.exactYears,
       ameriFluxBaseProduct.exactYears,
@@ -2382,15 +2472,17 @@
       ameriFluxBaseProduct.lastYear
     )) {
       surfacedProducts = [primaryProcessedProduct];
-      classification = SURFACED_CLASSIFICATION_PROCESSED_ONLY;
     } else {
       surfacedProducts = [primaryProcessedProduct, ameriFluxBaseProduct].filter(Boolean);
-      classification = surfacedProducts.length > 1
-        ? SURFACED_CLASSIFICATION_ADDITIONAL_BASE_YEARS
-        : (primaryProcessedProduct ? SURFACED_CLASSIFICATION_PROCESSED_ONLY : SURFACED_CLASSIFICATION_BASE_ONLY);
     }
 
-    return applySurfacedProductsToRow(row, primaryProcessedProduct, ameriFluxBaseProduct, surfacedProducts, classification);
+    return applySurfacedProductsToRow(
+      row,
+      primaryProcessedProduct,
+      ameriFluxBaseProduct,
+      surfacedProducts,
+      classifySurfacedProducts(surfacedProducts)
+    );
   }
 
   function mergeCatalogRows(shuttleRows, icosDirectRows, japanFluxRows, ameriFluxSites, fluxnet2015Sites, ameriFluxBaseSites) {
@@ -2589,7 +2681,7 @@
       if (siteId) {
         finalSiteIds[siteId] = true;
       }
-      if (row && row.surfacedProductClassification === SURFACED_CLASSIFICATION_ADDITIONAL_BASE_YEARS) {
+      if (row && row.surfacedProductClassification === SURFACED_CLASSIFICATION_FLUXNET_AND_OTHER) {
         additionalBaseYearsSites += 1;
       }
     });
@@ -3693,8 +3785,8 @@
         "</span>";
     }).join("<span class=\"shuttle-explorer__coverage-sep\" aria-hidden=\"true\">\u00b7</span>");
 
-    if (row && row.surfacedProductClassification === SURFACED_CLASSIFICATION_ADDITIONAL_BASE_YEARS) {
-      badgeHtml = "<div class=\"shuttle-explorer__coverage-badge\"><span class=\"shuttle-explorer__source-badge shuttle-explorer__source-badge--base-addition\">" + escapeHtml(TABLE_LABEL_ADDITIONAL_BASE_YEARS) + "</span></div>";
+    if (row && row.surfacedProductClassification === SURFACED_CLASSIFICATION_FLUXNET_AND_OTHER) {
+      badgeHtml = "<div class=\"shuttle-explorer__coverage-badge\"><span class=\"shuttle-explorer__source-badge shuttle-explorer__source-badge--base-addition\">" + escapeHtml(TABLE_LABEL_FLUXNET_AND_OTHER) + "</span></div>";
     }
 
     return "<div class=\"shuttle-explorer__coverage-list\">" + content + "</div>" + badgeHtml;
@@ -3918,7 +4010,7 @@
       "      <h4 id=\"ameriflux-bulk-source-heading\">Bulk download for surfaced AmeriFlux API products</h4>",
       "      <p class=\"shuttle-explorer__tiny\" data-role=\"ameriflux-selection-count\">0 sites available elsewhere selected</p>",
       "    </div>",
-      "    <p class=\"shuttle-explorer__tiny\">Applies to surfaced AmeriFlux API products selected in the table. This includes AmeriFlux FLUXNET rows, BASE rows, FLUXNET2015 fallback rows, and additional BASE years for sites whose primary FLUXNET-family product is delivered elsewhere.</p>",
+      "    <p class=\"shuttle-explorer__tiny\">Applies to surfaced AmeriFlux API products selected in the table. This includes AmeriFlux FLUXNET rows, BASE rows, FLUXNET2015 fallback rows, and any additional non-ONEFlux processed years surfaced alongside a FLUXNET-processed product.</p>",
       "    <p class=\"shuttle-explorer__tiny\">Optional: enter your own AmeriFlux username and email. If left blank, the generated script will use default values.</p>",
       "    <div class=\"shuttle-explorer__bulk-identity-grid\">",
       "      <div class=\"shuttle-explorer__field\">",
@@ -3991,7 +4083,7 @@
       "  <ul class=\"shuttle-explorer__tiny\">",
       "    <li>FLUXNET data are contributed by site teams around the world and distributed through one of three processing hubs: AmeriFlux (<a href=\"https://ameriflux.lbl.gov/\" target=\"_blank\" rel=\"noopener noreferrer\">https://ameriflux.lbl.gov/</a>), ICOS (<a href=\"https://www.icos-etc.eu/icos/\" target=\"_blank\" rel=\"noopener noreferrer\">https://www.icos-etc.eu/icos/</a>), or TERN (<a href=\"https://www.tern.org.au/\" target=\"_blank\" rel=\"noopener noreferrer\">https://www.tern.org.au/</a>).</li>",
       "    <li>If a site has different versions of its dataset published at different times, the explorer surfaces the most recently processed dataset.</li>",
-      "    <li>Data labeled as FLUXNET in the year column have been gap-filled and partitioned with the ONEFlux processing pipeline. To locate all ONEFlux-processed datasets in the explorer, choose the Availability filter option [FLUXNET available].</li>",
+      "    <li>Data labeled as FLUXNET in the year column have been gap-filled and partitioned with the ONEFlux processing pipeline. Use the Availability filter options [FLUXNET processed], [Other processed], and [Sites with both FLUXNET and additional processed years] to distinguish ONEFlux-derived coverage from non-ONEFlux processed coverage.</li>",
       "    <li>The FLUXNET Shuttle serves data processed with the most recent ONEFlux version and should generally be treated as the highest-quality processed product available here. Choose the Source filter option [FLUXNET-Shuttle] to view the subset of FLUXNET-format datasets generated with this most up-to-date processing.</li>",
       "    <li>Rows labeled [JapanFlux] come from the public JapanFlux2024 ADS archive. They are tracked as a distinct source family because the dataset uses selected FLUXNET-standard methods with dataset-specific adaptations rather than the FLUXNET Shuttle publication pipeline.</li>",
       "    <li>The explorer includes both gap-filled and partitioned data [FLUXNET] and non-gap-filled, non-partitioned observations [BASE].</li>",
