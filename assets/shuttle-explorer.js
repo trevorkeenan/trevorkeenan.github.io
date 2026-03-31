@@ -5,6 +5,8 @@
   var DEFAULT_CSV_URL = "assets/shuttle_snapshot.csv";
   var DEFAULT_ICOS_DIRECT_JSON_URL = "assets/icos_direct_fluxnet.json";
   var DEFAULT_ICOS_DIRECT_CSV_URL = "assets/icos_direct_fluxnet.csv";
+  var DEFAULT_JAPANFLUX_JSON_URL = "assets/japanflux_direct_snapshot.json";
+  var DEFAULT_JAPANFLUX_CSV_URL = "assets/japanflux_direct_snapshot.csv";
   var AMERIFLUX_SITE_INFO_URL = "assets/ameriflux_site_info.csv";
   var FLUXNET2015_SITE_INFO_URL = "assets/siteinfo_fluxnet2015.csv";
   var SITE_NAME_METADATA_URL = "assets/site_name_metadata.csv";
@@ -31,6 +33,7 @@
   var AMERIFLUX_BULK_IDENTITY_STORAGE_KEY = "shuttle-explorer:ameriflux-bulk-identity:v1";
   var AMERIFLUX_TRUSTED_RUNTIME_FLAG = "amerifluxTrustedRuntime";
   var ICOS_DIRECT_SOURCE_ONLY = "ICOS";
+  var JAPANFLUX_SOURCE_ONLY = "JapanFlux";
   var AMERIFLUX_SOURCE_ONLY = "AmeriFlux";
   var BASE_SOURCE_ONLY = "BASE";
   var FLUXNET2015_SOURCE_ONLY = "FLUXNET2015";
@@ -45,6 +48,7 @@
   var SOURCE_FILTER_TAG_ICOS_SHUTTLE = "ICOS-Shuttle";
   var SOURCE_FILTER_TAG_TERN = "TERN";
   var SOURCE_FILTER_TAG_TERN_SHUTTLE = "TERN-Shuttle";
+  var SOURCE_FILTER_TAG_JAPANFLUX = "JapanFlux";
   var SOURCE_FILTER_OPTIONS = [
     SOURCE_FILTER_TAG_AMERIFLUX,
     SOURCE_FILTER_TAG_AMERIFLUX_SHUTTLE,
@@ -53,6 +57,7 @@
     SOURCE_FILTER_TAG_FLUXNET_SHUTTLE,
     SOURCE_FILTER_TAG_ICOS,
     SOURCE_FILTER_TAG_ICOS_SHUTTLE,
+    SOURCE_FILTER_TAG_JAPANFLUX,
     SOURCE_FILTER_TAG_TERN,
     SOURCE_FILTER_TAG_TERN_SHUTTLE
   ];
@@ -84,9 +89,11 @@
   var FLUXNET2015_CHINA_COUNTRY_CODES = ["CN"];
   var SHUTTLE_SOURCE_ORIGIN = "shuttle";
   var ICOS_DIRECT_SOURCE_ORIGIN = "icos_direct";
+  var JAPANFLUX_SOURCE_ORIGIN = "japanflux_direct";
   var AMERIFLUX_API_SOURCE_ORIGIN = "ameriflux_api";
   var SHUTTLE_SOURCE_PRIORITY = 400;
   var ICOS_DIRECT_SOURCE_PRIORITY = 300;
+  var JAPANFLUX_SOURCE_PRIORITY = 250;
   var AMERIFLUX_SOURCE_PRIORITY = 200;
   var FLUXNET2015_SOURCE_PRIORITY = 100;
   var AMERIFLUX_FLUXNET_PRODUCT = "FLUXNET";
@@ -814,6 +821,9 @@
     if (sourceOrigin === ICOS_DIRECT_SOURCE_ORIGIN || sourceLabel === ICOS_DIRECT_SOURCE_ONLY) {
       return ICOS_DIRECT_SOURCE_PRIORITY;
     }
+    if (sourceOrigin === JAPANFLUX_SOURCE_ORIGIN || sourceLabel === JAPANFLUX_SOURCE_ONLY) {
+      return JAPANFLUX_SOURCE_PRIORITY;
+    }
     if (dataProduct === FLUXNET2015_PRODUCT || sourceLabel === FLUXNET2015_SOURCE_ONLY) {
       return FLUXNET2015_SOURCE_PRIORITY;
     }
@@ -1022,6 +1032,13 @@
       String(row && row.data_hub || "").trim().toLowerCase() === "chinaflux";
   }
 
+  function isJapanFluxNetworkRow(row) {
+    return rowHasNetworkToken(row, JAPANFLUX_SOURCE_ONLY) ||
+      String(row && row.source_label || "").trim() === JAPANFLUX_SOURCE_ONLY ||
+      String(row && row.data_hub || "").trim().toLowerCase() === "japanflux" ||
+      resolveSourceOrigin(row) === JAPANFLUX_SOURCE_ORIGIN;
+  }
+
   function computeSourceFilterTags(row) {
     var tags = [];
     var seen = {};
@@ -1030,6 +1047,7 @@
     var chinaFluxNetwork = isChinaFluxNetworkRow(row);
     var icosNetwork = isIcosNetworkRow(row);
     var ternNetwork = isTernNetworkRow(row);
+    var japanFluxNetwork = isJapanFluxNetworkRow(row);
     var fluxnet2015Supplemental = isFluxnet2015SupplementalRow(row);
 
     function addTag(tag) {
@@ -1054,6 +1072,9 @@
       if (shuttleAvailable) {
         addTag(SOURCE_FILTER_TAG_ICOS_SHUTTLE);
       }
+    }
+    if (japanFluxNetwork) {
+      addTag(SOURCE_FILTER_TAG_JAPANFLUX);
     }
     if (ternNetwork) {
       addTag(SOURCE_FILTER_TAG_TERN);
@@ -1092,6 +1113,9 @@
     }
     if (isIcosNetworkRow(row)) {
       return shuttleAvailable ? SOURCE_FILTER_TAG_ICOS_SHUTTLE : SOURCE_FILTER_TAG_ICOS;
+    }
+    if (isJapanFluxNetworkRow(row)) {
+      return SOURCE_FILTER_TAG_JAPANFLUX;
     }
     if (isTernNetworkRow(row)) {
       return shuttleAvailable ? SOURCE_FILTER_TAG_TERN_SHUTTLE : SOURCE_FILTER_TAG_TERN;
@@ -2336,19 +2360,26 @@
     return applySurfacedProductsToRow(row, primaryProcessedProduct, ameriFluxBaseProduct, surfacedProducts, classification);
   }
 
-  function mergeCatalogRows(shuttleRows, icosDirectRows, ameriFluxSites, fluxnet2015Sites, ameriFluxBaseSites) {
+  function mergeCatalogRows(shuttleRows, icosDirectRows, ameriFluxSites, fluxnet2015Sites, ameriFluxBaseSites, japanFluxDirectRows) {
     if (arguments.length < 4) {
       fluxnet2015Sites = ameriFluxSites;
       ameriFluxSites = icosDirectRows;
       icosDirectRows = [];
       ameriFluxBaseSites = [];
+      japanFluxDirectRows = [];
     } else if (arguments.length < 5) {
       ameriFluxBaseSites = [];
+      japanFluxDirectRows = [];
+    } else if (arguments.length < 6) {
+      japanFluxDirectRows = [];
     }
     var mergedRows = (Array.isArray(shuttleRows) ? shuttleRows : []).map(function (row) {
       return Object.assign({}, row);
     });
     var icosSites = (Array.isArray(icosDirectRows) ? icosDirectRows : []).map(function (row) {
+      return Object.assign({}, row);
+    });
+    var japanFluxSites = (Array.isArray(japanFluxDirectRows) ? japanFluxDirectRows : []).map(function (row) {
       return Object.assign({}, row);
     });
     var ameriSites = Array.isArray(ameriFluxSites) ? ameriFluxSites : [];
@@ -2358,6 +2389,8 @@
     var canonicalSiteIds = {};
     var icosSuppressedByShuttle = 0;
     var icosDirectOnlySites = 0;
+    var japanFluxSuppressedByPrecedence = 0;
+    var japanFluxOnlySites = 0;
     var overlapSites = 0;
     var ameriOnlySites = 0;
     var fluxnet2015OnlySites = 0;
@@ -2425,6 +2458,38 @@
       row.source_filter = sourceFilterValue(row);
       canonicalSiteIds[siteId] = true;
       icosDirectOnlySites += 1;
+      mergedRows.push(row);
+    });
+
+    // JapanFlux-direct: Shuttle > ICOS-direct > JapanFlux > AmeriFlux
+    japanFluxSites.forEach(function (row) {
+      var siteId = String(row && row.site_id || "").trim();
+      if (!siteId) {
+        return;
+      }
+      if (canonicalSiteIds[siteId]) {
+        japanFluxSuppressedByPrecedence += 1;
+        return;
+      }
+      if (!row.data_hub) {
+        row.data_hub = JAPANFLUX_SOURCE_ONLY;
+      }
+      if (!row.download_mode) {
+        row.download_mode = "direct";
+      }
+      if (!row.source_label) {
+        row.source_label = JAPANFLUX_SOURCE_ONLY;
+      }
+      if (!row.source_reason) {
+        row.source_reason = "Available from JapanFlux2024 (Ueyama et al., 2025, ESSD) via ADS. CC BY 4.0.";
+      }
+      if (!row.source_origin) {
+        row.source_origin = JAPANFLUX_SOURCE_ORIGIN;
+      }
+      row.source_priority = resolveSourcePriority(row);
+      row.source_filter = sourceFilterValue(row);
+      canonicalSiteIds[siteId] = true;
+      japanFluxOnlySites += 1;
       mergedRows.push(row);
     });
 
@@ -2527,6 +2592,9 @@
       icosDirectTotalSites: icosSites.length,
       icosDirectSuppressedByShuttle: icosSuppressedByShuttle,
       icosDirectOnlySites: icosDirectOnlySites,
+      japanFluxTotalSites: japanFluxSites.length,
+      japanFluxSuppressedByPrecedence: japanFluxSuppressedByPrecedence,
+      japanFluxOnlySites: japanFluxOnlySites,
       amerifluxTotalSites: ameriSites.length,
       amerifluxSitesWithYears: ameriSites.length,
       amerifluxOverlapSites: overlapSites,
@@ -3555,6 +3623,9 @@
     if (sourceLabel === AMERIFLUX_SHUTTLE) {
       return "shuttle-explorer__source-badge--ameriflux-shuttle";
     }
+    if (sourceLabel === JAPANFLUX_SOURCE_ONLY) {
+      return "shuttle-explorer__source-badge--japanflux";
+    }
     return "";
   }
 
@@ -3682,6 +3753,7 @@
       ".shuttle-explorer__table thead th{position:sticky;top:0;background:#f8fafc;z-index:1;}",
       ".shuttle-explorer__source-badge{display:inline-flex;align-items:center;padding:2px 8px;border-radius:999px;font-size:.86em;font-weight:600;line-height:1.25;}",
       ".shuttle-explorer__source-badge--icos{background:#eef7f8;border:1px solid #b7d9dc;color:#245761;}",
+      ".shuttle-explorer__source-badge--japanflux{background:#fdf2f8;border:1px solid #e0b3d0;color:#7a2b5b;}",
       ".shuttle-explorer__source-badge--base{background:#f8f3e8;border:1px solid #d9c288;color:#755319;}",
       ".shuttle-explorer__source-badge--ameriflux{background:#edf7f0;border:1px solid #b6dcc2;color:#1f6c3f;}",
       ".shuttle-explorer__source-badge--fluxnet2015{background:#fff4e5;border:1px solid #ebc47d;color:#8a5600;}",
@@ -3900,6 +3972,8 @@
     this.csvUrl = root.getAttribute("data-csv-src") || DEFAULT_CSV_URL;
     this.icosDirectJsonUrl = root.getAttribute("data-icos-direct-json-src") || DEFAULT_ICOS_DIRECT_JSON_URL;
     this.icosDirectCsvUrl = root.getAttribute("data-icos-direct-csv-src") || DEFAULT_ICOS_DIRECT_CSV_URL;
+    this.japanFluxJsonUrl = root.getAttribute("data-japanflux-json-src") || DEFAULT_JAPANFLUX_JSON_URL;
+    this.japanFluxCsvUrl = root.getAttribute("data-japanflux-csv-src") || DEFAULT_JAPANFLUX_CSV_URL;
     this.ameriFluxSiteInfoUrl = root.getAttribute("data-ameriflux-site-info-src") || AMERIFLUX_SITE_INFO_URL;
     this.fluxnet2015SiteInfoUrl = root.getAttribute("data-fluxnet2015-site-info-src") || FLUXNET2015_SITE_INFO_URL;
     this.siteNameMetadataUrl = root.getAttribute("data-site-name-metadata-src") || SITE_NAME_METADATA_URL;
@@ -3908,6 +3982,7 @@
     var ameriIdentity = resolveAmeriFluxIdentityFromRoot(root);
     this.shuttleSource = new ShuttleSource(this.jsonUrl, this.csvUrl);
     this.icosDirectSource = new ShuttleSource(this.icosDirectJsonUrl, this.icosDirectCsvUrl);
+    this.japanFluxSource = new ShuttleSource(this.japanFluxJsonUrl, this.japanFluxCsvUrl);
     this.ameriFluxSource = new AmeriFluxSource({
       availabilityUrl: AMERIFLUX_FLUXNET_AVAILABILITY_URL,
       downloadUrl: AMERIFLUX_V2_DOWNLOAD_URL,
@@ -6298,7 +6373,7 @@
     this.trackExplorerLoadedOnce();
   };
 
-  Explorer.prototype.buildMergedSnapshotState = function (shuttleResult, icosDirectResult, ameriResult, ameriBaseResult, fluxnet2015Result, ameriFluxSiteInfoResult, fluxnet2015SiteInfoResult, siteNameMetadataResult, vegetationMetadataResult) {
+  Explorer.prototype.buildMergedSnapshotState = function (shuttleResult, icosDirectResult, japanFluxResult, ameriResult, ameriBaseResult, fluxnet2015Result, ameriFluxSiteInfoResult, fluxnet2015SiteInfoResult, siteNameMetadataResult, vegetationMetadataResult) {
     var ameriFluxSiteInfoLookup = ameriFluxSiteInfoResult && ameriFluxSiteInfoResult.lookup ? ameriFluxSiteInfoResult.lookup : {};
     var fluxnet2015SiteInfoLookup = fluxnet2015SiteInfoResult && fluxnet2015SiteInfoResult.lookup ? fluxnet2015SiteInfoResult.lookup : {};
     var siteNameMetadataLookup = siteNameMetadataResult && siteNameMetadataResult.lookup ? siteNameMetadataResult.lookup : {};
@@ -6323,17 +6398,19 @@
       icosDirectResult && Array.isArray(icosDirectResult.rows) ? icosDirectResult.rows : [],
       enrichedAmeriFluxSites,
       enrichedFluxnet2015Sites,
-      enrichedAmeriFluxBaseSites
+      enrichedAmeriFluxBaseSites,
+      japanFluxResult && Array.isArray(japanFluxResult.rows) ? japanFluxResult.rows : []
     );
     var rows = enrichRowsWithSiteNameLookup(merge.rows, siteNameMetadataLookup);
     return {
       rows: rows,
       droppedRows: shuttleResult && shuttleResult.droppedRows ? shuttleResult.droppedRows : 0,
-      source: "Shuttle + ICOS + AmeriFlux FLUXNET + AmeriFlux BASE + FLUXNET2015",
+      source: "Shuttle + ICOS + JapanFlux + AmeriFlux FLUXNET + AmeriFlux BASE + FLUXNET2015",
       sourceUrl: shuttleResult && shuttleResult.sourceUrl ? shuttleResult.sourceUrl : this.jsonUrl,
       warning: combineWarnings(
         shuttleResult && shuttleResult.warning ? shuttleResult.warning : "",
         icosDirectResult && icosDirectResult.warning ? icosDirectResult.warning : "",
+        japanFluxResult && japanFluxResult.warning ? japanFluxResult.warning : "",
         ameriResult && ameriResult.warning ? ameriResult.warning : "",
         ameriBaseResult && ameriBaseResult.warning ? ameriBaseResult.warning : "",
         fluxnet2015Result && fluxnet2015Result.warning ? fluxnet2015Result.warning : "",
@@ -6380,6 +6457,7 @@
     Promise.all([
       this.shuttleSource.list_sites(),
       this.icosDirectSource.list_sites(),
+      this.japanFluxSource.list_sites(),
       this.ameriFluxSource.list_sites(),
       this.ameriFluxBaseSource.list_sites(),
       this.fluxnet2015Source.list_sites(),
@@ -6391,16 +6469,18 @@
       .then(function (results) {
         var shuttleResult = results[0] || {};
         var icosDirectResult = results[1] || {};
-        var ameriResult = results[2] || {};
-        var ameriBaseResult = results[3] || {};
-        var fluxnet2015Result = results[4] || {};
-        var ameriFluxSiteInfoResult = results[5] || {};
-        var fluxnet2015SiteInfoResult = results[6] || {};
-        var siteNameMetadataResult = results[7] || {};
-        var vegetationMetadataResult = results[8] || {};
+        var japanFluxResult = results[2] || {};
+        var ameriResult = results[3] || {};
+        var ameriBaseResult = results[4] || {};
+        var fluxnet2015Result = results[5] || {};
+        var ameriFluxSiteInfoResult = results[6] || {};
+        var fluxnet2015SiteInfoResult = results[7] || {};
+        var siteNameMetadataResult = results[8] || {};
+        var vegetationMetadataResult = results[9] || {};
         var snapshotState = self.buildMergedSnapshotState(
           shuttleResult,
           icosDirectResult,
+          japanFluxResult,
           ameriResult,
           ameriBaseResult,
           fluxnet2015Result,
@@ -6412,6 +6492,7 @@
         var freshnessKey = [
           "shuttle:" + buildSnapshotFreshnessKey(shuttleResult),
           "icos-direct:" + buildSnapshotFreshnessKey(icosDirectResult),
+          "japanflux:" + buildSnapshotFreshnessKey(japanFluxResult),
           String(ameriResult.freshnessKey || "ameriflux:none"),
           String(ameriBaseResult.freshnessKey || "ameriflux-base:none"),
           String(fluxnet2015Result.freshnessKey || "fluxnet2015:none"),
@@ -6531,6 +6612,7 @@
     renderSurfacedCoverageHtml: renderSurfacedCoverageHtml,
     partitionRowsByBulkSource: partitionRowsByBulkSource,
     summarizeBulkSelection: summarizeBulkSelection,
+    isJapanFluxNetworkRow: isJapanFluxNetworkRow,
     computeSourceFilterTags: computeSourceFilterTags,
     uniqueSourceFilterValues: uniqueSourceFilterValues,
     uniqueAvailabilityFilterValues: uniqueAvailabilityFilterValues,

@@ -120,12 +120,27 @@ jobs:
             --shuttle-csv "${TARGET_SNAPSHOT_CSV}" \
             --icos-csv "${TARGET_ICOS_DIRECT_CSV}"
 
+      - name: Refresh JapanFlux-direct snapshot
+        env:
+          TARGET_JAPANFLUX_CSV: assets/japanflux_direct_snapshot.csv
+          TARGET_JAPANFLUX_JSON: assets/japanflux_direct_snapshot.json
+        run: |
+          SNAPSHOT_UPDATED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          SNAPSHOT_UPDATED_DATE="${SNAPSHOT_UPDATED_AT%%T*}"
+          python scripts/refresh_japanflux_direct.py \
+            --output-csv "${TARGET_JAPANFLUX_CSV}" \
+            --output-json "${TARGET_JAPANFLUX_JSON}" \
+            --snapshot-updated-at "${SNAPSHOT_UPDATED_AT}" \
+            --snapshot-updated-date "${SNAPSHOT_UPDATED_DATE}"
+
       - name: Commit and push snapshot files if changed
         env:
           TARGET_SNAPSHOT_CSV: assets/shuttle_snapshot.csv
           TARGET_SNAPSHOT_JSON: assets/shuttle_snapshot.json
           TARGET_ICOS_DIRECT_CSV: assets/icos_direct_fluxnet.csv
           TARGET_ICOS_DIRECT_JSON: assets/icos_direct_fluxnet.json
+          TARGET_JAPANFLUX_CSV: assets/japanflux_direct_snapshot.csv
+          TARGET_JAPANFLUX_JSON: assets/japanflux_direct_snapshot.json
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -135,7 +150,9 @@ jobs:
             "${TARGET_SNAPSHOT_CSV}" \
             "${TARGET_SNAPSHOT_JSON}" \
             "${TARGET_ICOS_DIRECT_CSV}" \
-            "${TARGET_ICOS_DIRECT_JSON}"
+            "${TARGET_ICOS_DIRECT_JSON}" \
+            "${TARGET_JAPANFLUX_CSV}" \
+            "${TARGET_JAPANFLUX_JSON}"
 
           if git diff --cached --quiet; then
             echo "No snapshot file changes to commit."
