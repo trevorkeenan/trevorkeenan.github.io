@@ -3677,11 +3677,11 @@
   }
 
   function buildAttributionText(snapshotUpdatedDate) {
-    return "We appreciate acknowledgement of the QED FLUXNET Data Explorer when convenient. Contact TF Keenan (trevorkeenan@berkeley.edu) with any questions or suggestions. Available data is updated as of: " + snapshotUpdatedDateDisplayText(snapshotUpdatedDate) + ".";
+    return "We appreciate acknowledgement of the QED FLUXNET Data Explorer when convenient. Available data is updated as of: " + snapshotUpdatedDateDisplayText(snapshotUpdatedDate) + ". Contact TF Keenan (trevorkeenan@berkeley.edu) with any questions or suggestions.";
   }
 
   function buildAttributionHtml(snapshotUpdatedDate) {
-    return "We appreciate acknowledgement of the QED FLUXNET Data Explorer when convenient. Contact TF Keenan (<a href=\"mailto:trevorkeenan@berkeley.edu\">trevorkeenan@berkeley.edu</a>) with any questions or suggestions. Available data is updated as of: " + escapeHtml(snapshotUpdatedDateDisplayText(snapshotUpdatedDate)) + ".";
+    return "We appreciate acknowledgement of the QED FLUXNET Data Explorer when convenient. Available data is updated as of: " + escapeHtml(snapshotUpdatedDateDisplayText(snapshotUpdatedDate)) + ". Contact TF Keenan (<a href=\"mailto:trevorkeenan@berkeley.edu\">trevorkeenan@berkeley.edu</a>) with any questions or suggestions.";
   }
 
   function csvEscape(value) {
