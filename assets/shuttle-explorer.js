@@ -6993,6 +6993,7 @@
   }
 
   var testHooks = {
+    payloadJsonToObjects: payloadJsonToObjects,
     parseAmeriFluxAvailabilityPayload: parseAmeriFluxAvailabilityPayload,
     mergeCatalogRows: mergeCatalogRows,
     mergeShuttleAndAmeriFluxRows: mergeShuttleAndAmeriFluxRows,

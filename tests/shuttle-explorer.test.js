@@ -203,6 +203,28 @@ test('FLUXNET2015 availability payload uses the same filtering rules', () => {
   assert.match(parsed.freshnessKey, /^fluxnet2015:/);
 });
 
+test('Explorer default snapshot JSON files exist and are loadable by the current JSON loader', () => {
+  const explorerJs = fs.readFileSync(path.join(__dirname, '..', 'assets', 'shuttle-explorer.js'), 'utf8');
+  const expectedJsonFiles = [
+    'assets/shuttle_snapshot.json',
+    'assets/icos_direct_fluxnet.json',
+    'assets/japanflux_direct_snapshot.json'
+  ];
+
+  expectedJsonFiles.forEach((relativePath) => {
+    const absolutePath = path.join(__dirname, '..', relativePath);
+    const raw = fs.readFileSync(absolutePath, 'utf8');
+    const payload = JSON.parse(raw);
+    const rows = hooks.payloadJsonToObjects(payload);
+
+    assert.equal(explorerJs.includes('"' + relativePath + '"'), true);
+    assert.equal(Array.isArray(payload.columns), true);
+    assert.equal(Array.isArray(payload.rows), true);
+    assert.equal(Array.isArray(rows), true);
+    assert.equal(rows.length > 0, true);
+  });
+});
+
 test('Merge precedence is Shuttle > ICOS > AmeriFlux > FLUXNET2015 with no duplicates', () => {
   const shuttleRows = [
     {
