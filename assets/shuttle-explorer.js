@@ -105,8 +105,16 @@
   var AMERIFLUX_AVAILABILITY_CACHE_MAX_AGE_MS = 6 * 60 * 60 * 1000;
   var PRODUCT_FAMILY_FLUXNET = "FLUXNET";
   var PRODUCT_FAMILY_BASE = "BASE";
+  var PRODUCT_FAMILY_ICOS_ETC = "ICOS_ETC";
   var PROCESSING_LINEAGE_ONEFLUX = "oneflux";
   var PROCESSING_LINEAGE_OTHER = "other_processed";
+  var ICOS_CLASSIC_ARCHIVE_SPEC_URI = "http://meta.icos-cp.eu/resources/cpmeta/miscFluxnetArchiveProduct";
+  var ICOS_PRODUCT_SPEC_URI = "http://meta.icos-cp.eu/resources/cpmeta/miscFluxnetProduct";
+  var ICOS_ETC_ARCHIVE_SPEC_URI = "http://meta.icos-cp.eu/resources/cpmeta/etcArchiveProduct";
+  var ICOS_RELEASE_VERSION_RE = /_(\d{4})_(\d+)-(\d+)(?:\.|_|$)/i;
+  var ICOS_CURRENT_VERSION_RE = /_v(\d+(?:\.\d+)*)_r(\d+)/i;
+  var ICOS_BETA_VERSION_RE = /_beta[-_]?(\d+)/i;
+  var ICOS_RESOLUTION_PRODUCT_RE = /_(HH|HR|DD|WW|MM|YY|NRT)_/i;
   var SURFACED_CLASSIFICATION_FLUXNET_PROCESSED = "fluxnet_processed";
   var SURFACED_CLASSIFICATION_OTHER_PROCESSED = "other_processed";
   var SURFACED_CLASSIFICATION_FLUXNET_AND_OTHER = "fluxnet_and_other_processed";
@@ -798,6 +806,220 @@
       /data\.icos-cp\.eu\/licence_accept/.test(url);
   }
 
+  function normalizeProductFamily(value) {
+    var normalized = String(value || "").trim().toUpperCase();
+    if (normalized === PRODUCT_FAMILY_BASE) {
+      return PRODUCT_FAMILY_BASE;
+    }
+    if (normalized === PRODUCT_FAMILY_ICOS_ETC || normalized === "ICOS ETC") {
+      return PRODUCT_FAMILY_ICOS_ETC;
+    }
+    return PRODUCT_FAMILY_FLUXNET;
+  }
+
+  function normalizeVersionReference(value) {
+    return String(value || "").trim().replace(/\/+$/, "");
+  }
+
+  function inferRowProductFamily(row) {
+    var explicit = String(row && (row.product_family || row.productFamily) || "").trim();
+    var objectSpec = String(row && row.object_spec || "").trim();
+    var fileName = String(row && row.file_name || "").trim().toUpperCase();
+    var dataProduct = String(row && (row.api_data_product || row.apiDataProduct) || "").trim().toUpperCase();
+
+    if (explicit) {
+      return normalizeProductFamily(explicit);
+    }
+    if (dataProduct === AMERIFLUX_BASE_PRODUCT) {
+      return PRODUCT_FAMILY_BASE;
+    }
+    if (
+      objectSpec === ICOS_ETC_ARCHIVE_SPEC_URI ||
+      fileName.indexOf("ICOSETC_") === 0 ||
+      fileName.indexOf("ARCHIVE_L2") !== -1
+    ) {
+      return PRODUCT_FAMILY_ICOS_ETC;
+    }
+    return PRODUCT_FAMILY_FLUXNET;
+  }
+
+  function isIcosEtcRow(row) {
+    return isIcosRow(row) && inferRowProductFamily(row) === PRODUCT_FAMILY_ICOS_ETC;
+  }
+
+  function isIcosResolutionProduct(fileName) {
+    var upper = String(fileName || "").trim().toUpperCase();
+    return /\.CSV\.ZIP$/.test(upper) || ICOS_RESOLUTION_PRODUCT_RE.test(upper);
+  }
+
+  function isPreferredIcosClassicArchiveRow(row) {
+    var fileName = String(row && row.file_name || "").trim();
+    var upper = fileName.toUpperCase();
+    if (inferRowProductFamily(row) !== PRODUCT_FAMILY_FLUXNET) {
+      return false;
+    }
+    if (String(row && row.object_spec || "").trim() === ICOS_CLASSIC_ARCHIVE_SPEC_URI) {
+      return true;
+    }
+    if (isIcosResolutionProduct(fileName)) {
+      return false;
+    }
+    if (upper.indexOf("FULLSET") !== -1) {
+      return true;
+    }
+    return upper.indexOf("_FLUXNET_") !== -1;
+  }
+
+  function parseIcosVersionRank(fileName) {
+    var release = ICOS_RELEASE_VERSION_RE.exec(String(fileName || ""));
+    var current;
+    var beta;
+
+    if (release) {
+      return [3, [parseInt(release[1], 10), parseInt(release[2], 10), parseInt(release[3], 10)], 0];
+    }
+
+    current = ICOS_CURRENT_VERSION_RE.exec(String(fileName || ""));
+    if (current) {
+      return [
+        2,
+        current[1].split(".").map(function (part) { return parseInt(part, 10) || 0; }),
+        parseInt(current[2], 10) || 0
+      ];
+    }
+
+    beta = ICOS_BETA_VERSION_RE.exec(String(fileName || ""));
+    if (beta) {
+      return [1, [parseInt(beta[1], 10) || 0], 0];
+    }
+
+    return [0, [], 0];
+  }
+
+  function icosCoverageRank(row) {
+    var firstYear = parseIntOrNull(row && row.first_year);
+    var lastYear = parseIntOrNull(row && row.last_year);
+    var length = firstYear != null && lastYear != null && lastYear >= firstYear ? (lastYear - firstYear) + 1 : 0;
+    var earlierStartBonus = firstYear != null ? (9999 - firstYear) : 0;
+    return [lastYear || 0, length, earlierStartBonus];
+  }
+
+  function icosCanonicalNameBonus(row) {
+    var upper = String(row && row.file_name || "").trim().toUpperCase();
+    if (inferRowProductFamily(row) === PRODUCT_FAMILY_ICOS_ETC) {
+      return [
+        upper.indexOf("ICOSETC_") === 0 ? 1 : 0,
+        upper.indexOf("ARCHIVE_L2") !== -1 ? 1 : 0
+      ];
+    }
+    return [
+      upper.indexOf("FLX_") === 0 ? 1 : 0,
+      upper.indexOf("FULLSET") !== -1 ? 1 : 0
+    ];
+  }
+
+  function icosFamilyRank(row) {
+    return inferRowProductFamily(row) === PRODUCT_FAMILY_ICOS_ETC ? 1 : 2;
+  }
+
+  function icosMetadataVersionRank(row) {
+    var metadataUrl = normalizeVersionReference(row && row.metadata_url);
+    var latestVersionUrl = normalizeVersionReference(row && row.latest_version_url);
+    return [metadataUrl && latestVersionUrl && metadataUrl === latestVersionUrl ? 1 : 0, 0];
+  }
+
+  function compareRankValues(left, right) {
+    var leftIsArray = Array.isArray(left);
+    var rightIsArray = Array.isArray(right);
+    var index;
+    var cmp;
+    var leftValue;
+    var rightValue;
+
+    if (leftIsArray || rightIsArray) {
+      leftValue = leftIsArray ? left : [left];
+      rightValue = rightIsArray ? right : [right];
+      for (index = 0; index < Math.max(leftValue.length, rightValue.length); index += 1) {
+        cmp = compareRankValues(
+          index < leftValue.length ? leftValue[index] : 0,
+          index < rightValue.length ? rightValue[index] : 0
+        );
+        if (cmp) {
+          return cmp;
+        }
+      }
+      return 0;
+    }
+
+    leftValue = left == null ? "" : left;
+    rightValue = right == null ? "" : right;
+    if (leftValue === rightValue) {
+      return 0;
+    }
+    return leftValue > rightValue ? -1 : 1;
+  }
+
+  function compareIcosRows(left, right) {
+    var rankedPairs = [
+      [icosFamilyRank(left), icosFamilyRank(right)],
+      [isPreferredIcosClassicArchiveRow(left) ? 1 : 0, isPreferredIcosClassicArchiveRow(right) ? 1 : 0],
+      [icosMetadataVersionRank(left), icosMetadataVersionRank(right)],
+      [parseIcosVersionRank(left && left.file_name), parseIcosVersionRank(right && right.file_name)],
+      [icosCoverageRank(left), icosCoverageRank(right)],
+      [icosCanonicalNameBonus(left), icosCanonicalNameBonus(right)],
+      [String(left && left.production_end || ""), String(right && right.production_end || "")],
+      [String(left && left.coverage_end || ""), String(right && right.coverage_end || "")]
+    ];
+    var index;
+    var cmp;
+    var leftTail;
+    var rightTail;
+
+    for (index = 0; index < rankedPairs.length; index += 1) {
+      cmp = compareRankValues(rankedPairs[index][0], rankedPairs[index][1]);
+      if (cmp) {
+        return cmp;
+      }
+    }
+
+    leftTail = [String(left && left.file_name || ""), String(left && left.object_id || "")];
+    rightTail = [String(right && right.file_name || ""), String(right && right.object_id || "")];
+    if (leftTail[0] < rightTail[0]) {
+      return -1;
+    }
+    if (leftTail[0] > rightTail[0]) {
+      return 1;
+    }
+    if (leftTail[1] < rightTail[1]) {
+      return -1;
+    }
+    if (leftTail[1] > rightTail[1]) {
+      return 1;
+    }
+    return 0;
+  }
+
+  function dedupeIcosDirectRows(rows) {
+    var grouped = {};
+    var siteIds;
+
+    (Array.isArray(rows) ? rows : []).forEach(function (row) {
+      var siteId = normalizeSiteId(row && row.site_id);
+      if (!siteId) {
+        return;
+      }
+      if (!grouped[siteId]) {
+        grouped[siteId] = [];
+      }
+      grouped[siteId].push(row);
+    });
+
+    siteIds = Object.keys(grouped).sort();
+    return siteIds.map(function (siteId) {
+      return grouped[siteId].slice().sort(compareIcosRows)[0];
+    });
+  }
+
   function isJapanFluxSourceRow(row) {
     var sourceLabel = String(row && row.source_label || "").trim();
     var sourceOrigin = resolveSourceOrigin(row);
@@ -930,6 +1152,7 @@
     normalizeNetworkDisplay(row);
     row.source_origin = resolveSourceOrigin(row);
     row.source_priority = resolveSourcePriority(row);
+    row.product_family = inferRowProductFamily(row);
     row.processing_lineage = resolveProcessingLineage(row);
     applyRowSourceFilterState(row);
     row.is_icos = isIcosRow(row);
@@ -1175,7 +1398,8 @@
       sourceLabel === SOURCE_FILTER_TAG_JAPANFLUX ||
       dataHub === SOURCE_FILTER_TAG_JAPANFLUX ||
       dataProduct === AMERIFLUX_BASE_PRODUCT ||
-      productFamily === PRODUCT_FAMILY_BASE
+      productFamily === PRODUCT_FAMILY_BASE ||
+      productFamily === PRODUCT_FAMILY_ICOS_ETC
     ) {
       return PROCESSING_LINEAGE_OTHER;
     }
@@ -1362,9 +1586,12 @@
   }
 
   function productFamilyDisplayName(productFamily, useLongLabel) {
-    var family = String(productFamily || "").trim().toUpperCase();
+    var family = normalizeProductFamily(productFamily);
     if (family === PRODUCT_FAMILY_BASE) {
       return useLongLabel ? "BASE (standardized observations)" : PRODUCT_FAMILY_BASE;
+    }
+    if (family === PRODUCT_FAMILY_ICOS_ETC) {
+      return useLongLabel ? "ICOS ETC L2 archive" : "ICOS ETC";
     }
     return useLongLabel ? "FLUXNET (ONEFlux-derived)" : PRODUCT_FAMILY_FLUXNET;
   }
@@ -2220,7 +2447,7 @@
     );
     var firstYear = exactYears.length ? exactYears[0] : parseIntOrNull(fields && (fields.firstYear || fields.first_year));
     var lastYear = exactYears.length ? exactYears[exactYears.length - 1] : parseIntOrNull(fields && (fields.lastYear || fields.last_year));
-    var productFamily = String(fields && (fields.productFamily || fields.product_family) || PRODUCT_FAMILY_FLUXNET).trim().toUpperCase();
+    var productFamily = normalizeProductFamily(fields && (fields.productFamily || fields.product_family) || PRODUCT_FAMILY_FLUXNET);
     var sourceLabel = String(fields && (fields.sourceLabel || fields.source_label) || "").trim();
     var downloadMode = String(fields && (fields.downloadMode || fields.download_mode) || "").trim() || "direct";
     var apiDataProduct = normalizeDownloadProduct(fields && (fields.apiDataProduct || fields.api_data_product));
@@ -2246,7 +2473,7 @@
     var processingLineage = resolveProcessingLineage(fields || {});
 
     return {
-      productFamily: productFamily === PRODUCT_FAMILY_BASE ? PRODUCT_FAMILY_BASE : PRODUCT_FAMILY_FLUXNET,
+      productFamily: productFamily,
       processingLineage: processingLineage,
       source: sourceOrigin || resolveSourceOrigin(fields || {}),
       sourceLabel: sourceLabel,
@@ -2361,7 +2588,7 @@
       return null;
     }
     return buildSurfacedProductMetadata(Object.assign({}, row, {
-      productFamily: PRODUCT_FAMILY_FLUXNET,
+      productFamily: inferRowProductFamily(row),
       exactYears: resolveProcessedExactYears(row, availabilityLookups)
     }));
   }
@@ -2504,9 +2731,9 @@
     var mergedRows = (Array.isArray(shuttleRows) ? shuttleRows : []).map(function (row) {
       return Object.assign({}, row);
     });
-    var icosSites = (Array.isArray(icosDirectRows) ? icosDirectRows : []).map(function (row) {
+    var icosSites = dedupeIcosDirectRows((Array.isArray(icosDirectRows) ? icosDirectRows : []).map(function (row) {
       return Object.assign({}, row);
-    });
+    }));
     var japanFluxSites = (Array.isArray(japanFluxRows) ? japanFluxRows : []).map(function (row) {
       return Object.assign({}, row);
     });
@@ -2577,7 +2804,7 @@
         row.source_label = ICOS_DIRECT_SOURCE_ONLY;
       }
       if (!row.source_reason) {
-        row.source_reason = "Available directly from the ICOS Carbon Portal FLUXNET archive.";
+        row.source_reason = "Available directly from the ICOS Carbon Portal archive.";
       }
       if (!row.source_origin) {
         row.source_origin = ICOS_DIRECT_SOURCE_ORIGIN;
@@ -3245,11 +3472,18 @@
     var objectId = String(raw.object_id || "").trim();
     var fileName = String(raw.file_name || raw.filename || "").trim();
     var metadataUrl = String(raw.metadata_url || "").trim();
+    var latestVersionUrl = String(raw.latest_version_url || "").trim();
     var accessUrl = String(raw.access_url || "").trim();
+    var objectSpec = String(raw.object_spec || "").trim();
+    var project = String(raw.project || "").trim();
+    var coverageStart = String(raw.coverage_start || "").trim();
+    var coverageEnd = String(raw.coverage_end || "").trim();
+    var productionEnd = String(raw.production_end || "").trim();
     var citation = String(raw.citation || "").trim();
     var landingPageUrl = String(raw.landing_page_url || "").trim();
     var metadataId = String(raw.metadata_id || "").trim();
     var version = String(raw.version || "").trim();
+    var productFamily = String(raw.product_family || "").trim();
 
     if (!siteId || !hub || !downloadLink) {
       return null;
@@ -3279,12 +3513,19 @@
       source_reason: sourceReason,
       source_origin: sourceOrigin,
       source_priority: sourcePriority,
+      product_family: productFamily,
       api_data_product: apiDataProduct,
       object_id: objectId,
       file_name: fileName,
       direct_download_url: directDownloadUrl,
       metadata_url: metadataUrl,
+      latest_version_url: latestVersionUrl,
       access_url: accessUrl,
+      object_spec: objectSpec,
+      project: project,
+      coverage_start: coverageStart,
+      coverage_end: coverageEnd,
+      production_end: productionEnd,
       citation: citation,
       landing_page_url: landingPageUrl,
       metadata_id: metadataId,

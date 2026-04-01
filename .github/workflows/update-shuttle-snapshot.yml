@@ -108,7 +108,7 @@ jobs:
             --snapshot-updated-at "${SNAPSHOT_UPDATED_AT}" \
             --snapshot-updated-date "${SNAPSHOT_UPDATED_DATE}"
 
-      - name: Refresh ICOS-direct FLUXNET snapshot
+      - name: Refresh ICOS-direct archive snapshot
         env:
           TARGET_SNAPSHOT_CSV: assets/shuttle_snapshot.csv
           TARGET_ICOS_DIRECT_CSV: assets/icos_direct_fluxnet.csv

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Refresh a cached ICOS-direct FLUXNET snapshot for the FLUXNET Data Explorer."""
+"""Refresh a cached ICOS-direct archive snapshot for the FLUXNET Data Explorer."""
 
 from __future__ import annotations
 
@@ -21,12 +21,22 @@ from urllib.request import Request, urlopen
 SPARQL_ENDPOINT = "https://meta.icos-cp.eu/sparql"
 OBJECT_METADATA_BASE_URL = "https://meta.icos-cp.eu/objects/"
 PROJECT_FLUXNET = "http://meta.icos-cp.eu/resources/projects/FLUXNET"
+PROJECT_ICOS = "http://meta.icos-cp.eu/resources/projects/icos"
 ARCHIVE_SPEC_URI = "http://meta.icos-cp.eu/resources/cpmeta/miscFluxnetArchiveProduct"
 PRODUCT_SPEC_URI = "http://meta.icos-cp.eu/resources/cpmeta/miscFluxnetProduct"
+ETC_ARCHIVE_SPEC_URI = "http://meta.icos-cp.eu/resources/cpmeta/etcArchiveProduct"
 ICOS_SOURCE = "ICOS"
 ICOS_SOURCE_ORIGIN = "icos_direct"
 ICOS_SOURCE_PRIORITY = 300
 PROCESSING_LINEAGE_ONEFLUX = "oneflux"
+PROCESSING_LINEAGE_OTHER = "other_processed"
+PRODUCT_FAMILY_CLASSIC = "classic_fluxnet_archive"
+PRODUCT_FAMILY_ETC = "etc_l2_archive"
+PRODUCT_FAMILY_OTHER = "other"
+ICOS_DIRECT_SOURCE_REASON = (
+    "Discovered directly from ICOS Carbon Portal archive metadata. "
+    "Rows are selected per site before object metadata hydration."
+)
 DEFAULT_TIMEOUT_SECONDS = 60
 DEFAULT_RETRIES = 5
 DEFAULT_RETRY_DELAY_SECONDS = 2.0
@@ -87,6 +97,7 @@ OUTPUT_COLUMNS: Sequence[str] = (
     "file_name",
     "direct_download_url",
     "metadata_url",
+    "latest_version_url",
     "access_url",
     "object_spec",
     "project",
@@ -110,7 +121,7 @@ prefix prov: <http://www.w3.org/ns/prov#>
 prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#>
 """
 
-SPARQL_DISCOVERY_QUERY = f"""
+SPARQL_CLASSIC_DISCOVERY_QUERY = f"""
 {SPARQL_PREFIXES}
 select ?obj ?name ?spec ?project ?stationId
 where {{
@@ -123,8 +134,28 @@ where {{
 
   FILTER(?project = <{PROJECT_FLUXNET}>)
   FILTER(?spec IN (<{ARCHIVE_SPEC_URI}>, <{PRODUCT_SPEC_URI}>))
-  FILTER(STRSTARTS(STR(?name), "FLX_"))
-  FILTER(CONTAINS(STR(?name), "FLUXNET"))
+  FILTER(
+    STRSTARTS(STR(?name), "FLX_")
+    || CONTAINS(UCASE(STR(?name)), "FLUXNET2015_FULLSET")
+    || CONTAINS(UCASE(STR(?name)), "_FLUXNET_")
+  )
+  FILTER(STRENDS(LCASE(STR(?name)), ".zip"))
+}}
+order by ?stationId ?name ?obj
+"""
+
+SPARQL_ETC_DISCOVERY_QUERY = f"""
+{SPARQL_PREFIXES}
+select ?obj ?name ?spec ?project ?stationId
+where {{
+  ?obj cpmeta:hasObjectSpec ?spec ;
+       cpmeta:hasName ?name ;
+       cpmeta:wasAcquiredBy ?acq .
+  OPTIONAL {{ ?spec cpmeta:hasAssociatedProject ?project . }}
+  ?acq prov:wasAssociatedWith ?station .
+  ?station cpmeta:hasStationId ?stationId .
+
+  FILTER(?spec = <{ETC_ARCHIVE_SPEC_URI}>)
   FILTER(STRENDS(LCASE(STR(?name)), ".zip"))
 }}
 order by ?stationId ?name ?obj
@@ -300,7 +331,69 @@ def is_resolution_product(file_name: str) -> bool:
     return upper.endswith(".CSV.ZIP") or bool(RESOLUTION_PRODUCT_RE.search(upper))
 
 
+def upper_text(value: Any) -> str:
+    return str(value or "").strip().upper()
+
+
+def normalize_url_reference(value: Any) -> str:
+    return str(value or "").strip().rstrip("/")
+
+
+def parse_bool(value: Any) -> Optional[bool]:
+    if isinstance(value, bool):
+        return value
+    raw = str(value or "").strip().lower()
+    if not raw:
+        return None
+    if raw in {"1", "true", "yes"}:
+        return True
+    if raw in {"0", "false", "no"}:
+        return False
+    return None
+
+
+def classify_product_family(candidate: Dict[str, Any]) -> str:
+    file_name_upper = upper_text(candidate.get("file_name"))
+    title_upper = upper_text(candidate.get("title"))
+    spec_label_upper = upper_text(candidate.get("object_spec_label"))
+    spec_uri = str(candidate.get("object_spec") or "").strip()
+    project_uri = str(candidate.get("project") or "").strip()
+
+    if (
+        spec_uri == ETC_ARCHIVE_SPEC_URI
+        or "ETC L2 ARCHIVE" in spec_label_upper
+        or "ETC L2 ARCHIVE" in title_upper
+        or file_name_upper.startswith("ICOSETC_")
+        or "ARCHIVE_L2" in file_name_upper
+    ):
+        return PRODUCT_FAMILY_ETC
+
+    if (
+        project_uri == PROJECT_FLUXNET
+        or spec_uri in {ARCHIVE_SPEC_URI, PRODUCT_SPEC_URI}
+        or file_name_upper.startswith("FLX_")
+        or "FLUXNET2015_FULLSET" in file_name_upper
+        or "_FLUXNET_" in file_name_upper
+        or "FLUXNET" in title_upper
+    ):
+        return PRODUCT_FAMILY_CLASSIC
+
+    return PRODUCT_FAMILY_OTHER
+
+
+def processing_lineage_for_candidate(candidate: Dict[str, Any]) -> str:
+    return PROCESSING_LINEAGE_OTHER if classify_product_family(candidate) == PRODUCT_FAMILY_ETC else PROCESSING_LINEAGE_ONEFLUX
+
+
+def network_for_candidate(candidate: Dict[str, Any], site_id: str, file_name: str) -> str:
+    if classify_product_family(candidate) == PRODUCT_FAMILY_ETC:
+        return ICOS_SOURCE
+    return parse_network_prefix(file_name, site_id)
+
+
 def is_preferred_archive_candidate(candidate: Dict[str, Any]) -> bool:
+    if classify_product_family(candidate) != PRODUCT_FAMILY_CLASSIC:
+        return False
     file_name = str(candidate.get("file_name") or "")
     upper = file_name.upper()
     if candidate.get("object_spec") == ARCHIVE_SPEC_URI:
@@ -345,15 +438,41 @@ def coverage_rank(candidate: Dict[str, Any]) -> Tuple[int, int, int]:
 
 def canonical_name_bonus(candidate: Dict[str, Any]) -> Tuple[int, int]:
     upper = str(candidate.get("file_name") or "").upper()
+    family = classify_product_family(candidate)
+    if family == PRODUCT_FAMILY_ETC:
+        return (
+            1 if upper.startswith("ICOSETC_") else 0,
+            1 if "ARCHIVE_L2" in upper else 0,
+        )
     return (
         1 if upper.startswith("FLX_") else 0,
         1 if "FULLSET" in upper else 0,
     )
 
 
+def family_rank(candidate: Dict[str, Any]) -> int:
+    family = classify_product_family(candidate)
+    if family == PRODUCT_FAMILY_CLASSIC:
+        return 2
+    if family == PRODUCT_FAMILY_ETC:
+        return 1
+    return 0
+
+
+def metadata_version_rank(candidate: Dict[str, Any]) -> Tuple[int, int]:
+    metadata_url = normalize_url_reference(candidate.get("metadata_url"))
+    latest_version_url = normalize_url_reference(candidate.get("latest_version_url"))
+    deprecated_flag = parse_bool(candidate.get("deprecated"))
+    is_latest = bool(metadata_url and latest_version_url and metadata_url == latest_version_url)
+    not_deprecated = deprecated_flag is False
+    return (1 if is_latest else 0, 1 if not_deprecated else 0)
+
+
 def compare_candidates(left: Dict[str, Any], right: Dict[str, Any]) -> int:
     ranked_pairs = (
+        (family_rank(left), family_rank(right)),
         (1 if is_preferred_archive_candidate(left) else 0, 1 if is_preferred_archive_candidate(right) else 0),
+        (metadata_version_rank(left), metadata_version_rank(right)),
         (parse_version_rank(str(left.get("file_name") or "")), parse_version_rank(str(right.get("file_name") or ""))),
         (coverage_rank(left), coverage_rank(right)),
         (canonical_name_bonus(left), canonical_name_bonus(right)),
@@ -408,6 +527,27 @@ def dedupe_candidates(candidates: Iterable[Dict[str, Any]]) -> List[Dict[str, An
         if best is not None:
             chosen.append(best)
     return chosen
+
+
+def shortlist_candidates_for_hydration(candidates: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    grouped: Dict[str, List[Dict[str, Any]]] = {}
+    for candidate in candidates:
+        site_id = str(candidate.get("site_id") or "").strip()
+        if not site_id:
+            continue
+        grouped.setdefault(site_id, []).append(candidate)
+
+    shortlisted: List[Dict[str, Any]] = []
+    for site_id in sorted(grouped):
+        site_candidates = grouped[site_id]
+        classic_candidates = [candidate for candidate in site_candidates if classify_product_family(candidate) == PRODUCT_FAMILY_CLASSIC]
+        if classic_candidates:
+            preferred_archives = [candidate for candidate in classic_candidates if is_preferred_archive_candidate(candidate)]
+            shortlisted.extend(preferred_archives or classic_candidates)
+            continue
+        etc_candidates = [candidate for candidate in site_candidates if classify_product_family(candidate) == PRODUCT_FAMILY_ETC]
+        shortlisted.extend(etc_candidates or site_candidates)
+    return shortlisted
 
 
 def normalize_csv_value(value: Any) -> str:
@@ -506,16 +646,15 @@ def build_candidate(binding: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         return None
 
     first_year, last_year = parse_year_range(file_name, "", "")
-    network = parse_network_prefix(file_name, site_id)
     direct_download_url = build_direct_download_url(object_id, file_name)
 
-    return {
+    candidate = {
         "site_id": site_id,
         "site_name": site_id,
         "country": "",
         "data_hub": ICOS_SOURCE,
-        "network": network,
-        "source_network": network,
+        "network": "",
+        "source_network": "",
         "processing_lineage": PROCESSING_LINEAGE_ONEFLUX,
         "vegetation_type": "",
         "first_year": first_year,
@@ -526,10 +665,7 @@ def build_candidate(binding: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         "download_mode": "direct",
         "source": ICOS_SOURCE,
         "source_label": ICOS_SOURCE,
-        "source_reason": (
-            "Discovered directly from ICOS Carbon Portal FLUXNET metadata. "
-            "Rows are selected per site before object metadata hydration."
-        ),
+        "source_reason": ICOS_DIRECT_SOURCE_REASON,
         "source_priority": ICOS_SOURCE_PRIORITY,
         "source_origin": ICOS_SOURCE_ORIGIN,
         "object_id": object_id,
@@ -543,7 +679,18 @@ def build_candidate(binding: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         "coverage_end": "",
         "production_end": "",
         "citation": "",
+        "title": "",
+        "object_spec_label": "",
+        "latest_version_url": "",
+        "previous_version_url": "",
+        "next_version_url": "",
+        "deprecated": None,
     }
+    network = network_for_candidate(candidate, site_id, file_name)
+    candidate["network"] = network
+    candidate["source_network"] = network
+    candidate["processing_lineage"] = processing_lineage_for_candidate(candidate)
+    return candidate
 
 
 def first_present_nested(mapping: Any, *path: str) -> str:
@@ -610,11 +757,32 @@ def hydrate_candidate_from_metadata(
     coverage_start = first_present(interval, "start")
     coverage_end = first_present(interval, "stop")
     first_year, last_year = parse_year_range(file_name, coverage_start, coverage_end)
-    network = parse_network_prefix(file_name, site_id)
     direct_download_url = build_direct_download_url(object_id, file_name)
     metadata_url = first_present(candidate, "metadata_url") or f"{OBJECT_METADATA_BASE_URL}{object_id}"
+    spec_uri = first_present_nested(specification, "self", "uri") or str(candidate.get("object_spec") or "")
+    project_uri = first_present_nested(specification, "project", "self", "uri") or str(candidate.get("project") or "")
+    references_title = first_present(references, "title") or str(candidate.get("title") or "")
 
     row = dict(candidate)
+    row.update(
+        {
+            "file_name": file_name,
+            "metadata_url": metadata_url,
+            "object_spec": spec_uri,
+            "project": project_uri,
+            "title": references_title,
+            "object_spec_label": first_present_nested(specification, "self", "label")
+            or str(candidate.get("object_spec_label") or ""),
+            "latest_version_url": first_present(metadata, "latestVersion")
+            or str(candidate.get("latest_version_url") or ""),
+            "previous_version_url": first_present(metadata, "previousVersion")
+            or str(candidate.get("previous_version_url") or ""),
+            "next_version_url": first_present(metadata, "nextVersion")
+            or str(candidate.get("next_version_url") or ""),
+            "deprecated": metadata.get("deprecated", candidate.get("deprecated")),
+        }
+    )
+    network = network_for_candidate(row, site_id, file_name)
     row.update(
         {
             "site_id": site_id,
@@ -625,6 +793,7 @@ def hydrate_candidate_from_metadata(
             "country": first_present(station, "countryCode") or str(candidate.get("country") or ""),
             "network": network or str(candidate.get("network") or ""),
             "source_network": network or str(candidate.get("source_network") or ""),
+            "processing_lineage": processing_lineage_for_candidate(row),
             "vegetation_type": first_present(ecosystem, "label") or str(candidate.get("vegetation_type") or ""),
             "first_year": first_year,
             "last_year": last_year,
@@ -636,8 +805,8 @@ def hydrate_candidate_from_metadata(
             "direct_download_url": direct_download_url,
             "metadata_url": metadata_url,
             "access_url": first_present(metadata, "accessUrl") or str(candidate.get("access_url") or ""),
-            "object_spec": first_present_nested(specification, "self", "uri") or str(candidate.get("object_spec") or ""),
-            "project": first_present_nested(specification, "project", "self", "uri") or str(candidate.get("project") or ""),
+            "object_spec": spec_uri,
+            "project": project_uri,
             "coverage_start": coverage_start,
             "coverage_end": coverage_end,
             "production_end": first_present(submission, "stop"),
@@ -667,22 +836,29 @@ def fetch_candidates(timeout: int, retries: int, retry_delay: float) -> Tuple[Li
     # Root cause: a DOI/DataCite-based discovery path only covered a subset of ICOS FLUXNET files,
     # which dropped valid sites like AT-Neu before normalization or deduplication. Discovery now
     # starts from the complete ICOS metadata graph, then chosen rows are hydrated via object JSON.
-    payload = sparql_post(SPARQL_DISCOVERY_QUERY, timeout, retries, retry_delay, label="discovery")
-    bindings = payload.get("results", {}).get("bindings", [])
-    print(f"ICOS discovery query rows: {len(bindings)}", flush=True)
+    discovery_queries = (
+        ("classic_fluxnet", SPARQL_CLASSIC_DISCOVERY_QUERY),
+        ("etc_l2_archive", SPARQL_ETC_DISCOVERY_QUERY),
+    )
 
     candidates: List[Dict[str, Any]] = []
+    total_bindings = 0
     seen_object_ids: set[str] = set()
-    for binding in bindings:
-        candidate = build_candidate(binding)
-        if candidate is None:
-            continue
-        object_id = str(candidate.get("object_id") or "")
-        if object_id in seen_object_ids:
-            continue
-        seen_object_ids.add(object_id)
-        candidates.append(candidate)
-    return candidates, len(bindings)
+    for label, query in discovery_queries:
+        payload = sparql_post(query, timeout, retries, retry_delay, label=label)
+        bindings = payload.get("results", {}).get("bindings", [])
+        total_bindings += len(bindings)
+        print(f"ICOS discovery query rows ({label}): {len(bindings)}", flush=True)
+        for binding in bindings:
+            candidate = build_candidate(binding)
+            if candidate is None:
+                continue
+            object_id = str(candidate.get("object_id") or "")
+            if object_id in seen_object_ids:
+                continue
+            seen_object_ids.add(object_id)
+            candidates.append(candidate)
+    return candidates, total_bindings
 
 
 def print_expected_site_stage(stage_label: str, site_ids: Iterable[str]) -> List[str]:
@@ -723,19 +899,22 @@ def main() -> None:
         raw_candidates,
         key=lambda row: (str(row.get("site_id") or ""), str(row.get("file_name") or ""), str(row.get("object_id") or "")),
     )
-    deduped_rows = dedupe_candidates(normalized_candidates)
-    deduped_rows = hydrate_candidates(
-        deduped_rows,
+    shortlisted_candidates = shortlist_candidates_for_hydration(normalized_candidates)
+    hydrated_candidates = hydrate_candidates(
+        shortlisted_candidates,
         timeout=max(1, args.timeout),
         retries=max(1, args.retries),
         retry_delay=max(0.1, args.retry_delay),
     )
+    deduped_rows = dedupe_candidates(hydrated_candidates)
     deduped_rows = sorted(deduped_rows, key=lambda row: (str(row.get("site_id") or ""), str(row.get("file_name") or "")))
     final_icos_rows = [row for row in deduped_rows if str(row.get("site_id") or "") not in shuttle_site_ids]
     final_explorer_sources = build_final_explorer_sources(shuttle_site_ids, deduped_rows)
 
     fetched_site_ids = {str(row.get("site_id") or "") for row in raw_candidates}
     normalized_site_ids = {str(row.get("site_id") or "") for row in normalized_candidates}
+    shortlisted_site_ids = {str(row.get("site_id") or "") for row in shortlisted_candidates}
+    hydrated_site_ids = {str(row.get("site_id") or "") for row in hydrated_candidates}
     deduped_site_ids = {str(row.get("site_id") or "") for row in deduped_rows}
     final_icos_site_ids = {str(row.get("site_id") or "") for row in final_icos_rows}
 
@@ -745,6 +924,10 @@ def main() -> None:
     print(f"ICOS rows after normalization: {len(normalized_candidates)}", flush=True)
     print(f"ICOS unique site IDs after normalization: {len(normalized_site_ids)}", flush=True)
     print_expected_site_stage("After normalization", normalized_site_ids)
+    print(f"ICOS rows shortlisted for metadata hydration: {len(shortlisted_candidates)}", flush=True)
+    print_expected_site_stage("After hydration shortlist", shortlisted_site_ids)
+    print(f"ICOS rows after metadata hydration: {len(hydrated_candidates)}", flush=True)
+    print_expected_site_stage("After metadata hydration", hydrated_site_ids)
     print(f"ICOS rows after per-site deduplication: {len(deduped_rows)}", flush=True)
     print_expected_site_stage("After deduplication", deduped_site_ids)
     print(f"ICOS rows after Shuttle precedence suppression: {len(final_icos_rows)}", flush=True)
@@ -777,7 +960,8 @@ def main() -> None:
             "retained_rows_after_dedup": len(deduped_rows),
             "suppressed_by_shuttle": suppressed_by_shuttle,
             "final_rows_after_precedence": len(final_icos_rows),
-            "project": PROJECT_FLUXNET,
+            "projects": [PROJECT_FLUXNET, PROJECT_ICOS],
+            "product_families": [PRODUCT_FAMILY_CLASSIC, PRODUCT_FAMILY_ETC],
         },
         snapshot_updated_at=args.snapshot_updated_at,
         snapshot_updated_date=args.snapshot_updated_date,

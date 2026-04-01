@@ -35,6 +35,20 @@ class ProcessingLineageGenerationTests(unittest.TestCase):
         self.assertIsNotNone(row)
         self.assertEqual(row["processing_lineage"], "oneflux")
 
+    def test_icos_etc_rows_stamp_other_processed_lineage(self):
+        row = icos_module.build_candidate(
+            {
+                "obj": {"value": "https://meta.icos-cp.eu/objects/test-etc-object"},
+                "name": {"value": "ICOSETC_CH-Dav_ARCHIVE_L2.zip"},
+                "stationId": {"value": "CH-Dav"},
+                "spec": {"value": icos_module.ETC_ARCHIVE_SPEC_URI},
+                "project": {"value": icos_module.PROJECT_ICOS},
+            }
+        )
+
+        self.assertIsNotNone(row)
+        self.assertEqual(row["processing_lineage"], "other_processed")
+
     def test_japanflux_rows_stamp_other_processed_lineage(self):
         self.assertIn("processing_lineage", japan_module.OUTPUT_COLUMNS)
         self.assertEqual(

@@ -81,7 +81,7 @@ function makeCatalogRow(overrides) {
       download_mode: 'direct',
       processing_lineage: 'oneflux',
       source_label: 'ICOS',
-      source_reason: 'Available directly from the ICOS Carbon Portal FLUXNET archive.',
+      source_reason: 'Available directly from the ICOS Carbon Portal archive.',
       source_origin: 'icos_direct'
     },
     overrides || {}
@@ -263,12 +263,38 @@ test('Merge precedence is Shuttle > ICOS > AmeriFlux > FLUXNET2015 with no dupli
       years: '2012-2014',
       download_link: 'https://data.icos-cp.eu/licence_accept?ids=%5B%22obj-ar-bal%22%5D&fileName=FLX_AR-Bal_FLUXNET2015_FULLSET_2012-2014_beta-3.zip',
       download_mode: 'direct',
+      processing_lineage: 'oneflux',
       source_label: 'ICOS',
-      source_reason: 'Available directly from the ICOS Carbon Portal FLUXNET archive.',
+      source_reason: 'Available directly from the ICOS Carbon Portal archive.',
       source_origin: 'icos_direct',
       object_id: 'obj-ar-bal',
       file_name: 'FLX_AR-Bal_FLUXNET2015_FULLSET_2012-2014_beta-3.zip',
+      object_spec: 'http://meta.icos-cp.eu/resources/cpmeta/miscFluxnetArchiveProduct',
       direct_download_url: 'https://data.icos-cp.eu/licence_accept?ids=%5B%22obj-ar-bal%22%5D&fileName=FLX_AR-Bal_FLUXNET2015_FULLSET_2012-2014_beta-3.zip'
+    },
+    {
+      site_id: 'AR-Bal',
+      site_name: 'Arroyo ICOS ETC',
+      country: 'AR',
+      data_hub: 'ICOS',
+      network: 'ICOS',
+      source_network: 'ICOS',
+      network_display: 'ICOS',
+      network_tokens: ['ICOS'],
+      vegetation_type: '',
+      first_year: 2021,
+      last_year: 2024,
+      years: '2021-2024',
+      download_link: 'https://data.icos-cp.eu/licence_accept?ids=%5B%22obj-ar-bal-etc%22%5D&fileName=ICOSETC_AR-Bal_ARCHIVE_L2.zip',
+      download_mode: 'direct',
+      processing_lineage: 'other_processed',
+      source_label: 'ICOS',
+      source_reason: 'Available directly from the ICOS Carbon Portal archive.',
+      source_origin: 'icos_direct',
+      object_id: 'obj-ar-bal-etc',
+      file_name: 'ICOSETC_AR-Bal_ARCHIVE_L2.zip',
+      object_spec: 'http://meta.icos-cp.eu/resources/cpmeta/etcArchiveProduct',
+      direct_download_url: 'https://data.icos-cp.eu/licence_accept?ids=%5B%22obj-ar-bal-etc%22%5D&fileName=ICOSETC_AR-Bal_ARCHIVE_L2.zip'
     },
     {
       site_id: 'BE-Bra',
@@ -285,12 +311,38 @@ test('Merge precedence is Shuttle > ICOS > AmeriFlux > FLUXNET2015 with no dupli
       years: '1996-2020',
       download_link: 'https://data.icos-cp.eu/licence_accept?ids=%5B%225BCT4nKCoGaYQh77DW6OW7gs%22%5D&fileName=FLX_BE-Bra_FLUXNET2015_FULLSET_1996-2020_beta-3.zip',
       download_mode: 'direct',
+      processing_lineage: 'oneflux',
       source_label: 'ICOS',
-      source_reason: 'Available directly from the ICOS Carbon Portal FLUXNET archive.',
+      source_reason: 'Available directly from the ICOS Carbon Portal archive.',
       source_origin: 'icos_direct',
       object_id: '5BCT4nKCoGaYQh77DW6OW7gs',
       file_name: 'FLX_BE-Bra_FLUXNET2015_FULLSET_1996-2020_beta-3.zip',
+      object_spec: 'http://meta.icos-cp.eu/resources/cpmeta/miscFluxnetArchiveProduct',
       direct_download_url: 'https://data.icos-cp.eu/licence_accept?ids=%5B%225BCT4nKCoGaYQh77DW6OW7gs%22%5D&fileName=FLX_BE-Bra_FLUXNET2015_FULLSET_1996-2020_beta-3.zip'
+    },
+    {
+      site_id: 'BE-Bra',
+      site_name: 'Brasschaat ETC',
+      country: 'BE',
+      data_hub: 'ICOS',
+      network: 'ICOS',
+      source_network: 'ICOS',
+      network_display: 'ICOS',
+      network_tokens: ['ICOS'],
+      vegetation_type: '',
+      first_year: 2021,
+      last_year: 2024,
+      years: '2021-2024',
+      download_link: 'https://data.icos-cp.eu/licence_accept?ids=%5B%22obj-be-bra-etc%22%5D&fileName=ICOSETC_BE-Bra_ARCHIVE_L2.zip',
+      download_mode: 'direct',
+      processing_lineage: 'other_processed',
+      source_label: 'ICOS',
+      source_reason: 'Available directly from the ICOS Carbon Portal archive.',
+      source_origin: 'icos_direct',
+      object_id: 'obj-be-bra-etc',
+      file_name: 'ICOSETC_BE-Bra_ARCHIVE_L2.zip',
+      object_spec: 'http://meta.icos-cp.eu/resources/cpmeta/etcArchiveProduct',
+      direct_download_url: 'https://data.icos-cp.eu/licence_accept?ids=%5B%22obj-be-bra-etc%22%5D&fileName=ICOSETC_BE-Bra_ARCHIVE_L2.zip'
     }
   ];
 
@@ -364,6 +416,45 @@ test('Merge precedence is Shuttle > ICOS > AmeriFlux > FLUXNET2015 with no dupli
   assert.equal(shuttleAmeriFlux.network_display, 'AmeriFlux');
   assert.deepEqual(shuttleAmeriFlux.network_tokens, ['AmeriFlux']);
   assert.deepEqual(shuttleAmeriFlux.source_filter_tags, ['AmeriFlux', 'AmeriFlux-Shuttle', 'FLUXNET-Shuttle']);
+});
+
+test('ICOS ETC rows remain downloadable ICOS rows and surface as other processed', () => {
+  const merged = hooks.mergeCatalogRows(
+    [],
+    [
+      makeCatalogRow({
+        site_id: 'CH-Dav',
+        site_name: 'Davos',
+        country: 'CH',
+        network: 'ICOS',
+        source_network: 'ICOS',
+        network_display: 'ICOS',
+        network_tokens: ['ICOS'],
+        first_year: 2019,
+        last_year: 2023,
+        years: '2019-2023',
+        download_link: 'https://data.icos-cp.eu/licence_accept?ids=%5B%22obj-ch-dav%22%5D&fileName=ICOSETC_CH-Dav_ARCHIVE_L2.zip',
+        processing_lineage: 'other_processed',
+        file_name: 'ICOSETC_CH-Dav_ARCHIVE_L2.zip',
+        object_id: 'obj-ch-dav',
+        object_spec: 'http://meta.icos-cp.eu/resources/cpmeta/etcArchiveProduct',
+        direct_download_url: 'https://data.icos-cp.eu/licence_accept?ids=%5B%22obj-ch-dav%22%5D&fileName=ICOSETC_CH-Dav_ARCHIVE_L2.zip'
+      })
+    ],
+    [],
+    []
+  );
+  const row = merged.rows[0];
+  const option = hooks.buildRowDownloadOptions(row, true)[0];
+
+  assert.equal(row.source_label, 'ICOS');
+  assert.equal(row.download_mode, 'direct');
+  assert.equal(row.processing_lineage, 'other_processed');
+  assert.equal(row.product_family, 'ICOS_ETC');
+  assert.deepEqual(row.availability_filter_labels, ['Other processed']);
+  assert.deepEqual(row.source_filter_tags, ['ICOS']);
+  assert.equal(option.actionLabel, 'Accept ICOS license and download');
+  assert.equal(option.displayLabel, 'ICOS ETC L2 archive');
 });
 
 test('BASE-only sites surface BASE only and bulk helpers keep the BASE product', () => {
@@ -2398,7 +2489,7 @@ test('Data Notes box appears between the map and attribution sections with share
   assert.equal(explorerJs.includes('These notes highlight how the explorer labels datasets and how the bulk tools behave.'), true);
   assert.equal(explorerJs.includes('Use the Availability filter options [FLUXNET processed], [Other processed], and [Sites with both FLUXNET and additional processed years]'), true);
   assert.equal(explorerJs.includes('Choose the Source filter option [FLUXNET-Shuttle]'), true);
-  assert.equal(explorerJs.includes('The explorer includes both gap-filled and partitioned data [FLUXNET] and non-gap-filled, non-partitioned observations [BASE].'), true);
+  assert.equal(explorerJs.includes('The explorer includes both gap-filled and partitioned data [FLUXNET] and non-gap-filled, non-partitioned observations [e.g., AmeriFlux-BASE].'), true);
   assert.equal(explorerJs.includes('The bulk-download scripts may require users to install a jq package if neither jq nor python3 are already installed.'), true);
   assert.equal(explorerCss.includes('.shuttle-explorer__attribution ul {'), true);
   assert.equal(explorerCss.includes('.shuttle-explorer__attribution li + li {'), true);
