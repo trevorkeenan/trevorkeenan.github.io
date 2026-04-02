@@ -4081,17 +4081,6 @@
     return a._index - b._index;
   }
 
-  function formatHubCounts(rows) {
-    var counts = {};
-    rows.forEach(function (row) {
-      var hub = row.data_hub || "Unknown";
-      counts[hub] = (counts[hub] || 0) + 1;
-    });
-    return Object.keys(counts).sort().map(function (hub) {
-      return hub + ": " + counts[hub];
-    }).join(" | ");
-  }
-
   function buildAttributionText(snapshotUpdatedDate) {
     return "We appreciate acknowledgement of the QED FLUXNET Data Explorer when convenient. Available data is updated as of: " + snapshotUpdatedDateDisplayText(snapshotUpdatedDate) + ". Contact TF Keenan (trevorkeenan@berkeley.edu) with any questions or suggestions.";
   }
@@ -6927,10 +6916,9 @@
 
   Explorer.prototype.renderHubSummaryInStatus = function () {
     var total = this.state.rows.length;
-    var hubCounts = formatHubCounts(this.state.rows);
-    var msg = "Data is available for a total of " + total + " sites: " + hubCounts;
+    var msg = "Data is available for a total of " + total + " sites.";
     if (this.state.warning) {
-      msg += ". " + this.state.warning;
+      msg += " " + this.state.warning;
     }
     this.setMode("ready", msg, "is-ok");
   };
