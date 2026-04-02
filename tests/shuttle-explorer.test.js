@@ -1605,7 +1605,8 @@ test('EFD rows are only surfaced when no higher-precedence source already repres
   assert.equal(bySite['NO-Efd'].download_link, 'https://www.europe-fluxdata.eu/home/data/request-data');
   assert.equal(bySite['NO-Efd'].years, 'Request via EFD');
   assert.deepEqual(bySite['NO-Efd'].source_filter_tags, ['EFD']);
-  assert.deepEqual(bySite['NO-Efd'].availability_filter_labels, []);
+  assert.equal(bySite['NO-Efd'].surfacedProductClassification, 'other_processed');
+  assert.deepEqual(bySite['NO-Efd'].availability_filter_labels, ['Other processed']);
   assert.equal(bySite['DE-Dup'].source_label, '');
   assert.equal(bySite['FR-Dup'].source_label, 'ICOS');
   assert.equal(bySite['JP-Dup'].source_label, 'JapanFlux');
@@ -1634,13 +1635,22 @@ test('EFD rows render request-only actions and stay out of direct bulk downloads
   assert.match(option.title, /Login is required/);
 });
 
-test('EFD rows participate in source filtering without contaminating availability filtering', () => {
+test('EFD rows classify as other processed without being mislabeled as FLUXNET or BASE', () => {
   const row = hooks.mergeCatalogRows([], [], [], [], [], [], [makeEfdRow({ site_id: 'SE-Efd' })]).rows[0];
 
+  assert.equal(row.source_label, 'EFD');
+  assert.equal(row.surfacedProductClassification, 'other_processed');
+  assert.equal(row.hasFluxnetAvailable, false);
+  assert.deepEqual(row.availability_filter_labels, ['Other processed']);
+  assert.deepEqual(hooks.uniqueAvailabilityFilterValues([row]), ['Other processed']);
   assert.equal(hooks.rowMatchesExplorerFilters(row, { selectedSource: 'EFD' }), true);
   assert.equal(hooks.rowMatchesExplorerFilters(row, { selectedSource: 'ICOS' }), false);
   assert.equal(hooks.rowMatchesExplorerFilters(row, { selectedAvailability: 'FLUXNET processed' }), false);
-  assert.equal(hooks.rowMatchesExplorerFilters(row, { selectedAvailability: 'Other processed' }), false);
+  assert.equal(hooks.rowMatchesExplorerFilters(row, { selectedAvailability: 'Other processed' }), true);
+  assert.equal(hooks.getSurfacedProductsForRow(row).length, 0);
+  assert.equal(hooks.renderSurfacedCoverageHtml(row), 'Request via EFD');
+  assert.equal(hooks.renderSurfacedCoverageHtml(row).includes('BASE'), false);
+  assert.equal(hooks.renderSurfacedCoverageHtml(row).includes('FLUXNET'), false);
 });
 
 test('FLUXNET2015 supplemental rows infer regional networks from country while retaining FLUXNET-2015 source tags', () => {

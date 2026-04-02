@@ -2768,6 +2768,12 @@
     var unionYears = buildSurfacedYearUnion(products);
     var rowClassification = String(classification || "").trim() || classifySurfacedProducts(products);
 
+    if (!rowClassification && isEfdSourceRow(row)) {
+      // EFD rows are request-only discovery records, but they still belong in the
+      // non-FLUXNET "Other processed" availability bucket.
+      rowClassification = SURFACED_CLASSIFICATION_OTHER_PROCESSED;
+    }
+
     row.primaryProcessedProduct = primaryProcessedProduct || null;
     row.ameriFluxBaseProduct = ameriFluxBaseProduct || null;
     row.surfacedProducts = products;
