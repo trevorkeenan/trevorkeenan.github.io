@@ -1596,7 +1596,7 @@ test('Explorer summary copy refers to sites rather than records', () => {
   assert.equal(explorerJs.includes('Showing " + filtered + " of " + total + " records.'), false);
 });
 
-test('FLUXNET processed matches ONEFlux-only rows, while hybrid and other-processed rows use their own availability labels', () => {
+test('FLUXNET processed includes both ONEFlux-only and hybrid rows, while other availability labels stay specific', () => {
   const merged = hooks.mergeCatalogRows(
     [],
     [
@@ -1631,10 +1631,12 @@ test('FLUXNET processed matches ONEFlux-only rows, while hybrid and other-proces
   const bySite = Object.fromEntries(merged.rows.map((row) => [row.site_id, row]));
 
   assert.equal(hooks.rowMatchesExplorerFilters(bySite['US-Pro'], { selectedAvailability: 'FLUXNET processed' }), true);
-  assert.equal(hooks.rowMatchesExplorerFilters(bySite['US-Add'], { selectedAvailability: 'FLUXNET processed' }), false);
+  assert.equal(hooks.rowMatchesExplorerFilters(bySite['US-Add'], { selectedAvailability: 'FLUXNET processed' }), true);
   assert.equal(hooks.rowMatchesExplorerFilters(bySite['US-Base'], { selectedAvailability: 'FLUXNET processed' }), false);
   assert.equal(hooks.rowMatchesExplorerFilters(bySite['US-Add'], { selectedAvailability: 'Sites with both FLUXNET and additional processed years' }), true);
+  assert.equal(hooks.rowMatchesExplorerFilters(bySite['US-Pro'], { selectedAvailability: 'Sites with both FLUXNET and additional processed years' }), false);
   assert.equal(hooks.rowMatchesExplorerFilters(bySite['US-Base'], { selectedAvailability: 'Other processed' }), true);
+  assert.equal(hooks.rowMatchesExplorerFilters(bySite['US-Add'], { selectedAvailability: 'Other processed' }), false);
   assert.equal(bySite['US-Pro'].surfacedProductClassification, 'fluxnet_processed');
   assert.equal(bySite['US-Add'].surfacedProductClassification, 'fluxnet_and_other_processed');
   assert.equal(bySite['US-Base'].surfacedProductClassification, 'other_processed');
@@ -1683,7 +1685,7 @@ test('Source and Availability filters compose for AmeriFlux provenance with FLUX
     .map((row) => row.site_id)
     .sort();
 
-  assert.deepEqual(matchingSiteIds, ['US-Pro']);
+  assert.deepEqual(matchingSiteIds, ['US-Add', 'US-Pro']);
 });
 
 test('Hybrid availability filter isolates sites with FLUXNET and additional processed years', () => {

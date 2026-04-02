@@ -1494,11 +1494,24 @@
     });
   }
 
+  function hasFluxnetAvailability(row) {
+    var classification = String(row && row.surfacedProductClassification || "").trim();
+    if (typeof (row && row.hasFluxnetAvailable) === "boolean") {
+      return row.hasFluxnetAvailable;
+    }
+    return classification === SURFACED_CLASSIFICATION_FLUXNET_PROCESSED ||
+      classification === SURFACED_CLASSIFICATION_FLUXNET_AND_OTHER;
+  }
+
   function availabilityFilterMatches(row, selectedAvailability) {
-    if (!selectedAvailability) {
+    var selected = String(selectedAvailability || "").trim();
+    if (!selected) {
       return true;
     }
-    return availabilityFilterLabels(row).indexOf(String(selectedAvailability || "").trim()) !== -1;
+    if (selected === FILTER_LABEL_FLUXNET_PROCESSED) {
+      return hasFluxnetAvailability(row);
+    }
+    return availabilityFilterLabels(row).indexOf(selected) !== -1;
   }
 
   function rowMatchesExplorerFilters(row, filters) {
