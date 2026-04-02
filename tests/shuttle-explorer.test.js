@@ -114,6 +114,35 @@ function makeJapanFluxRow(overrides) {
   ));
 }
 
+function makeEfdRow(overrides) {
+  return makeCatalogRow(Object.assign(
+    {
+      site_id: 'DE-Efd',
+      site_name: 'EFD Site',
+      country: 'DE',
+      data_hub: 'EFD',
+      network: 'EuroFlux;ICOS',
+      source_network: 'EuroFlux;ICOS',
+      network_display: 'EuroFlux;ICOS',
+      network_tokens: ['EuroFlux', 'ICOS'],
+      vegetation_type: 'ENF',
+      first_year: null,
+      last_year: null,
+      years: 'Request via EFD',
+      download_link: 'https://www.europe-fluxdata.eu/home/data/request-data',
+      download_mode: 'request_page',
+      processing_lineage: '',
+      source_label: 'EFD',
+      source_reason: 'Listed in the public European Fluxes Database site catalog. Access is request-based via EFD login; some data may require PI approval and download links are emailed after request submission.',
+      source_origin: 'efd',
+      flux_list: 'CO2-E; LE-E',
+      access_label: 'Public; Private',
+      data_use_label: 'Open; Close'
+    },
+    overrides || {}
+  ));
+}
+
 function makeAvailabilitySite(siteId, publishYears, overrides) {
   const years = Array.isArray(publishYears) ? publishYears.slice() : [];
   const normalizedYears = years.slice().sort((a, b) => a - b);
@@ -208,7 +237,8 @@ test('Explorer default snapshot JSON files exist and are loadable by the current
   const expectedJsonFiles = [
     'assets/shuttle_snapshot.json',
     'assets/icos_direct_fluxnet.json',
-    'assets/japanflux_direct_snapshot.json'
+    'assets/japanflux_direct_snapshot.json',
+    'assets/efd_sites_snapshot.json'
   ];
 
   expectedJsonFiles.forEach((relativePath) => {
@@ -1178,6 +1208,7 @@ test('Source filter options expose the full overlapping source tag list while av
     { source_filter_tags: ['AmeriFlux'] },
     { source_filter_tags: ['AmeriFlux', 'AmeriFlux-Shuttle', 'FLUXNET-Shuttle'] },
     { source_filter_tags: ['ChinaFlux', 'FLUXNET-2015'] },
+    { source_filter_tags: ['EFD'] },
     { source_filter_tags: ['FLUXNET-2015'] },
     { source_filter_tags: ['ICOS'] },
     { source_filter_tags: ['JapanFlux'] },
@@ -1201,6 +1232,7 @@ test('Source filter options expose the full overlapping source tag list while av
     'AmeriFlux',
     'AmeriFlux-Shuttle',
     'ChinaFlux',
+    'EFD',
     'FLUXNET-2015',
     'FLUXNET-Shuttle',
     'ICOS',
@@ -1448,6 +1480,14 @@ test('Explicit processing_lineage wins over legacy source fallback, and missing 
     }),
     'other_processed'
   );
+  assert.equal(
+    hooks.resolveProcessingLineage({
+      source_label: 'EFD',
+      source_origin: 'efd',
+      download_mode: 'request_page'
+    }),
+    ''
+  );
 });
 
 test('JapanFlux landing-page rows stay out of direct bulk downloads and keep explicit row actions', () => {
@@ -1518,6 +1558,89 @@ test('JapanFlux direct ZIP rows participate in direct bulk downloads', () => {
   assert.deepEqual(partition.manualLandingPageRows, []);
   assert.equal(option.displayLabel, 'JapanFlux2024');
   assert.equal(option.actionLabel, 'Download');
+});
+
+test('EFD rows are only surfaced when no higher-precedence source already represents the site', () => {
+  const merged = hooks.mergeCatalogRows(
+    [
+      makeCatalogRow({ site_id: 'DE-Dup', source_origin: 'shuttle', source_label: '', source_reason: '' })
+    ],
+    [
+      makeCatalogRow({
+        site_id: 'FR-Dup',
+        data_hub: 'ICOS',
+        source_label: 'ICOS',
+        source_origin: 'icos_direct'
+      })
+    ],
+    [
+      makeJapanFluxRow({ site_id: 'JP-Dup' })
+    ],
+    [
+      makeAvailabilitySite('US-Dup', [2019], { site_name: 'Ameri Duplicate', country: 'US' })
+    ],
+    [
+      makeAvailabilitySite('CL-Dup', [2005], { site_name: 'Legacy Duplicate', country: 'CL' })
+    ],
+    [
+      makeAvailabilitySite('FI-Dup', [2010], { site_name: 'BASE Duplicate', country: 'FI' })
+    ],
+    [
+      makeEfdRow({ site_id: 'DE-Dup', site_name: 'Suppressed by Shuttle' }),
+      makeEfdRow({ site_id: 'FR-Dup', site_name: 'Suppressed by ICOS' }),
+      makeEfdRow({ site_id: 'JP-Dup', site_name: 'Suppressed by JapanFlux' }),
+      makeEfdRow({ site_id: 'US-Dup', site_name: 'Suppressed by AmeriFlux' }),
+      makeEfdRow({ site_id: 'CL-Dup', site_name: 'Suppressed by FLUXNET2015' }),
+      makeEfdRow({ site_id: 'FI-Dup', site_name: 'Suppressed by BASE' }),
+      makeEfdRow({ site_id: 'NO-Efd', site_name: 'Norway Request Site', network: 'EuroFlux', source_network: 'EuroFlux', network_display: 'EuroFlux', network_tokens: ['EuroFlux'] })
+    ]
+  );
+  const bySite = Object.fromEntries(merged.rows.map((row) => [row.site_id, row]));
+
+  assert.equal(merged.efdTotalSites, 7);
+  assert.equal(merged.efdSuppressedByHigherPrecedence, 6);
+  assert.equal(merged.efdOnlySites, 1);
+  assert.equal(bySite['NO-Efd'].source_label, 'EFD');
+  assert.equal(bySite['NO-Efd'].download_mode, 'request_page');
+  assert.equal(bySite['NO-Efd'].download_link, 'https://www.europe-fluxdata.eu/home/data/request-data');
+  assert.equal(bySite['NO-Efd'].years, 'Request via EFD');
+  assert.deepEqual(bySite['NO-Efd'].source_filter_tags, ['EFD']);
+  assert.deepEqual(bySite['NO-Efd'].availability_filter_labels, []);
+  assert.equal(bySite['DE-Dup'].source_label, '');
+  assert.equal(bySite['FR-Dup'].source_label, 'ICOS');
+  assert.equal(bySite['JP-Dup'].source_label, 'JapanFlux');
+  assert.equal(bySite['US-Dup'].source_label, 'AmeriFlux');
+  assert.equal(bySite['CL-Dup'].source_label, 'FLUXNET2015');
+  assert.equal(bySite['FI-Dup'].source_label, 'BASE');
+});
+
+test('EFD rows render request-only actions and stay out of direct bulk downloads', () => {
+  const row = makeEfdRow();
+  const partition = hooks.partitionRowsByBulkSource([row]);
+  const summary = hooks.summarizeBulkSelection([row]);
+  const option = hooks.buildRowDownloadOptions(row, true)[0];
+
+  assert.deepEqual(partition.shuttleRows, []);
+  assert.deepEqual(partition.shuttleDownloadRows, []);
+  assert.deepEqual(partition.manualLandingPageRows, []);
+  assert.deepEqual(partition.requestOnlyRows.map((item) => item.site_id || item.siteId), ['DE-Efd']);
+  assert.deepEqual(partition.ameriFluxRows, []);
+  assert.equal(summary.showAllSelectedActions, false);
+  assert.equal(summary.showShuttleSection, false);
+  assert.equal(summary.showAmeriFluxSection, false);
+  assert.equal(summary.requestOnlyCount, 1);
+  assert.equal(option.actionLabel, 'Request at EFD');
+  assert.equal(option.downloadLink, 'https://www.europe-fluxdata.eu/home/data/request-data');
+  assert.match(option.title, /Login is required/);
+});
+
+test('EFD rows participate in source filtering without contaminating availability filtering', () => {
+  const row = hooks.mergeCatalogRows([], [], [], [], [], [], [makeEfdRow({ site_id: 'SE-Efd' })]).rows[0];
+
+  assert.equal(hooks.rowMatchesExplorerFilters(row, { selectedSource: 'EFD' }), true);
+  assert.equal(hooks.rowMatchesExplorerFilters(row, { selectedSource: 'ICOS' }), false);
+  assert.equal(hooks.rowMatchesExplorerFilters(row, { selectedAvailability: 'FLUXNET processed' }), false);
+  assert.equal(hooks.rowMatchesExplorerFilters(row, { selectedAvailability: 'Other processed' }), false);
 });
 
 test('FLUXNET2015 supplemental rows infer regional networks from country while retaining FLUXNET-2015 source tags', () => {
@@ -2513,6 +2636,7 @@ test('Data Notes box appears between the map and attribution sections with share
   assert.equal(explorerJs.includes('These notes highlight how the explorer labels datasets and how the bulk tools behave.'), true);
   assert.equal(explorerJs.includes('Use the Availability filter options [FLUXNET processed], [Other processed], and [Sites with both FLUXNET and additional processed years]'), true);
   assert.equal(explorerJs.includes('Choose the Source filter option [FLUXNET-Shuttle]'), true);
+  assert.equal(explorerJs.includes('EFD records link to the European Fluxes Database request workflow.'), true);
   assert.equal(explorerJs.includes('The explorer includes both gap-filled and partitioned data [FLUXNET] and non-gap-filled, non-partitioned observations [e.g., AmeriFlux-BASE].'), true);
   assert.equal(explorerJs.includes('The bulk-download scripts may require users to install a jq package if neither jq nor python3 are already installed.'), true);
   assert.equal(explorerCss.includes('.shuttle-explorer__attribution ul {'), true);

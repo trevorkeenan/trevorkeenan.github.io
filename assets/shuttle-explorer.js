@@ -7,6 +7,8 @@
   var DEFAULT_ICOS_DIRECT_CSV_URL = "assets/icos_direct_fluxnet.csv";
   var DEFAULT_JAPANFLUX_DIRECT_JSON_URL = "assets/japanflux_direct_snapshot.json";
   var DEFAULT_JAPANFLUX_DIRECT_CSV_URL = "assets/japanflux_direct_snapshot.csv";
+  var DEFAULT_EFD_JSON_URL = "assets/efd_sites_snapshot.json";
+  var DEFAULT_EFD_CSV_URL = "assets/efd_sites_snapshot.csv";
   var AMERIFLUX_SITE_INFO_URL = "assets/ameriflux_site_info.csv";
   var FLUXNET2015_SITE_INFO_URL = "assets/siteinfo_fluxnet2015.csv";
   var SITE_NAME_METADATA_URL = "assets/site_name_metadata.csv";
@@ -15,8 +17,8 @@
   var MAX_PAGE_BUTTONS = 7;
   var SEARCH_DEBOUNCE_MS = 180;
   var STYLE_ID = "shuttle-explorer-inline-styles";
-  var SNAPSHOT_CACHE_SCHEMA_VERSION = 7;
-  var SNAPSHOT_CACHE_STORAGE_PREFIX = "shuttle-explorer:snapshot-cache:v7";
+  var SNAPSHOT_CACHE_SCHEMA_VERSION = 8;
+  var SNAPSHOT_CACHE_STORAGE_PREFIX = "shuttle-explorer:snapshot-cache:v8";
   var AMERIFLUX_FLUXNET_AVAILABILITY_URL = "https://amfcdn.lbl.gov/api/v2/data_availability/AmeriFlux/FLUXNET/CCBY4.0";
   var AMERIFLUX_BASE_AVAILABILITY_URL = "https://amfcdn.lbl.gov/api/v2/data_availability/AmeriFlux/BASE-BADM/CCBY4.0";
   var FLUXNET2015_AVAILABILITY_URL = "https://amfcdn.lbl.gov/api/v2/data_availability/FLUXNET/FLUXNET2015/CCBY4.0";
@@ -41,6 +43,7 @@
   var SOURCE_FILTER_TAG_AMERIFLUX = "AmeriFlux";
   var SOURCE_FILTER_TAG_AMERIFLUX_SHUTTLE = "AmeriFlux-Shuttle";
   var SOURCE_FILTER_TAG_CHINAFLUX = "ChinaFlux";
+  var SOURCE_FILTER_TAG_EFD = "EFD";
   var SOURCE_FILTER_TAG_FLUXNET_2015 = "FLUXNET-2015";
   var SOURCE_FILTER_TAG_FLUXNET_SHUTTLE = "FLUXNET-Shuttle";
   var SOURCE_FILTER_TAG_ICOS = "ICOS";
@@ -52,6 +55,7 @@
     SOURCE_FILTER_TAG_AMERIFLUX,
     SOURCE_FILTER_TAG_AMERIFLUX_SHUTTLE,
     SOURCE_FILTER_TAG_CHINAFLUX,
+    SOURCE_FILTER_TAG_EFD,
     SOURCE_FILTER_TAG_FLUXNET_2015,
     SOURCE_FILTER_TAG_FLUXNET_SHUTTLE,
     SOURCE_FILTER_TAG_ICOS,
@@ -89,16 +93,20 @@
   var SHUTTLE_SOURCE_ORIGIN = "shuttle";
   var ICOS_DIRECT_SOURCE_ORIGIN = "icos_direct";
   var JAPANFLUX_DIRECT_SOURCE_ORIGIN = "japanflux_direct";
+  var EFD_SOURCE_ORIGIN = "efd";
   var AMERIFLUX_API_SOURCE_ORIGIN = "ameriflux_api";
   var SHUTTLE_SOURCE_PRIORITY = 400;
   var ICOS_DIRECT_SOURCE_PRIORITY = 300;
   var JAPANFLUX_DIRECT_SOURCE_PRIORITY = 250;
   var AMERIFLUX_SOURCE_PRIORITY = 200;
   var FLUXNET2015_SOURCE_PRIORITY = 100;
+  var EFD_SOURCE_PRIORITY = 50;
   var AMERIFLUX_FLUXNET_PRODUCT = "FLUXNET";
   var AMERIFLUX_BASE_PRODUCT = "BASE-BADM";
   var FLUXNET2015_PRODUCT = "FLUXNET2015";
   var AMERIFLUX_DATA_HUB = "AmeriFlux";
+  var LANDING_PAGE_DOWNLOAD_MODE = "landing_page";
+  var REQUEST_PAGE_DOWNLOAD_MODE = "request_page";
   var AMERIFLUX_FLUXNET_AVAILABILITY_CACHE_KEY = "shuttle-explorer:ameriflux-fluxnet-availability:v1";
   var AMERIFLUX_BASE_AVAILABILITY_CACHE_KEY = "shuttle-explorer:ameriflux-base-availability:v1";
   var FLUXNET2015_AVAILABILITY_CACHE_KEY = "shuttle-explorer:fluxnet2015-availability:v1";
@@ -1020,6 +1028,24 @@
     });
   }
 
+  function dedupeSiteLevelRows(rows) {
+    var grouped = {};
+    var siteIds;
+
+    (Array.isArray(rows) ? rows : []).forEach(function (row) {
+      var siteId = normalizeSiteId(row && row.site_id);
+      if (!siteId || grouped[siteId]) {
+        return;
+      }
+      grouped[siteId] = row;
+    });
+
+    siteIds = Object.keys(grouped).sort();
+    return siteIds.map(function (siteId) {
+      return grouped[siteId];
+    });
+  }
+
   function isJapanFluxSourceRow(row) {
     var sourceLabel = String(row && row.source_label || "").trim();
     var sourceOrigin = resolveSourceOrigin(row);
@@ -1027,6 +1053,19 @@
     return sourceOrigin === JAPANFLUX_DIRECT_SOURCE_ORIGIN ||
       sourceLabel === SOURCE_FILTER_TAG_JAPANFLUX ||
       dataHub === "japanflux";
+  }
+
+  function isEfdSourceRow(row) {
+    var sourceLabel = String(row && row.source_label || "").trim();
+    var sourceOrigin = resolveSourceOrigin(row);
+    var dataHub = String(row && row.data_hub || "").trim().toLowerCase();
+    return sourceOrigin === EFD_SOURCE_ORIGIN ||
+      sourceLabel === SOURCE_FILTER_TAG_EFD ||
+      dataHub === "efd";
+  }
+
+  function isRequestOnlyRow(row) {
+    return String(row && row.download_mode || "").trim() === REQUEST_PAGE_DOWNLOAD_MODE;
   }
 
   function resolveSourceOrigin(row) {
@@ -1039,6 +1078,9 @@
     }
     if (String(row && row.source_label || "").trim() === SOURCE_FILTER_TAG_JAPANFLUX) {
       return JAPANFLUX_DIRECT_SOURCE_ORIGIN;
+    }
+    if (String(row && row.source_label || "").trim() === SOURCE_FILTER_TAG_EFD) {
+      return EFD_SOURCE_ORIGIN;
     }
     if (String(row && row.source_label || "").trim() === ICOS_DIRECT_SOURCE_ONLY) {
       return ICOS_DIRECT_SOURCE_ORIGIN;
@@ -1062,6 +1104,9 @@
     }
     if (sourceOrigin === JAPANFLUX_DIRECT_SOURCE_ORIGIN || sourceLabel === SOURCE_FILTER_TAG_JAPANFLUX) {
       return JAPANFLUX_DIRECT_SOURCE_PRIORITY;
+    }
+    if (sourceOrigin === EFD_SOURCE_ORIGIN || sourceLabel === SOURCE_FILTER_TAG_EFD) {
+      return EFD_SOURCE_PRIORITY;
     }
     if (dataProduct === FLUXNET2015_PRODUCT || sourceLabel === FLUXNET2015_SOURCE_ONLY) {
       return FLUXNET2015_SOURCE_PRIORITY;
@@ -1109,6 +1154,9 @@
     var classification = String(row && row.surfacedProductClassification || "").trim();
     var availabilityLabels = Array.isArray(row && row.availability_filter_labels) ? row.availability_filter_labels.join(" ") : "";
     var sourceTags = Array.isArray(row && row.source_filter_tags) ? row.source_filter_tags.join(" ") : "";
+    var fluxList = String(row && row.flux_list || "").trim();
+    var accessLabel = String(row && row.access_label || "").trim();
+    var dataUseLabel = String(row && row.data_use_label || "").trim();
     return (
       String(row && row.site_id || "") + " " +
       String(row && row.site_name || "") + " " +
@@ -1121,6 +1169,9 @@
       String(row && row.source_filter || "") + " " +
       sourceTags + " " +
       availabilityLabels + " " +
+      fluxList + " " +
+      accessLabel + " " +
+      dataUseLabel + " " +
       String(row && row.years || "") + " " +
       surfacedSummary + " " +
       classification
@@ -1291,6 +1342,11 @@
       tags.push(tag);
     }
 
+    if (isEfdSourceRow(row)) {
+      addTag(SOURCE_FILTER_TAG_EFD);
+      return tags;
+    }
+
     if (ameriFluxNetwork) {
       addTag(SOURCE_FILTER_TAG_AMERIFLUX);
       if (shuttleAvailable) {
@@ -1338,6 +1394,9 @@
       return explicit;
     }
     shuttleAvailable = isShuttleCatalogRow(row);
+    if (isEfdSourceRow(row)) {
+      return SOURCE_FILTER_TAG_EFD;
+    }
     if (isAmeriFluxNetworkRow(row)) {
       return shuttleAvailable ? SOURCE_FILTER_TAG_AMERIFLUX_SHUTTLE : SOURCE_FILTER_TAG_AMERIFLUX;
     }
@@ -1390,8 +1449,12 @@
     var dataHub = String(fields && (fields.dataHub || fields.data_hub) || "").trim();
     var dataProduct = normalizeDownloadProduct(fields && (fields.apiDataProduct || fields.api_data_product));
     var productFamily = String(fields && (fields.productFamily || fields.product_family) || "").trim().toUpperCase();
+    var downloadMode = String(fields && (fields.downloadMode || fields.download_mode) || "").trim();
     if (explicit) {
       return explicit;
+    }
+    if (sourceOrigin === EFD_SOURCE_ORIGIN || sourceLabel === SOURCE_FILTER_TAG_EFD || dataHub === SOURCE_FILTER_TAG_EFD || downloadMode === REQUEST_PAGE_DOWNLOAD_MODE) {
+      return "";
     }
     if (
       sourceOrigin === JAPANFLUX_DIRECT_SOURCE_ORIGIN ||
@@ -1808,10 +1871,44 @@
     return lines.join("\n") + "\n";
   }
 
-  function flattenSurfacedProducts(rows) {
+  function buildManualActionProduct(row) {
+    if (!row) {
+      return null;
+    }
+    return {
+      displayLabel: String(row.source_label || row.data_hub || "Request").trim() || "Request",
+      downloadMode: String(row.download_mode || "").trim(),
+      download_mode: String(row.download_mode || "").trim(),
+      downloadLink: String(row.download_link || "").trim(),
+      download_link: String(row.download_link || "").trim(),
+      sourceLabel: String(row.source_label || "").trim(),
+      source_label: String(row.source_label || "").trim(),
+      sourceOrigin: resolveSourceOrigin(row),
+      source_origin: resolveSourceOrigin(row),
+      sourceReason: String(row.source_reason || "").trim(),
+      source_reason: String(row.source_reason || "").trim(),
+      siteId: String(row.site_id || "").trim(),
+      site_id: String(row.site_id || "").trim(),
+      coverageLabel: String(row.years || "").trim(),
+      years: String(row.years || "").trim()
+    };
+  }
+
+  function getRowActionProducts(row) {
+    var products = getSurfacedProductsForRow(row);
+    if (products.length) {
+      return products;
+    }
+    if (row && String(row.download_mode || "").trim() && String(row.download_mode || "").trim() !== "direct") {
+      return [buildManualActionProduct(row)].filter(Boolean);
+    }
+    return [];
+  }
+
+  function flattenActionProducts(rows) {
     var products = [];
     (rows || []).forEach(function (row) {
-      getSurfacedProductsForRow(row).forEach(function (product) {
+      getRowActionProducts(row).forEach(function (product) {
         products.push(Object.assign({}, product, {
           parentSelectionKey: String(row && row._selection_key || "")
         }));
@@ -1824,13 +1921,18 @@
     var shuttleRows = [];
     var shuttleDownloadRows = [];
     var manualLandingPageRows = [];
+    var requestOnlyRows = [];
     var ameriFluxRows = [];
-    flattenSurfacedProducts(rows).forEach(function (product) {
+    flattenActionProducts(rows).forEach(function (product) {
       if (product.download_mode === "ameriflux_api") {
         ameriFluxRows.push(product);
         return;
       }
-      if (product.download_mode === "landing_page") {
+      if (product.download_mode === REQUEST_PAGE_DOWNLOAD_MODE) {
+        requestOnlyRows.push(product);
+        return;
+      }
+      if (product.download_mode === LANDING_PAGE_DOWNLOAD_MODE) {
         manualLandingPageRows.push(product);
         shuttleRows.push(product);
         return;
@@ -1842,6 +1944,7 @@
       shuttleRows: shuttleRows,
       shuttleDownloadRows: shuttleDownloadRows,
       manualLandingPageRows: manualLandingPageRows,
+      requestOnlyRows: requestOnlyRows,
       ameriFluxRows: ameriFluxRows
     };
   }
@@ -1851,15 +1954,18 @@
     var shuttleCount = uniqueSiteIdsFromRows(partition.shuttleRows).length;
     var shuttleDownloadCount = uniqueSiteIdsFromRows(partition.shuttleDownloadRows).length;
     var manualLandingPageCount = uniqueSiteIdsFromRows(partition.manualLandingPageRows).length;
+    var requestOnlyCount = uniqueSiteIdsFromRows(partition.requestOnlyRows).length;
     var ameriFluxCount = uniqueSiteIdsFromRows(partition.ameriFluxRows).length;
     return {
       shuttleRows: partition.shuttleRows,
       shuttleDownloadRows: partition.shuttleDownloadRows,
       manualLandingPageRows: partition.manualLandingPageRows,
+      requestOnlyRows: partition.requestOnlyRows,
       ameriFluxRows: partition.ameriFluxRows,
       shuttleCount: shuttleCount,
       shuttleDownloadCount: shuttleDownloadCount,
       manualLandingPageCount: manualLandingPageCount,
+      requestOnlyCount: requestOnlyCount,
       ameriFluxCount: ameriFluxCount,
       showAllSelectedActions: shuttleDownloadCount > 0 || ameriFluxCount > 0,
       showShuttleSection: shuttleCount > 0,
@@ -2597,7 +2703,7 @@
   function buildPrimaryProcessedProduct(row, availabilityLookups) {
     var sourceLabel = String(row && row.source_label || "").trim();
     var dataProduct = getApiRowDataProduct(row);
-    if (!row || sourceLabel === BASE_SOURCE_ONLY || dataProduct === AMERIFLUX_BASE_PRODUCT) {
+    if (!row || sourceLabel === BASE_SOURCE_ONLY || dataProduct === AMERIFLUX_BASE_PRODUCT || isRequestOnlyRow(row) || isEfdSourceRow(row)) {
       return null;
     }
     return buildSurfacedProductMetadata(Object.assign({}, row, {
@@ -2676,7 +2782,9 @@
       row.years = buildSurfacedCoverageSummary(products);
       row.length_years = unionYears.length;
     } else {
-      row.years = yearRangeLabel(row.first_year, row.last_year);
+      row.years = isEfdSourceRow(row) || isRequestOnlyRow(row)
+        ? "Request via EFD"
+        : yearRangeLabel(row.first_year, row.last_year);
       row.length_years = calculateCoverageLength(row.first_year, row.last_year);
     }
 
@@ -2733,7 +2841,7 @@
     );
   }
 
-  function mergeCatalogRows(shuttleRows, icosDirectRows, japanFluxRows, ameriFluxSites, fluxnet2015Sites, ameriFluxBaseSites) {
+  function mergeCatalogRows(shuttleRows, icosDirectRows, japanFluxRows, ameriFluxSites, fluxnet2015Sites, ameriFluxBaseSites, efdRows) {
     if (arguments.length < 6) {
       var legacyAmeriFluxBaseSites = arguments.length >= 5 ? fluxnet2015Sites : [];
       fluxnet2015Sites = ameriFluxSites;
@@ -2753,6 +2861,9 @@
     var ameriSites = Array.isArray(ameriFluxSites) ? ameriFluxSites : [];
     var fluxnet2015 = Array.isArray(fluxnet2015Sites) ? fluxnet2015Sites : [];
     var ameriFluxBase = Array.isArray(ameriFluxBaseSites) ? ameriFluxBaseSites : [];
+    var efdSites = dedupeSiteLevelRows((Array.isArray(efdRows) ? efdRows : []).map(function (row) {
+      return Object.assign({}, row);
+    }));
     var shuttleBySite = {};
     var canonicalSiteIds = {};
     var icosSuppressedByShuttle = 0;
@@ -2764,8 +2875,10 @@
     var fluxnet2015OnlySites = 0;
     var baseOnlySites = 0;
     var additionalBaseYearsSites = 0;
+    var efdSuppressedByHigherPrecedence = 0;
+    var efdOnlySites = 0;
 
-    // Keep precedence centralized here: Shuttle > ICOS-direct > JapanFlux-direct > AmeriFlux FLUXNET > FLUXNET2015.
+    // Keep precedence centralized here: Shuttle > ICOS-direct > JapanFlux-direct > AmeriFlux FLUXNET > FLUXNET2015 > BASE > EFD.
     mergedRows.forEach(function (row) {
       var siteId = String(row && row.site_id || "").trim();
       if (!siteId) {
@@ -2950,6 +3063,42 @@
       finalRows.push(applySurfacedProductSelection(baseRow, availabilityLookups));
     });
 
+    efdSites.forEach(function (row) {
+      var siteId = normalizeSiteId(row && row.site_id);
+      var finalizedRow;
+      if (!siteId) {
+        return;
+      }
+      if (finalSiteIds[siteId]) {
+        efdSuppressedByHigherPrecedence += 1;
+        return;
+      }
+      if (!row.data_hub) {
+        row.data_hub = SOURCE_FILTER_TAG_EFD;
+      }
+      if (!row.download_link && row.request_page_url) {
+        row.download_link = row.request_page_url;
+      }
+      if (!row.download_mode) {
+        row.download_mode = REQUEST_PAGE_DOWNLOAD_MODE;
+      }
+      if (!row.source_label) {
+        row.source_label = SOURCE_FILTER_TAG_EFD;
+      }
+      if (!row.source_reason) {
+        row.source_reason = "Listed in the public European Fluxes Database site catalog.";
+      }
+      if (!row.source_origin) {
+        row.source_origin = EFD_SOURCE_ORIGIN;
+      }
+      row.source_priority = resolveSourcePriority(row);
+      row.source_filter = sourceFilterValue(row);
+      finalizedRow = applySurfacedProductSelection(finalizeRowComputedState(row), availabilityLookups);
+      finalRows.push(finalizedRow);
+      finalSiteIds[siteId] = true;
+      efdOnlySites += 1;
+    });
+
     finalRows.forEach(function (row, idx) {
       row._index = idx;
       if (!row._selection_key) {
@@ -2976,7 +3125,10 @@
       additionalBaseYearsSites: additionalBaseYearsSites,
       fluxnet2015TotalSites: fluxnet2015.length,
       fluxnet2015SitesWithYears: fluxnet2015.length,
-      fluxnet2015OnlySites: fluxnet2015OnlySites
+      fluxnet2015OnlySites: fluxnet2015OnlySites,
+      efdTotalSites: efdSites.length,
+      efdSuppressedByHigherPrecedence: efdSuppressedByHigherPrecedence,
+      efdOnlySites: efdOnlySites
     };
   }
 
@@ -3497,6 +3649,11 @@
     var metadataId = String(raw.metadata_id || "").trim();
     var version = String(raw.version || "").trim();
     var productFamily = String(raw.product_family || "").trim();
+    var fluxList = String(raw.flux_list || "").trim();
+    var accessLabel = String(raw.access_label || raw.access_policy_label || "").trim();
+    var dataUseLabel = String(raw.data_use_label || raw.data_use_policy_label || "").trim();
+    var requestPageUrl = String(raw.request_page_url || "").trim();
+    var lastUpdated = String(raw.last_updated || "").trim();
 
     if (!siteId || !hub || !downloadLink) {
       return null;
@@ -3542,7 +3699,12 @@
       citation: citation,
       landing_page_url: landingPageUrl,
       metadata_id: metadataId,
-      version: version
+      version: version,
+      flux_list: fluxList,
+      access_label: accessLabel,
+      data_use_label: dataUseLabel,
+      request_page_url: requestPageUrl,
+      last_updated: lastUpdated
     };
     return finalizeRowComputedState(row);
   }
@@ -4002,6 +4164,9 @@
     if (sourceLabel === ICOS_DIRECT_SOURCE_ONLY) {
       return "shuttle-explorer__source-badge--icos";
     }
+    if (sourceLabel === SOURCE_FILTER_TAG_EFD) {
+      return "shuttle-explorer__source-badge--efd";
+    }
     if (sourceLabel === SOURCE_FILTER_TAG_JAPANFLUX) {
       return "shuttle-explorer__source-badge--japanflux";
     }
@@ -4055,14 +4220,15 @@
   }
 
   function buildRowDownloadOptions(row, canAmeriFluxDownload) {
-    return getSurfacedProductsForRow(row).map(function (product) {
+    return getRowActionProducts(row).map(function (product) {
       var dataProduct = normalizeDownloadProduct(product && product.apiDataProduct);
       var option = {
         product: product,
-        displayLabel: surfacedProductDisplayName(product, true),
+        displayLabel: String(product && (product.displayLabel || product.display_label) || "").trim() || surfacedProductDisplayName(product, true),
         mode: String(product && product.downloadMode || ""),
         siteId: String(product && product.siteId || ""),
         sourceLabel: String(product && product.sourceLabel || ""),
+        sourceOrigin: String(product && (product.sourceOrigin || product.source_origin) || ""),
         dataProduct: dataProduct,
         downloadLink: String(product && product.downloadLink || ""),
         isIcos: !!(product && product.isIcos),
@@ -4074,7 +4240,12 @@
         if (!canAmeriFluxDownload) {
           option.title = apiProductDisplayName(dataProduct) + " downloads require your own AmeriFlux identity. Click to copy a curl command template.";
         }
-      } else if (option.mode === "landing_page") {
+      } else if (option.mode === REQUEST_PAGE_DOWNLOAD_MODE) {
+        option.actionLabel = option.sourceOrigin === EFD_SOURCE_ORIGIN || option.sourceLabel === SOURCE_FILTER_TAG_EFD
+          ? "Request at EFD"
+          : "Open request page";
+        option.title = "Login is required. Some EFD data may require PI approval, and download links are emailed after request submission.";
+      } else if (option.mode === LANDING_PAGE_DOWNLOAD_MODE) {
         option.actionLabel = "Open landing page";
         option.title = "Direct ZIP URL could not be validated automatically; open the ADS landing page to download manually.";
       } else {
@@ -4147,6 +4318,7 @@
       ".shuttle-explorer__table thead th{position:sticky;top:0;background:#f8fafc;z-index:1;}",
       ".shuttle-explorer__source-badge{display:inline-flex;align-items:center;padding:2px 8px;border-radius:999px;font-size:.86em;font-weight:600;line-height:1.25;}",
       ".shuttle-explorer__source-badge--icos{background:#eef7f8;border:1px solid #b7d9dc;color:#245761;}",
+      ".shuttle-explorer__source-badge--efd{background:#f9efe5;border:1px solid #dfc09a;color:#7b4a13;}",
       ".shuttle-explorer__source-badge--japanflux{background:#f4efe7;border:1px solid #d7b99a;color:#704624;}",
       ".shuttle-explorer__source-badge--base{background:#f8f3e8;border:1px solid #d9c288;color:#755319;}",
       ".shuttle-explorer__source-badge--ameriflux{background:#edf7f0;border:1px solid #b6dcc2;color:#1f6c3f;}",
@@ -4303,7 +4475,7 @@
       "      <li><strong>shuttle_selected_sites.txt</strong>: one <code>site_id</code> per line for Shuttle CLI workflows.</li>",
       "      <li><strong>ameriflux_selected_sites.txt</strong>: tab-delimited <code>site_id</code>, <code>data_product</code>, and <code>source_label</code> for AmeriFlux API-backed workflows.</li>",
       "      <li><strong>shuttle_selected_manifest.csv</strong>: selected non-AmeriFlux rows with source metadata, download modes, and links.</li>",
-      "      <li><strong>shuttle_links.txt / Copy Shuttle links</strong>: validated direct URLs only (AmeriFlux rows and landing-page-only rows are excluded).</li>",
+      "      <li><strong>shuttle_links.txt / Copy Shuttle links</strong>: validated direct URLs only (AmeriFlux rows, landing-page-only rows, and request-only rows are excluded).</li>",
       "    </ul>",
       "  </details>",
       "  <div class=\"shuttle-explorer__cli-panel shuttle-explorer__hidden\" data-role=\"cli-panel\">",
@@ -4348,6 +4520,7 @@
       "    <li>Data labeled as FLUXNET in the year column have been gap-filled and partitioned with the ONEFlux processing pipeline. Use the Availability filter options [FLUXNET processed], [Other processed], and [Sites with both FLUXNET and additional processed years] to distinguish ONEFlux-derived coverage from non-ONEFlux processed coverage.</li>",
       "    <li>The FLUXNET Shuttle serves data processed with the most recent ONEFlux version and should generally be treated as the highest-quality processed product available here. Choose the Source filter option [FLUXNET-Shuttle] to view the subset of FLUXNET-format datasets generated with this most up-to-date processing.</li>",
       "    <li>Rows labeled [JapanFlux] come from the public JapanFlux2024 ADS archive. Although JapanFlux2024 is provided in the FLUXNET format and gap-filled/partitioned, it is not processed with ONEflux.</li>",
+      "    <li>EFD records link to the European Fluxes Database request workflow. Login is required, some data may require PI approval, and download links are provided by EFD after request submission.</li>",
       "    <li>The explorer includes both gap-filled and partitioned data [FLUXNET] and non-gap-filled, non-partitioned observations [e.g., AmeriFlux-BASE].</li>",
       "    <li>For some sites, the BASE product currently extends to years that are not yet available in the corresponding FLUXNET product.</li>",
       "    <li>The bulk-download scripts may require users to install a jq package if neither jq nor python3 are already installed. jq is a lightweight command-line JSON parser used by the script workflow.</li>",
@@ -4355,7 +4528,7 @@
       "</aside>",
       "<aside class=\"shuttle-explorer__attribution\" data-role=\"attribution\">",
       "  <h3>Data Use and Attribution</h3>",
-      "  <p class=\"shuttle-explorer__tiny\">The flux data surfaced here are shared under a <a href=\"https://creativecommons.org/licenses/by/4.0/\" target=\"_blank\" rel=\"noopener noreferrer\">CC-BY 4.0</a> data use license, which requires attribution. Data users must follow dataset- and network-specific attribution and citation guidance included with each downloaded archive.</p>",
+      "  <p class=\"shuttle-explorer__tiny\">Data users must follow dataset- and network-specific access, attribution, and citation guidance included with each downloaded archive or request workflow. AmeriFlux API products are requested under <a href=\"https://creativecommons.org/licenses/by/4.0/\" target=\"_blank\" rel=\"noopener noreferrer\">CC-BY 4.0</a>; EFD request-only records remain subject to EFD site and project data policies.</p>",
       "</aside>"
     ].join("");
   }
@@ -4369,6 +4542,8 @@
     this.icosDirectCsvUrl = root.getAttribute("data-icos-direct-csv-src") || DEFAULT_ICOS_DIRECT_CSV_URL;
     this.japanFluxJsonUrl = root.getAttribute("data-japanflux-direct-json-src") || DEFAULT_JAPANFLUX_DIRECT_JSON_URL;
     this.japanFluxCsvUrl = root.getAttribute("data-japanflux-direct-csv-src") || DEFAULT_JAPANFLUX_DIRECT_CSV_URL;
+    this.efdJsonUrl = root.getAttribute("data-efd-json-src") || DEFAULT_EFD_JSON_URL;
+    this.efdCsvUrl = root.getAttribute("data-efd-csv-src") || DEFAULT_EFD_CSV_URL;
     this.ameriFluxSiteInfoUrl = root.getAttribute("data-ameriflux-site-info-src") || AMERIFLUX_SITE_INFO_URL;
     this.fluxnet2015SiteInfoUrl = root.getAttribute("data-fluxnet2015-site-info-src") || FLUXNET2015_SITE_INFO_URL;
     this.siteNameMetadataUrl = root.getAttribute("data-site-name-metadata-src") || SITE_NAME_METADATA_URL;
@@ -4378,6 +4553,7 @@
     this.shuttleSource = new ShuttleSource(this.jsonUrl, this.csvUrl);
     this.icosDirectSource = new ShuttleSource(this.icosDirectJsonUrl, this.icosDirectCsvUrl);
     this.japanFluxSource = new ShuttleSource(this.japanFluxJsonUrl, this.japanFluxCsvUrl);
+    this.efdSource = new ShuttleSource(this.efdJsonUrl, this.efdCsvUrl);
     this.ameriFluxSource = new AmeriFluxSource({
       availabilityUrl: AMERIFLUX_FLUXNET_AVAILABILITY_URL,
       downloadUrl: AMERIFLUX_V2_DOWNLOAD_URL,
@@ -4850,10 +5026,25 @@
 
       b.tbody.addEventListener("click", function (event) {
         var target = event.target;
-        while (target && target !== b.tbody && !(target.tagName === "BUTTON" && target.getAttribute("data-role") === "ameriflux-download")) {
+        while (
+          target &&
+          target !== b.tbody &&
+          !(
+            (target.tagName === "BUTTON" && target.getAttribute("data-role") === "ameriflux-download") ||
+            (target.tagName === "A" && target.getAttribute("data-role") === "row-link-action")
+          )
+        ) {
           target = target.parentNode;
         }
         if (!target || target === b.tbody) {
+          return;
+        }
+        if (target.tagName === "A" && target.getAttribute("data-role") === "row-link-action") {
+          gaEvent(String(target.getAttribute("data-outbound-event") || "fx_row_link_click"), {
+            site_id: String(target.getAttribute("data-site-id") || ""),
+            mode: String(target.getAttribute("data-link-mode") || ""),
+            source_label: String(target.getAttribute("data-source-label") || "")
+          });
           return;
         }
         var siteId = String(target.getAttribute("data-site-id") || "");
@@ -5473,6 +5664,10 @@
     return partitionRowsByBulkSource(rows).manualLandingPageRows;
   };
 
+  Explorer.prototype.getRequestOnlyRows = function (rows) {
+    return partitionRowsByBulkSource(rows).requestOnlyRows;
+  };
+
   Explorer.prototype.getShuttleCliRows = function (rows) {
     return (rows || []).filter(isShuttleCatalogRow);
   };
@@ -5579,10 +5774,18 @@
 
   Explorer.prototype.buildManualLandingPageWarning = function (rows) {
     var manualCount = uniqueSiteIdsFromRows(this.getManualLandingPageRows(rows)).length;
-    if (!manualCount) {
+    var requestOnlyCount = uniqueSiteIdsFromRows(this.getRequestOnlyRows(rows)).length;
+    var parts = [];
+    if (!manualCount && !requestOnlyCount) {
       return "";
     }
-    return manualCount + " landing-page-only selection(s) were excluded from direct bulk output.";
+    if (manualCount) {
+      parts.push(manualCount + " landing-page-only");
+    }
+    if (requestOnlyCount) {
+      parts.push(requestOnlyCount + " request-only");
+    }
+    return parts.join(" and ") + " selection(s) were excluded from direct bulk output.";
   };
 
   Explorer.prototype.getDuplicateSelectedSiteIds = function (rows) {
@@ -6260,11 +6463,14 @@
     }
 
     if (b.shuttleSelectionCount) {
+      var shuttleSelectionParts = [selectionSummary.shuttleDownloadCount + " direct-download"];
       if (selectionSummary.manualLandingPageCount > 0) {
-        b.shuttleSelectionCount.textContent = selectionSummary.shuttleDownloadCount + " direct-download and " + selectionSummary.manualLandingPageCount + " landing-page-only site(s) selected";
-      } else {
-        b.shuttleSelectionCount.textContent = selectionSummary.shuttleDownloadCount + " direct-download site(s) selected";
+        shuttleSelectionParts.push(selectionSummary.manualLandingPageCount + " landing-page-only");
       }
+      if (selectionSummary.requestOnlyCount > 0) {
+        shuttleSelectionParts.push(selectionSummary.requestOnlyCount + " request-only");
+      }
+      b.shuttleSelectionCount.textContent = shuttleSelectionParts.join(", ") + " site(s) selected";
     }
     if (b.ameriFluxSelectionCount) {
       b.ameriFluxSelectionCount.textContent = selectionSummary.ameriFluxCount + " sites available elsewhere selected";
@@ -6633,6 +6839,16 @@
           control.href = option.downloadLink;
           control.target = "_blank";
           control.rel = "noopener noreferrer";
+          control.setAttribute("data-role", "row-link-action");
+          control.setAttribute("data-site-id", option.siteId);
+          control.setAttribute("data-link-mode", option.mode);
+          control.setAttribute("data-source-label", option.sourceLabel);
+          control.setAttribute(
+            "data-outbound-event",
+            option.mode === REQUEST_PAGE_DOWNLOAD_MODE
+              ? "fx_request_page_click"
+              : (option.mode === LANDING_PAGE_DOWNLOAD_MODE ? "fx_landing_page_click" : "fx_row_download_click")
+          );
           control.textContent = option.actionLabel;
           control.setAttribute("aria-label", option.actionLabel + " for " + option.siteId);
           if (option.title) {
@@ -6804,7 +7020,7 @@
     this.trackExplorerLoadedOnce();
   };
 
-  Explorer.prototype.buildMergedSnapshotState = function (shuttleResult, icosDirectResult, japanFluxResult, ameriResult, ameriBaseResult, fluxnet2015Result, ameriFluxSiteInfoResult, fluxnet2015SiteInfoResult, siteNameMetadataResult, vegetationMetadataResult) {
+  Explorer.prototype.buildMergedSnapshotState = function (shuttleResult, icosDirectResult, japanFluxResult, efdResult, ameriResult, ameriBaseResult, fluxnet2015Result, ameriFluxSiteInfoResult, fluxnet2015SiteInfoResult, siteNameMetadataResult, vegetationMetadataResult) {
     var ameriFluxSiteInfoLookup = ameriFluxSiteInfoResult && ameriFluxSiteInfoResult.lookup ? ameriFluxSiteInfoResult.lookup : {};
     var fluxnet2015SiteInfoLookup = fluxnet2015SiteInfoResult && fluxnet2015SiteInfoResult.lookup ? fluxnet2015SiteInfoResult.lookup : {};
     var siteNameMetadataLookup = siteNameMetadataResult && siteNameMetadataResult.lookup ? siteNameMetadataResult.lookup : {};
@@ -6830,18 +7046,20 @@
       japanFluxResult && Array.isArray(japanFluxResult.rows) ? japanFluxResult.rows : [],
       enrichedAmeriFluxSites,
       enrichedFluxnet2015Sites,
-      enrichedAmeriFluxBaseSites
+      enrichedAmeriFluxBaseSites,
+      efdResult && Array.isArray(efdResult.rows) ? efdResult.rows : []
     );
     var rows = enrichRowsWithSiteNameLookup(merge.rows, siteNameMetadataLookup);
     return {
       rows: rows,
       droppedRows: shuttleResult && shuttleResult.droppedRows ? shuttleResult.droppedRows : 0,
-      source: "Shuttle + ICOS + JapanFlux + AmeriFlux FLUXNET + AmeriFlux BASE + FLUXNET2015",
+      source: "Shuttle + ICOS + JapanFlux + AmeriFlux FLUXNET + AmeriFlux BASE + FLUXNET2015 + EFD",
       sourceUrl: shuttleResult && shuttleResult.sourceUrl ? shuttleResult.sourceUrl : this.jsonUrl,
       warning: combineWarnings(
         shuttleResult && shuttleResult.warning ? shuttleResult.warning : "",
         icosDirectResult && icosDirectResult.warning ? icosDirectResult.warning : "",
         japanFluxResult && japanFluxResult.warning ? japanFluxResult.warning : "",
+        efdResult && efdResult.warning ? efdResult.warning : "",
         ameriResult && ameriResult.warning ? ameriResult.warning : "",
         ameriBaseResult && ameriBaseResult.warning ? ameriBaseResult.warning : "",
         fluxnet2015Result && fluxnet2015Result.warning ? fluxnet2015Result.warning : "",
@@ -6889,6 +7107,7 @@
       this.shuttleSource.list_sites(),
       this.icosDirectSource.list_sites(),
       this.japanFluxSource.list_sites(),
+      this.efdSource.list_sites(),
       this.ameriFluxSource.list_sites(),
       this.ameriFluxBaseSource.list_sites(),
       this.fluxnet2015Source.list_sites(),
@@ -6901,17 +7120,19 @@
         var shuttleResult = results[0] || {};
         var icosDirectResult = results[1] || {};
         var japanFluxResult = results[2] || {};
-        var ameriResult = results[3] || {};
-        var ameriBaseResult = results[4] || {};
-        var fluxnet2015Result = results[5] || {};
-        var ameriFluxSiteInfoResult = results[6] || {};
-        var fluxnet2015SiteInfoResult = results[7] || {};
-        var siteNameMetadataResult = results[8] || {};
-        var vegetationMetadataResult = results[9] || {};
+        var efdResult = results[3] || {};
+        var ameriResult = results[4] || {};
+        var ameriBaseResult = results[5] || {};
+        var fluxnet2015Result = results[6] || {};
+        var ameriFluxSiteInfoResult = results[7] || {};
+        var fluxnet2015SiteInfoResult = results[8] || {};
+        var siteNameMetadataResult = results[9] || {};
+        var vegetationMetadataResult = results[10] || {};
         var snapshotState = self.buildMergedSnapshotState(
           shuttleResult,
           icosDirectResult,
           japanFluxResult,
+          efdResult,
           ameriResult,
           ameriBaseResult,
           fluxnet2015Result,
@@ -6924,6 +7145,7 @@
           "shuttle:" + buildSnapshotFreshnessKey(shuttleResult),
           "icos-direct:" + buildSnapshotFreshnessKey(icosDirectResult),
           "japanflux-direct:" + buildSnapshotFreshnessKey(japanFluxResult),
+          "efd:" + buildSnapshotFreshnessKey(efdResult),
           String(ameriResult.freshnessKey || "ameriflux:none"),
           String(ameriBaseResult.freshnessKey || "ameriflux-base:none"),
           String(fluxnet2015Result.freshnessKey || "fluxnet2015:none"),

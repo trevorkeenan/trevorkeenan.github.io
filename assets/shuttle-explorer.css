@@ -578,6 +578,12 @@
   color: #245761;
 }
 
+.shuttle-explorer__source-badge--efd {
+  background: #f9efe5;
+  border: 1px solid #dfc09a;
+  color: #7b4a13;
+}
+
 .shuttle-explorer__source-badge--base {
   background: #f8f3e8;
   border: 1px solid #d9c288;

@@ -6,6 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from scripts import refresh_efd_sites as efd_module
 from scripts import refresh_icos_direct_fluxnet as icos_module
 from scripts import refresh_japanflux_direct as japan_module
 
@@ -73,6 +74,28 @@ class ProcessingLineageGenerationTests(unittest.TestCase):
         )
 
         self.assertEqual(row["processing_lineage"], "other_processed")
+
+    def test_efd_rows_keep_processing_lineage_neutral_but_preserve_column_position(self):
+        self.assertIn("processing_lineage", efd_module.OUTPUT_COLUMNS)
+        self.assertEqual(
+            efd_module.OUTPUT_COLUMNS.index("processing_lineage"),
+            efd_module.OUTPUT_COLUMNS.index("source_network") + 1,
+        )
+
+        row = efd_module.build_site_row(
+            {
+                "Code": "DE-Efd",
+                "Name": "EFD Site",
+                "Igbp": "ENF",
+                "Latitude": 50.0,
+                "Longitude": 8.0,
+                "Access": "Public",
+                "DataUse": "Open",
+            },
+            "2026-04-02T00:00:00Z",
+        )
+
+        self.assertEqual(row["processing_lineage"], "")
 
     def test_shuttle_json_converter_defaults_processing_lineage_to_oneflux(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -157,11 +180,13 @@ class ProcessingLineageGenerationTests(unittest.TestCase):
             REPO_ROOT / "assets" / "shuttle_snapshot.csv",
             REPO_ROOT / "assets" / "icos_direct_fluxnet.csv",
             REPO_ROOT / "assets" / "japanflux_direct_snapshot.csv",
+            REPO_ROOT / "assets" / "efd_sites_snapshot.csv",
         ]
         json_paths = [
             REPO_ROOT / "assets" / "shuttle_snapshot.json",
             REPO_ROOT / "assets" / "icos_direct_fluxnet.json",
             REPO_ROOT / "assets" / "japanflux_direct_snapshot.json",
+            REPO_ROOT / "assets" / "efd_sites_snapshot.json",
         ]
 
         for path in csv_paths:

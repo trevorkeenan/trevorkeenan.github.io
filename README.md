@@ -11,9 +11,12 @@ This repo includes a GitHub Actions workflow at `.github/workflows/update-shuttl
   - `assets/icos_direct_fluxnet.json`
   - `assets/japanflux_direct_snapshot.csv`
   - `assets/japanflux_direct_snapshot.json`
+  - `assets/efd_sites_snapshot.csv`
+  - `assets/efd_sites_snapshot.json`
 - Source: `fluxnet/shuttle` installed from GitHub during the workflow run
 - ICOS direct source: `scripts/refresh_icos_direct_fluxnet.py` discovers candidate FLUXNET files from the official ICOS Carbon Portal SPARQL metadata endpoint, then hydrates the chosen per-site rows from the ICOS object JSON endpoint so the build does not depend on timeout-prone metadata joins
 - JapanFlux direct source: `scripts/refresh_japanflux_direct.py` queries the ADS REST API for the published JapanFlux2024 inventory, validates direct ZIP candidates when possible, and otherwise falls back to the ADS dataset landing page
+- EFD site source: `scripts/refresh_efd_sites.py` reads the public European Fluxes Database site-list service and builds site-level request-only records without any authenticated scraping
 - JSON format: compact browser payload with normalized `snake_case` column names (`{"columns":[...],"rows":[...]}`), keeping key discovery/download fields including explicit `processing_lineage`
 - Safety behavior: the workflow only stages/commits the generated snapshot files, and it refuses to overwrite the Shuttle CSV snapshot if `listall()` returns zero rows
 
@@ -21,21 +24,24 @@ This supports a no-backend GitHub Pages setup where the site reads stable snapsh
 
 ## Source integration
 
-The explorer now merges five effective source layers:
+The explorer now merges seven effective source layers:
 
 - FLUXNET Shuttle snapshot rows (`assets/shuttle_snapshot.json` / `assets/shuttle_snapshot.csv`)
 - ICOS-direct FLUXNET discovery snapshot (`assets/icos_direct_fluxnet.json` / `assets/icos_direct_fluxnet.csv`)
 - JapanFlux-direct archive snapshot (`assets/japanflux_direct_snapshot.json` / `assets/japanflux_direct_snapshot.csv`)
+- EFD request-only site snapshot (`assets/efd_sites_snapshot.json` / `assets/efd_sites_snapshot.csv`)
 - AmeriFlux FLUXNET API availability (`https://amfcdn.lbl.gov/api/v2/data_availability/AmeriFlux/FLUXNET/CCBY4.0`)
+- AmeriFlux BASE API availability (`https://amfcdn.lbl.gov/api/v2/data_availability/AmeriFlux/BASE-BADM/CCBY4.0`)
 - AmeriFlux FLUXNET2015 API availability (`https://amfcdn.lbl.gov/api/v2/data_availability/FLUXNET/FLUXNET2015/CCBY4.0`)
 
-Canonical precedence is:
+Canonical single-row precedence is:
 
 - Shuttle
 - ICOS-direct
 - JapanFlux-direct
 - AmeriFlux FLUXNET
 - FLUXNET2015
+- EFD
 
 Merge behavior:
 
@@ -47,9 +53,12 @@ Merge behavior:
 - If a site exists only in AmeriFlux FLUXNET, it is shown as `AmeriFlux`.
 - `FLUXNET2015` is used only as a fallback for sites missing from both Shuttle and AmeriFlux FLUXNET.
 - If a site exists in both AmeriFlux FLUXNET and FLUXNET2015, only the AmeriFlux FLUXNET row is kept when Shuttle and ICOS-direct are both absent.
+- EFD rows are appended only after all other existing sources have been merged. If any Shuttle, ICOS-direct, JapanFlux-direct, AmeriFlux FLUXNET, FLUXNET2015, or BASE-backed row already exists for a site ID, the EFD row is suppressed.
+- EFD rows are site-level discovery records only. They link to the public EFD request workflow and never pretend to be direct downloads.
 
 The ICOS-direct snapshot is discovered from ICOS Carbon Portal metadata rather than HTML scraping or a DOI subset. The ICOS per-row UX remains a direct `licence_accept` link with the existing button text `Accept ICOS license and download`.
 JapanFlux-direct rows remain labeled as `JapanFlux` rather than `FLUXNET-Shuttle` so the explorer does not imply the JapanFlux2024 archive came from the FLUXNET Shuttle.
+EFD rows remain labeled as `EFD` and use a dedicated request-only row action (`Request at EFD`) that points to the public EFD request page.
 
 ### Processing lineage
 
@@ -97,6 +106,7 @@ For trusted/private runtime deployments:
 - AmeriFlux API bulk tools apply to both `AmeriFlux` and `FLUXNET2015` rows.
 - AmeriFlux API-backed rows are not mixed into Shuttle links files or Shuttle CLI helper outputs.
 - JapanFlux rows that only expose an ADS landing page stay in the manifest but are skipped by the direct-link shell script and `shuttle_links.txt`.
+- EFD request-only rows remain searchable, selectable, and mappable, but they are excluded from direct-link bulk downloads, generated shell scripts, and copied direct-URL lists.
 
 Generated bulk artifacts include:
 
@@ -121,11 +131,14 @@ AmeriFlux API bulk script behavior:
 ## Dev checks
 
 - Unit tests (Node built-in test runner): `node --test tests/shuttle-explorer.test.js`
+- EFD refresh unit tests: `python3 -m unittest tests.test_refresh_efd_sites`
 - JapanFlux refresh unit tests: `python3 -m unittest tests.test_refresh_japanflux_direct`
 - AmeriFlux smoke check (counts; optional AR-Bal download URL if credentials are set): `python3 scripts/ameriflux_api_smoke.py`
 - Refresh the cached ICOS-direct snapshot locally:
   `python3 scripts/refresh_icos_direct_fluxnet.py --shuttle-csv assets/shuttle_snapshot.csv --output-csv assets/icos_direct_fluxnet.csv --output-json assets/icos_direct_fluxnet.json`
 - Refresh the cached JapanFlux-direct snapshot locally:
   `python3 scripts/refresh_japanflux_direct.py --output-csv assets/japanflux_direct_snapshot.csv --output-json assets/japanflux_direct_snapshot.json`
+- Refresh the cached EFD site snapshot locally:
+  `python3 scripts/refresh_efd_sites.py --output-csv assets/efd_sites_snapshot.csv --output-json assets/efd_sites_snapshot.json`
 - Validate that the final Shuttle/ICOS explorer inputs still contain the expected regression sites:
   `python3 scripts/validate_icos_direct_fluxnet.py --shuttle-csv assets/shuttle_snapshot.csv --icos-csv assets/icos_direct_fluxnet.csv`
