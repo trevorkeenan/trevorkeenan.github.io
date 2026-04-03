@@ -4088,11 +4088,11 @@
   }
 
   function buildAttributionText(snapshotUpdatedDate) {
-    return "We appreciate acknowledgement of the QED FLUXNET Data Explorer when convenient. Available data is updated as of: " + snapshotUpdatedDateDisplayText(snapshotUpdatedDate) + ". Contact TF Keenan (trevorkeenan@berkeley.edu) with any questions or suggestions.";
+    return "We appreciate acknowledgement of the QED FLUXNET Data Explorer when convenient. Available data is updated as of: " + snapshotUpdatedDateDisplayText(snapshotUpdatedDate) + ". Contact TF Keenan (trevorkeenan@berkeley.edu) with any questions or suggestions. Funding for the FLUXNET Data Explorer was generously provided by the NSF AccelNet program.";
   }
 
   function buildAttributionHtml(snapshotUpdatedDate) {
-    return "We appreciate acknowledgement of the QED FLUXNET Data Explorer when convenient. Available data is updated as of: " + escapeHtml(snapshotUpdatedDateDisplayText(snapshotUpdatedDate)) + ". Contact TF Keenan (<a href=\"mailto:trevorkeenan@berkeley.edu\">trevorkeenan@berkeley.edu</a>) with any questions or suggestions.";
+    return "We appreciate acknowledgement of the QED FLUXNET Data Explorer when convenient. Available data is updated as of: " + escapeHtml(snapshotUpdatedDateDisplayText(snapshotUpdatedDate)) + ". Contact TF Keenan (<a href=\"mailto:trevorkeenan@berkeley.edu\">trevorkeenan@berkeley.edu</a>) with any questions or suggestions. Funding for the FLUXNET Data Explorer was generously provided by the NSF AccelNet program.";
   }
 
   function csvEscape(value) {
@@ -4523,7 +4523,7 @@
       "</aside>",
       "<aside class=\"shuttle-explorer__attribution\" data-role=\"attribution\">",
       "  <h3>Data Use and Attribution</h3>",
-      "  <p class=\"shuttle-explorer__tiny\">Data users must follow dataset- and network-specific access, attribution, and citation guidance included with each downloaded archive or request workflow. All directly downloadable data are provided under <a href=\"https://creativecommons.org/licenses/by/4.0/\" target=\"_blank\" rel=\"noopener noreferrer\">CC-BY 4.0</a>;</p>",
+      "  <p class=\"shuttle-explorer__tiny\">Data users must follow dataset- and network-specific access, attribution, and citation guidance included with each downloaded archive or request workflow. All directly downloadable data are provided under <a href=\"https://creativecommons.org/licenses/by/4.0/\" target=\"_blank\" rel=\"noopener noreferrer\">CC-BY 4.0</a></p>",
       "</aside>"
     ].join("");
   }
