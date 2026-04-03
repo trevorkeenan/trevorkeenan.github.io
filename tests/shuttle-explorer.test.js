@@ -1077,6 +1077,8 @@ test('Table clipboard export includes visible headers, preserves row order, and 
       site_id: 'AR-Bal',
       site_name: 'Balcarce\nBA',
       country: 'Argentina',
+      latitude: -37.7596,
+      longitude: -58.3024,
       data_hub: 'AmeriFlux',
       vegetation_type: 'Grassland  ',
       years: '2012-2013',
@@ -1086,6 +1088,8 @@ test('Table clipboard export includes visible headers, preserves row order, and 
       site_id: 'US-Blank',
       site_name: '',
       country: 'USA',
+      latitude: 'not-a-number',
+      longitude: 181,
       data_hub: 'Shuttle',
       vegetation_type: null,
       years: '2010-2010',
@@ -1096,12 +1100,61 @@ test('Table clipboard export includes visible headers, preserves row order, and 
   assert.equal(
     text,
     [
-      'Site ID\tSite Name\tCountry\tHub\tVeg Type\tYears\tLength',
-      'AR-Bal\tBalcarce BA\tArgentina\tAmeriFlux\tGrassland\t2012-2013\t2',
-      'US-Blank\t—\tUSA\tShuttle\t—\t2010-2010\t1',
+      'Site ID\tSite Name\tCountry\tLat\tLon\tHub\tVeg Type\tYears\tLength',
+      'AR-Bal\tBalcarce BA\tArgentina\t-37.76\t-58.30\tAmeriFlux\tGrassland\t2012-2013\t2',
+      'US-Blank\t—\tUSA\t—\t—\tShuttle\t—\t2010-2010\t1',
       ''
     ].join('\n')
   );
+});
+
+test('Table sort columns place Lat and Lon immediately after Country', () => {
+  assert.deepEqual(
+    hooks.getSortColumns().map((column) => column.key),
+    [
+      'site_id',
+      'site_name',
+      'country',
+      'latitude',
+      'longitude',
+      'data_hub',
+      'vegetation_type',
+      'years',
+      'length_years'
+    ]
+  );
+});
+
+test('Coordinate formatter rounds for display and handles invalid values safely', () => {
+  assert.equal(hooks.formatCoordinate(37.87654, -90, 90), '37.88');
+  assert.equal(hooks.formatCoordinate('-122.26487', -180, 180), '-122.26');
+  assert.equal(hooks.formatCoordinate('', -90, 90), '—');
+  assert.equal(hooks.formatCoordinate(181, -180, 180), '—');
+});
+
+test('Coordinate sorting uses underlying numeric values rather than formatted strings', () => {
+  const lower = {
+    _index: 0,
+    site_id: 'US-Low',
+    data_hub: 'AmeriFlux',
+    latitude: '9.9'
+  };
+  const higher = {
+    _index: 1,
+    site_id: 'US-High',
+    data_hub: 'AmeriFlux',
+    latitude: '10.1'
+  };
+  const missing = {
+    _index: 2,
+    site_id: 'US-Miss',
+    data_hub: 'AmeriFlux',
+    latitude: 'bad'
+  };
+
+  assert.ok(hooks.compareRows(lower, higher, 'latitude', 'asc') < 0);
+  assert.ok(hooks.compareRows(higher, lower, 'latitude', 'asc') > 0);
+  assert.ok(hooks.compareRows(lower, missing, 'latitude', 'asc') < 0);
 });
 
 test('AmeriFlux bulk identity helper prefers explicit input values and otherwise falls back to defaults', () => {
@@ -2203,6 +2256,39 @@ test('FLUXNET2015 site info lookup accepts mysitename/lon/lat columns and enrich
   assert.equal(enriched[1].longitude, undefined);
   assert.equal(enriched[1].country, 'ZZ');
   assert.equal(enriched[1].vegetation_type, undefined);
+});
+
+test('Merged site rows preserve full-precision coordinates for map behavior while table display stays rounded', () => {
+  const merged = hooks.mergeCatalogRows(
+    [
+      makeCatalogRow({
+        site_id: 'US-Precise',
+        data_hub: 'AmeriFlux',
+        network: 'AmeriFlux',
+        source_network: 'AmeriFlux',
+        network_display: 'AmeriFlux',
+        network_tokens: ['AmeriFlux'],
+        source_origin: 'shuttle',
+        source_label: '',
+        latitude: 37.87654321,
+        longitude: -122.26487654,
+        download_link: 'https://example.org/us-precise.zip'
+      })
+    ],
+    [],
+    [],
+    [],
+    [],
+    [],
+    []
+  );
+  const row = merged.rows[0];
+
+  assert.equal(row.latitude, 37.87654321);
+  assert.equal(row.longitude, -122.26487654);
+  assert.equal(row.has_coordinates, true);
+  assert.equal(hooks.formatCoordinate(row.latitude, -90, 90), '37.88');
+  assert.equal(hooks.formatCoordinate(row.longitude, -180, 180), '-122.26');
 });
 
 test('Site-name metadata fills blank names and refreshes search text', () => {

@@ -237,6 +237,8 @@
     { key: "site_id", label: "Site ID", type: "string" },
     { key: "site_name", label: "Site Name", type: "string" },
     { key: "country", label: "Country", type: "string" },
+    { key: "latitude", label: "Lat", type: "coordinate" },
+    { key: "longitude", label: "Lon", type: "coordinate" },
     { key: "data_hub", label: "Hub", type: "string" },
     { key: "vegetation_type", label: "Veg Type", type: "string" },
     { key: "years", label: "Years", type: "years" },
@@ -4040,8 +4042,19 @@
     return this.get_download_urls(siteId, variant, policy, identityOverride);
   };
 
+  function coordinateBoundsForKey(columnKey) {
+    if (columnKey === "latitude") {
+      return [-90, 90];
+    }
+    if (columnKey === "longitude") {
+      return [-180, 180];
+    }
+    return null;
+  }
+
   function compareRows(a, b, sortKey, sortDir) {
     var dir = sortDir === "desc" ? -1 : 1;
+    var coordinateBounds = coordinateBoundsForKey(sortKey);
     var av;
     var bv;
 
@@ -4053,6 +4066,14 @@
       }
       av = a.last_year == null ? Number.POSITIVE_INFINITY : a.last_year;
       bv = b.last_year == null ? Number.POSITIVE_INFINITY : b.last_year;
+      if (av !== bv) {
+        return (av < bv ? -1 : 1) * dir;
+      }
+    } else if (coordinateBounds) {
+      av = parseCoordinate(a && a[sortKey], coordinateBounds[0], coordinateBounds[1]);
+      bv = parseCoordinate(b && b[sortKey], coordinateBounds[0], coordinateBounds[1]);
+      av = av == null ? Number.POSITIVE_INFINITY : av;
+      bv = bv == null ? Number.POSITIVE_INFINITY : bv;
       if (av !== bv) {
         return (av < bv ? -1 : 1) * dir;
       }
@@ -4128,16 +4149,32 @@
     return String(value == null ? "" : value).replace(/\s+/g, " ").trim();
   }
 
-  function tableClipboardCellValue(row, columnKey) {
+  function formatCoordinate(value, min, max) {
+    var numeric = parseCoordinate(value, min, max);
+    if (numeric == null) {
+      return "\u2014";
+    }
+    return numeric.toFixed(2);
+  }
+
+  function tableDisplayCellValue(row, columnKey) {
     var value;
+    var coordinateBounds = coordinateBoundsForKey(columnKey);
     if (!row || !columnKey) {
       return "\u2014";
+    }
+    if (coordinateBounds) {
+      return formatCoordinate(row[columnKey], coordinateBounds[0], coordinateBounds[1]);
     }
     if (columnKey === "length_years") {
       return row.length_years == null ? "\u2014" : String(row.length_years);
     }
     value = normalizeClipboardCellText(row[columnKey]);
     return value || "\u2014";
+  }
+
+  function tableClipboardCellValue(row, columnKey) {
+    return tableDisplayCellValue(row, columnKey);
   }
 
   function buildTableClipboardText(rows) {
@@ -4153,6 +4190,31 @@
       }).join("\t"));
     });
     return lines.join("\n") + "\n";
+  }
+
+  function tableColumnClassName(columnKey) {
+    if (columnKey === "latitude") {
+      return "shuttle-explorer__coord-col shuttle-explorer__coord-col--lat";
+    }
+    if (columnKey === "longitude") {
+      return "shuttle-explorer__coord-col shuttle-explorer__coord-col--lon";
+    }
+    return "";
+  }
+
+  function renderTableCellHtml(row, columnKey, sourceBadgeHtml) {
+    var displayValue;
+    if (columnKey === "site_id") {
+      return "<strong>" + escapeHtml(row && row.site_id || "") + "</strong>" + (sourceBadgeHtml || "");
+    }
+    if (columnKey === "years") {
+      return renderSurfacedCoverageHtml(row);
+    }
+    displayValue = tableDisplayCellValue(row, columnKey);
+    if (displayValue === "\u2014") {
+      return "<span class=\"shuttle-explorer__muted\">—</span>";
+    }
+    return escapeHtml(displayValue);
   }
 
   function sourceBadgeClass(sourceLabel) {
@@ -4311,6 +4373,9 @@
       ".shuttle-explorer__table{width:100%;border-collapse:collapse;min-width:880px;font-size:.9em;}",
       ".shuttle-explorer__table th,.shuttle-explorer__table td{padding:8px 10px;border-bottom:1px solid #edf1f5;vertical-align:top;text-align:left;}",
       ".shuttle-explorer__table thead th{position:sticky;top:0;background:#f8fafc;z-index:1;}",
+      ".shuttle-explorer__table th.shuttle-explorer__coord-col,.shuttle-explorer__table td.shuttle-explorer__coord-col{width:72px;min-width:72px;white-space:nowrap;}",
+      ".shuttle-explorer__table td.shuttle-explorer__coord-col{font-variant-numeric:tabular-nums;}",
+      ".shuttle-explorer__coord-col .shuttle-explorer__sort{white-space:nowrap;}",
       ".shuttle-explorer__source-badge{display:inline-flex;align-items:center;padding:2px 8px;border-radius:999px;font-size:.86em;font-weight:600;line-height:1.25;}",
       ".shuttle-explorer__source-badge--icos{background:#eef7f8;border:1px solid #b7d9dc;color:#245761;}",
       ".shuttle-explorer__source-badge--efd{background:#f9efe5;border:1px solid #dfc09a;color:#7b4a13;}",
@@ -6555,7 +6620,11 @@
 
     SORT_COLUMNS.forEach(function (col) {
       var th = document.createElement("th");
+      var className = tableColumnClassName(col.key);
       th.scope = "col";
+      if (className) {
+        th.className = className;
+      }
       th.setAttribute("aria-sort", "none");
       var btn = document.createElement("button");
       btn.type = "button";
@@ -6785,18 +6854,18 @@
       var sourceBadgeHtml = row.source_label
         ? "<div class=\"shuttle-explorer__site-badge\">" + renderSourceBadgeHtml(row.source_label, row.source_reason) + "</div>"
         : "";
+      var cellsHtml = SORT_COLUMNS.map(function (column) {
+        var className = tableColumnClassName(column.key);
+        return "<td" + (className ? " class=\"" + className + "\"" : "") + ">" +
+          renderTableCellHtml(row, column.key, sourceBadgeHtml) +
+          "</td>";
+      }).join("");
       var downloadOptions = buildRowDownloadOptions(row, canAmeriFluxDownload);
       tr.innerHTML = [
         "<td class=\"shuttle-explorer__select-cell\"><input type=\"checkbox\" data-role=\"row-select\" data-key=\"" + escapeHtml(row._selection_key) + "\"" +
           (selectedKeys[row._selection_key] ? " checked" : "") +
           " aria-label=\"Select " + escapeHtml(row.site_id) + "\" /></td>",
-        "<td><strong>" + escapeHtml(row.site_id) + "</strong>" + sourceBadgeHtml + "</td>",
-        "<td>" + (row.site_name ? escapeHtml(row.site_name) : "<span class=\"shuttle-explorer__muted\">—</span>") + "</td>",
-        "<td>" + (row.country ? escapeHtml(row.country) : "<span class=\"shuttle-explorer__muted\">—</span>") + "</td>",
-        "<td>" + escapeHtml(row.data_hub) + "</td>",
-        "<td>" + (row.vegetation_type ? escapeHtml(row.vegetation_type) : "<span class=\"shuttle-explorer__muted\">—</span>") + "</td>",
-        "<td>" + renderSurfacedCoverageHtml(row) + "</td>",
-        "<td>" + (row.length_years == null ? "<span class=\"shuttle-explorer__muted\">—</span>" : escapeHtml(row.length_years)) + "</td>"
+        cellsHtml
       ].join("");
 
       var downloadTd = document.createElement("td");
@@ -7236,6 +7305,7 @@
     normalizeVegetationType: normalizeVegetationType,
     vegetationDisplayLabel: vegetationDisplayLabel,
     calculateCoverageLength: calculateCoverageLength,
+    formatCoordinate: formatCoordinate,
     shouldEnableBulkToolsActions: shouldEnableBulkToolsActions,
     formatSelectedSiteCount: formatSelectedSiteCount,
     resolveAmeriFluxBulkIdentity: resolveAmeriFluxBulkIdentity,
@@ -7256,6 +7326,12 @@
     buildDownloadAllSelectedScriptText: buildDownloadAllSelectedScriptText,
     buildDownloadAllSelectedFileBundle: buildDownloadAllSelectedFileBundle,
     buildTableClipboardText: buildTableClipboardText,
+    compareRows: compareRows,
+    getSortColumns: function () {
+      return SORT_COLUMNS.map(function (column) {
+        return Object.assign({}, column);
+      });
+    },
     getSurfacedProductsForRow: getSurfacedProductsForRow,
     buildRowDownloadOptions: buildRowDownloadOptions,
     renderSurfacedCoverageHtml: renderSurfacedCoverageHtml,

@@ -544,6 +544,21 @@
   background: #f8fafc;
 }
 
+.shuttle-explorer__table th.shuttle-explorer__coord-col,
+.shuttle-explorer__table td.shuttle-explorer__coord-col {
+  width: 72px;
+  min-width: 72px;
+  white-space: nowrap;
+}
+
+.shuttle-explorer__table td.shuttle-explorer__coord-col {
+  font-variant-numeric: tabular-nums;
+}
+
+.shuttle-explorer__coord-col .shuttle-explorer__sort {
+  white-space: nowrap;
+}
+
 .shuttle-explorer__select-col,
 .shuttle-explorer__select-cell {
   width: 56px;
