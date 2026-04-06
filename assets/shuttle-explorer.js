@@ -4109,11 +4109,11 @@
   }
 
   function buildAttributionText(snapshotUpdatedDate) {
-    return "We appreciate acknowledgement of the QED FLUXNET Data Explorer when convenient. Available data is updated as of: " + snapshotUpdatedDateDisplayText(snapshotUpdatedDate) + ". Contact TF Keenan (trevorkeenan@berkeley.edu) with any questions or suggestions. Funding for the FLUXNET Data Explorer was generously provided by the NSF AccelNet program.";
+    return "We appreciate acknowledgement of the QED FLUXNET Data Explorer when convenient. Contact TF Keenan (trevorkeenan@berkeley.edu) with any questions or suggestions. Funding for the FLUXNET Data Explorer was generously provided by the NSF AccelNet program. Available data is updated as of: " + snapshotUpdatedDateDisplayText(snapshotUpdatedDate) + ".";
   }
 
   function buildAttributionHtml(snapshotUpdatedDate) {
-    return "We appreciate acknowledgement of the QED FLUXNET Data Explorer when convenient. Available data is updated as of: " + escapeHtml(snapshotUpdatedDateDisplayText(snapshotUpdatedDate)) + ". Contact TF Keenan (<a href=\"mailto:trevorkeenan@berkeley.edu\">trevorkeenan@berkeley.edu</a>) with any questions or suggestions. Funding for the FLUXNET Data Explorer was generously provided by the NSF AccelNet program.";
+    return "We appreciate acknowledgement of the QED FLUXNET Data Explorer when convenient. Contact TF Keenan (<a href=\"mailto:trevorkeenan@berkeley.edu\">trevorkeenan@berkeley.edu</a>) with any questions or suggestions. Funding for the FLUXNET Data Explorer was generously provided by the NSF AccelNet program. Available data is updated as of: " + escapeHtml(snapshotUpdatedDateDisplayText(snapshotUpdatedDate)) + ".";
   }
 
   function csvEscape(value) {
