@@ -133,11 +133,18 @@ function makeEfdRow(overrides) {
       download_mode: 'request_page',
       processing_lineage: '',
       source_label: 'EFD',
-      source_reason: 'Listed in the public European Fluxes Database site catalog. Access is request-based via EFD login; some data may require PI approval and download links are emailed after request submission.',
+      source_reason: 'Known EFD data record based on the public EFD site details and data-policy pages. Access remains request-based via EFD; some data may require PI approval or PI contact, and current direct download is not implied.',
       source_origin: 'efd',
       flux_list: 'CO2-E; LE-E',
       access_label: 'Public; Private',
-      data_use_label: 'Open; Close'
+      data_use_label: 'Open; Close',
+      site_page_url: 'https://www.europe-fluxdata.eu/home/site-details?id=DE-Efd',
+      known_data_record: 'true',
+      efd_access_summary: 'mixed',
+      efd_policy_year_count: '2',
+      efd_policy_first_year: '2001',
+      efd_policy_last_year: '2002',
+      efd_provenance: 'Derived from the public EFD site-details pages and year-by-year data-policy tables on 2026-04-07.'
     },
     overrides || {}
   ));
@@ -238,7 +245,7 @@ test('Explorer default snapshot JSON files exist and are loadable by the current
     'assets/shuttle_snapshot.json',
     'assets/icos_direct_fluxnet.json',
     'assets/japanflux_direct_snapshot.json',
-    'assets/efd_sites_snapshot.json'
+    'assets/efd_curated_sites_snapshot.json'
   ];
 
   expectedJsonFiles.forEach((relativePath) => {
@@ -253,6 +260,19 @@ test('Explorer default snapshot JSON files exist and are loadable by the current
     assert.equal(Array.isArray(rows), true);
     assert.equal(rows.length > 0, true);
   });
+  assert.equal(explorerJs.includes('"assets/efd_sites_snapshot.json"'), false);
+});
+
+test('Explorer uses curated local EFD assets rather than the old public-snapshot path', () => {
+  const explorerJs = fs.readFileSync(path.join(__dirname, '..', 'assets', 'shuttle-explorer.js'), 'utf8');
+  const explorerHtml = fs.readFileSync(path.join(__dirname, '..', 'fluxnet-explorer.html'), 'utf8');
+
+  assert.equal(explorerJs.includes('"assets/efd_curated_sites_snapshot.json"'), true);
+  assert.equal(explorerJs.includes('"assets/efd_curated_sites_snapshot.csv"'), true);
+  assert.equal(explorerJs.includes('"assets/efd_sites_snapshot.json"'), false);
+  assert.equal(explorerJs.includes('"assets/efd_sites_snapshot.csv"'), false);
+  assert.equal(explorerHtml.includes('data-efd-curated-json-src="assets/efd_curated_sites_snapshot.json"'), true);
+  assert.equal(explorerHtml.includes('data-efd-curated-csv-src="assets/efd_curated_sites_snapshot.csv"'), true);
 });
 
 test('Merge precedence is Shuttle > ICOS > AmeriFlux > FLUXNET2015 with no duplicates', () => {
@@ -1683,9 +1703,10 @@ test('EFD rows render request-only actions and stay out of direct bulk downloads
   assert.equal(summary.showShuttleSection, false);
   assert.equal(summary.showAmeriFluxSection, false);
   assert.equal(summary.requestOnlyCount, 1);
-  assert.equal(option.actionLabel, 'Request at EFD');
+  assert.equal(option.actionLabel, 'Request via EFD');
   assert.equal(option.downloadLink, 'https://www.europe-fluxdata.eu/home/data/request-data');
-  assert.match(option.title, /Login is required/);
+  assert.match(option.title, /Known EFD data record/);
+  assert.match(option.title, /current direct download is not implied/);
 });
 
 test('EFD rows classify as other processed without being mislabeled as FLUXNET or BASE', () => {
@@ -2732,7 +2753,7 @@ test('Data Notes box appears between the map and attribution sections with share
   assert.equal(explorerJs.includes('These notes highlight how the explorer labels datasets and how the bulk tools behave.'), true);
   assert.equal(explorerJs.includes('Use the Availability filter options [FLUXNET processed], [Other processed], and [Sites with both FLUXNET and additional processed years]'), true);
   assert.equal(explorerJs.includes('Choose the Source filter option [FLUXNET-Shuttle]'), true);
-  assert.equal(explorerJs.includes('EFD records link to the European Fluxes Database request workflow.'), true);
+  assert.equal(explorerJs.includes('EFD rows indicate known data records from the public EFD site and policy pages.'), true);
   assert.equal(explorerJs.includes('The explorer includes both gap-filled and partitioned data [FLUXNET] and non-gap-filled, non-partitioned observations [e.g., AmeriFlux-BASE].'), true);
   assert.equal(explorerJs.includes('The bulk-download scripts may require users to install a jq package if neither jq nor python3 are already installed.'), true);
   assert.equal(explorerCss.includes('.shuttle-explorer__attribution ul {'), true);

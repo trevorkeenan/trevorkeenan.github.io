@@ -7,8 +7,8 @@
   var DEFAULT_ICOS_DIRECT_CSV_URL = "assets/icos_direct_fluxnet.csv";
   var DEFAULT_JAPANFLUX_DIRECT_JSON_URL = "assets/japanflux_direct_snapshot.json";
   var DEFAULT_JAPANFLUX_DIRECT_CSV_URL = "assets/japanflux_direct_snapshot.csv";
-  var DEFAULT_EFD_JSON_URL = "assets/efd_sites_snapshot.json";
-  var DEFAULT_EFD_CSV_URL = "assets/efd_sites_snapshot.csv";
+  var DEFAULT_EFD_JSON_URL = "assets/efd_curated_sites_snapshot.json";
+  var DEFAULT_EFD_CSV_URL = "assets/efd_curated_sites_snapshot.csv";
   var AMERIFLUX_SITE_INFO_URL = "assets/ameriflux_site_info.csv";
   var FLUXNET2015_SITE_INFO_URL = "assets/siteinfo_fluxnet2015.csv";
   var SITE_NAME_METADATA_URL = "assets/site_name_metadata.csv";
@@ -17,8 +17,8 @@
   var MAX_PAGE_BUTTONS = 7;
   var SEARCH_DEBOUNCE_MS = 180;
   var STYLE_ID = "shuttle-explorer-inline-styles";
-  var SNAPSHOT_CACHE_SCHEMA_VERSION = 8;
-  var SNAPSHOT_CACHE_STORAGE_PREFIX = "shuttle-explorer:snapshot-cache:v8";
+  var SNAPSHOT_CACHE_SCHEMA_VERSION = 9;
+  var SNAPSHOT_CACHE_STORAGE_PREFIX = "shuttle-explorer:snapshot-cache:v9";
   var AMERIFLUX_FLUXNET_AVAILABILITY_URL = "https://amfcdn.lbl.gov/api/v2/data_availability/AmeriFlux/FLUXNET/CCBY4.0";
   var AMERIFLUX_BASE_AVAILABILITY_URL = "https://amfcdn.lbl.gov/api/v2/data_availability/AmeriFlux/BASE-BADM/CCBY4.0";
   var FLUXNET2015_AVAILABILITY_URL = "https://amfcdn.lbl.gov/api/v2/data_availability/FLUXNET/FLUXNET2015/CCBY4.0";
@@ -1159,6 +1159,11 @@
     var fluxList = String(row && row.flux_list || "").trim();
     var accessLabel = String(row && row.access_label || "").trim();
     var dataUseLabel = String(row && row.data_use_label || "").trim();
+    var efdAccessSummary = String(row && row.efd_access_summary || "").trim();
+    var efdPolicyYearCount = String(row && row.efd_policy_year_count || "").trim();
+    var efdPolicyFirstYear = String(row && row.efd_policy_first_year || "").trim();
+    var efdPolicyLastYear = String(row && row.efd_policy_last_year || "").trim();
+    var efdProvenance = String(row && row.efd_provenance || "").trim();
     return (
       String(row && row.site_id || "") + " " +
       String(row && row.site_name || "") + " " +
@@ -1174,6 +1179,11 @@
       fluxList + " " +
       accessLabel + " " +
       dataUseLabel + " " +
+      efdAccessSummary + " " +
+      efdPolicyYearCount + " " +
+      efdPolicyFirstYear + " " +
+      efdPolicyLastYear + " " +
+      efdProvenance + " " +
       String(row && row.years || "") + " " +
       surfacedSummary + " " +
       classification
@@ -3094,7 +3104,7 @@
         row.source_label = SOURCE_FILTER_TAG_EFD;
       }
       if (!row.source_reason) {
-        row.source_reason = "Listed in the public European Fluxes Database site catalog.";
+        row.source_reason = "Known EFD data record based on the public EFD site details and data-policy pages.";
       }
       if (!row.source_origin) {
         row.source_origin = EFD_SOURCE_ORIGIN;
@@ -3661,6 +3671,13 @@
     var accessLabel = String(raw.access_label || raw.access_policy_label || "").trim();
     var dataUseLabel = String(raw.data_use_label || raw.data_use_policy_label || "").trim();
     var requestPageUrl = String(raw.request_page_url || "").trim();
+    var sitePageUrl = String(raw.site_page_url || "").trim();
+    var knownDataRecord = String(raw.known_data_record || "").trim();
+    var efdAccessSummary = String(raw.efd_access_summary || "").trim();
+    var efdPolicyYearCount = String(raw.efd_policy_year_count || "").trim();
+    var efdPolicyFirstYear = String(raw.efd_policy_first_year || "").trim();
+    var efdPolicyLastYear = String(raw.efd_policy_last_year || "").trim();
+    var efdProvenance = String(raw.efd_provenance || "").trim();
     var lastUpdated = String(raw.last_updated || "").trim();
 
     if (!siteId || !hub || !downloadLink) {
@@ -3712,6 +3729,13 @@
       access_label: accessLabel,
       data_use_label: dataUseLabel,
       request_page_url: requestPageUrl,
+      site_page_url: sitePageUrl,
+      known_data_record: knownDataRecord,
+      efd_access_summary: efdAccessSummary,
+      efd_policy_year_count: efdPolicyYearCount,
+      efd_policy_first_year: efdPolicyFirstYear,
+      efd_policy_last_year: efdPolicyLastYear,
+      efd_provenance: efdProvenance,
       last_updated: lastUpdated
     };
     return finalizeRowComputedState(row);
@@ -4299,9 +4323,9 @@
         }
       } else if (option.mode === REQUEST_PAGE_DOWNLOAD_MODE) {
         option.actionLabel = option.sourceOrigin === EFD_SOURCE_ORIGIN || option.sourceLabel === SOURCE_FILTER_TAG_EFD
-          ? "Request at EFD"
+          ? "Request via EFD"
           : "Open request page";
-        option.title = "Login is required. Some EFD data may require PI approval, and download links are emailed after request submission.";
+        option.title = "Known EFD data record. Login may be required, some data may require PI approval or PI contact, and current direct download is not implied.";
       } else if (option.mode === LANDING_PAGE_DOWNLOAD_MODE) {
         option.actionLabel = "Open landing page";
         option.title = "Direct ZIP URL could not be validated automatically; open the ADS landing page to download manually.";
@@ -4581,7 +4605,7 @@
       "    <li>FLUXNET data are contributed by site teams around the world and distributed through one of three processing hubs: AmeriFlux (<a href=\"https://ameriflux.lbl.gov/\" target=\"_blank\" rel=\"noopener noreferrer\">https://ameriflux.lbl.gov/</a>), ICOS (<a href=\"https://www.icos-etc.eu/icos/\" target=\"_blank\" rel=\"noopener noreferrer\">https://www.icos-etc.eu/icos/</a>), or TERN (<a href=\"https://www.tern.org.au/\" target=\"_blank\" rel=\"noopener noreferrer\">https://www.tern.org.au/</a>).</li>",
       "    <li>The FLUXNET Shuttle serves data processed with the most recent ONEFlux version and should generally be treated as the highest-quality processed product available here. Choose the Source filter option [FLUXNET-Shuttle] to view the subset of FLUXNET-format datasets generated with this most up-to-date processing.</li>",
       "    <li>Rows labeled [JapanFlux] come from the public JapanFlux2024 ADS archive. Although JapanFlux2024 is provided in the FLUXNET format and gap-filled/partitioned, it is not processed with ONEflux.</li>",
-      "    <li>EFD records link to the European Fluxes Database request workflow. Login is required, some data may require PI approval, and download links are provided by EFD after request submission.</li>",
+      "    <li>EFD rows indicate known data records from the public EFD site and policy pages. Access remains request-based, may require PI approval or PI contact, and may not be directly downloadable from EFD.</li>",
       "    <li>For some sites, the AmeriFlux-BASE product currently extends to years that are not yet available in the corresponding FLUXNET product. Records from both products are presented in such cases</li>",
       "    <li>The bulk-download scripts may require users to install a jq package if neither jq nor python3 are already installed. jq is a lightweight command-line JSON parser used by the script workflow.</li>",
       "  </ul>",
@@ -4602,8 +4626,8 @@
     this.icosDirectCsvUrl = root.getAttribute("data-icos-direct-csv-src") || DEFAULT_ICOS_DIRECT_CSV_URL;
     this.japanFluxJsonUrl = root.getAttribute("data-japanflux-direct-json-src") || DEFAULT_JAPANFLUX_DIRECT_JSON_URL;
     this.japanFluxCsvUrl = root.getAttribute("data-japanflux-direct-csv-src") || DEFAULT_JAPANFLUX_DIRECT_CSV_URL;
-    this.efdJsonUrl = root.getAttribute("data-efd-json-src") || DEFAULT_EFD_JSON_URL;
-    this.efdCsvUrl = root.getAttribute("data-efd-csv-src") || DEFAULT_EFD_CSV_URL;
+    this.efdJsonUrl = root.getAttribute("data-efd-curated-json-src") || root.getAttribute("data-efd-json-src") || DEFAULT_EFD_JSON_URL;
+    this.efdCsvUrl = root.getAttribute("data-efd-curated-csv-src") || root.getAttribute("data-efd-csv-src") || DEFAULT_EFD_CSV_URL;
     this.ameriFluxSiteInfoUrl = root.getAttribute("data-ameriflux-site-info-src") || AMERIFLUX_SITE_INFO_URL;
     this.fluxnet2015SiteInfoUrl = root.getAttribute("data-fluxnet2015-site-info-src") || FLUXNET2015_SITE_INFO_URL;
     this.siteNameMetadataUrl = root.getAttribute("data-site-name-metadata-src") || SITE_NAME_METADATA_URL;

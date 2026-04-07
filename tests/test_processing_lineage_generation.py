@@ -180,13 +180,13 @@ class ProcessingLineageGenerationTests(unittest.TestCase):
             REPO_ROOT / "assets" / "shuttle_snapshot.csv",
             REPO_ROOT / "assets" / "icos_direct_fluxnet.csv",
             REPO_ROOT / "assets" / "japanflux_direct_snapshot.csv",
-            REPO_ROOT / "assets" / "efd_sites_snapshot.csv",
+            REPO_ROOT / "assets" / "efd_curated_sites_snapshot.csv",
         ]
         json_paths = [
             REPO_ROOT / "assets" / "shuttle_snapshot.json",
             REPO_ROOT / "assets" / "icos_direct_fluxnet.json",
             REPO_ROOT / "assets" / "japanflux_direct_snapshot.json",
-            REPO_ROOT / "assets" / "efd_sites_snapshot.json",
+            REPO_ROOT / "assets" / "efd_curated_sites_snapshot.json",
         ]
 
         for path in csv_paths:
