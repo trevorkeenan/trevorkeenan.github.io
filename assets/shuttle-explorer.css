@@ -128,10 +128,10 @@
 }
 
 .shuttle-explorer__range-value {
-  color: #23364a;
-  font-size: 0.95em;
-  font-weight: 600;
-  line-height: 1.2;
+  color: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  line-height: inherit;
 }
 
 .shuttle-explorer__range-meta {

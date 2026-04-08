@@ -4436,7 +4436,7 @@
       ".shuttle-explorer__years-filter{flex-direction:row;align-items:center;padding:10px 12px;border:1px solid #d5dbe3;border-radius:8px;background:#ffffff;gap:12px;}",
       ".shuttle-explorer__years-filter label{flex:0 0 auto;white-space:nowrap;}",
       ".shuttle-explorer__range-header{display:flex;justify-content:space-between;align-items:baseline;gap:12px;}",
-      ".shuttle-explorer__range-value{color:#23364a;font-size:.95em;font-weight:600;line-height:1.2;}",
+      ".shuttle-explorer__range-value{color:inherit;font-size:inherit;font-weight:inherit;line-height:inherit;}",
       ".shuttle-explorer__range-meta{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;}",
       ".shuttle-explorer__label-row{display:inline-flex;align-items:center;gap:6px;}",
       ".shuttle-explorer__tooltip-wrap{position:relative;display:inline-flex;align-items:center;}",
