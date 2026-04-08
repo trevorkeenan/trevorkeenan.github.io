@@ -72,6 +72,7 @@ OUTPUT_COLUMNS: Sequence[str] = (
     "known_data_record",
     "efd_access_summary",
     "efd_policy_year_count",
+    "efd_policy_years",
     "efd_policy_first_year",
     "efd_policy_last_year",
     "efd_provenance",
@@ -261,6 +262,7 @@ def score_row(row: Dict[str, Any]) -> Tuple[int, int]:
         "longitude",
         "known_data_record",
         "efd_policy_year_count",
+        "efd_policy_years",
         "site_page_url",
     ):
         if clean_string(row.get(key)):
@@ -305,6 +307,7 @@ def build_site_row(raw: Dict[str, Any], last_updated: str) -> Optional[Dict[str,
         "known_data_record": "",
         "efd_access_summary": "",
         "efd_policy_year_count": "",
+        "efd_policy_years": "",
         "efd_policy_first_year": "",
         "efd_policy_last_year": "",
         "efd_provenance": "",
@@ -599,7 +602,7 @@ def build_curated_site_row(base_row: Dict[str, Any], detail_html: str, last_upda
         return None
 
     labels = extract_detail_labels(detail_html)
-    years = [int(row["year"]) for row in evidence_rows if row.get("year")]
+    years = sorted({int(row["year"]) for row in evidence_rows if row.get("year")})
     access_values = join_tokens(row.get("access", "") for row in evidence_rows)
     data_use_values = join_tokens(row.get("data_use", "") for row in evidence_rows)
     row = dict(base_row)
@@ -620,8 +623,11 @@ def build_curated_site_row(base_row: Dict[str, Any], detail_html: str, last_upda
     row["source_reason"] = EFD_SOURCE_REASON
     row["site_page_url"] = site_detail_url(row.get("site_id", ""))
     row["known_data_record"] = "true"
+    row["first_year"] = str(years[0]) if years else ""
+    row["last_year"] = str(years[-1]) if years else ""
     row["efd_access_summary"] = summarize_access_rows(evidence_rows)
     row["efd_policy_year_count"] = str(len(years))
+    row["efd_policy_years"] = "; ".join(str(year) for year in years)
     row["efd_policy_first_year"] = str(min(years)) if years else ""
     row["efd_policy_last_year"] = str(max(years)) if years else ""
     row["efd_provenance"] = build_provenance_text(last_updated)

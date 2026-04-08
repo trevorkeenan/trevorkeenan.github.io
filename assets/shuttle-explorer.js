@@ -1162,6 +1162,9 @@
     var dataUseLabel = String(row && row.data_use_label || "").trim();
     var efdAccessSummary = String(row && row.efd_access_summary || "").trim();
     var efdPolicyYearCount = String(row && row.efd_policy_year_count || "").trim();
+    var efdPolicyYears = Array.isArray(row && row.efd_policy_years)
+      ? row.efd_policy_years.join(" ")
+      : String(row && row.efd_policy_years || "").trim();
     var efdPolicyFirstYear = String(row && row.efd_policy_first_year || "").trim();
     var efdPolicyLastYear = String(row && row.efd_policy_last_year || "").trim();
     var efdProvenance = String(row && row.efd_provenance || "").trim();
@@ -1182,6 +1185,7 @@
       dataUseLabel + " " +
       efdAccessSummary + " " +
       efdPolicyYearCount + " " +
+      efdPolicyYears + " " +
       efdPolicyFirstYear + " " +
       efdPolicyLastYear + " " +
       efdProvenance + " " +
@@ -1204,6 +1208,8 @@
   }
 
   function finalizeRowComputedState(row) {
+    var explicitYears;
+    var exactYears;
     if (!row || typeof row !== "object") {
       return row;
     }
@@ -1211,8 +1217,32 @@
     row.vegetation_type = normalizeVegetationType(row.vegetation_type);
     row.first_year = parseIntOrNull(row.first_year);
     row.last_year = parseIntOrNull(row.last_year);
-    row.years = yearRangeLabel(row.first_year, row.last_year);
-    row.length_years = calculateCoverageLength(row.first_year, row.last_year);
+    explicitYears = normalizePublishYears(preferredExplicitYearSource(row.publish_years, row.efd_policy_years));
+    exactYears = normalizedExactYears(explicitYears, row.first_year, row.last_year);
+    row.publish_years = explicitYears.slice();
+    row.efd_policy_years = isEfdSourceRow(row)
+      ? normalizePublishYears(preferredExplicitYearSource(row.efd_policy_years, explicitYears))
+      : normalizePublishYears(row.efd_policy_years);
+    if (isEfdSourceRow(row) && row.efd_policy_years.length) {
+      if (!String(row.efd_policy_year_count || "").trim()) {
+        row.efd_policy_year_count = String(row.efd_policy_years.length);
+      }
+      if (!String(row.efd_policy_first_year || "").trim()) {
+        row.efd_policy_first_year = String(row.efd_policy_years[0]);
+      }
+      if (!String(row.efd_policy_last_year || "").trim()) {
+        row.efd_policy_last_year = String(row.efd_policy_years[row.efd_policy_years.length - 1]);
+      }
+    }
+    if (exactYears.length) {
+      row.first_year = exactYears[0];
+      row.last_year = exactYears[exactYears.length - 1];
+      row.years = exactYearCoverageLabel(exactYears, row.first_year, row.last_year);
+      row.length_years = exactYears.length;
+    } else {
+      row.years = yearRangeLabel(row.first_year, row.last_year);
+      row.length_years = calculateCoverageLength(row.first_year, row.last_year);
+    }
     normalizeNetworkDisplay(row);
     row.source_origin = resolveSourceOrigin(row);
     row.source_priority = resolveSourcePriority(row);
@@ -2422,10 +2452,7 @@
   function normalizePublishYears(values) {
     var out = [];
     var seen = {};
-    if (!Array.isArray(values)) {
-      return out;
-    }
-    values.forEach(function (value) {
+    function addYear(value) {
       var year = parseIntOrNull(value);
       if (year == null) {
         return;
@@ -2435,11 +2462,40 @@
       }
       seen[year] = true;
       out.push(year);
-    });
+    }
+    function addValue(value) {
+      var matches;
+      if (Array.isArray(value)) {
+        value.forEach(addValue);
+        return;
+      }
+      if (value == null || value === "") {
+        return;
+      }
+      if (typeof value === "string") {
+        matches = value.match(/\b(?:19|20)\d{2}\b/g);
+        if (matches && (matches.length > 1 || /[,;|]/.test(value))) {
+          matches.forEach(addYear);
+          return;
+        }
+      }
+      addYear(value);
+    }
+    addValue(values);
     out.sort(function (a, b) {
       return a - b;
     });
     return out;
+  }
+
+  function preferredExplicitYearSource(values, fallbackValues) {
+    if (Array.isArray(values)) {
+      return values.length ? values : fallbackValues;
+    }
+    if (values != null && String(values).trim() !== "") {
+      return values;
+    }
+    return fallbackValues;
   }
 
   function buildContiguousYearArray(firstYear, lastYear) {
@@ -2869,6 +2925,11 @@
       row.last_year = unionYears[unionYears.length - 1];
       row.years = buildSurfacedCoverageSummary(products);
       row.length_years = unionYears.length;
+    } else if (availableYears.length) {
+      row.first_year = availableYears[0];
+      row.last_year = availableYears[availableYears.length - 1];
+      row.years = exactYearCoverageLabel(availableYears, row.first_year, row.last_year);
+      row.length_years = availableYears.length;
     } else {
       row.years = isEfdSourceRow(row) || isRequestOnlyRow(row)
         ? "Request via EFD"
@@ -3748,6 +3809,8 @@
     var knownDataRecord = String(raw.known_data_record || "").trim();
     var efdAccessSummary = String(raw.efd_access_summary || "").trim();
     var efdPolicyYearCount = String(raw.efd_policy_year_count || "").trim();
+    var publishYears = normalizePublishYears(preferredExplicitYearSource(raw.publish_years, raw.efd_policy_years));
+    var efdPolicyYears = publishYears.slice();
     var efdPolicyFirstYear = String(raw.efd_policy_first_year || "").trim();
     var efdPolicyLastYear = String(raw.efd_policy_last_year || "").trim();
     var efdProvenance = String(raw.efd_provenance || "").trim();
@@ -3769,10 +3832,10 @@
       network_display: networkDisplay,
       network_tokens: splitNetworks(networkDisplay),
       vegetation_type: vegetationType,
-      first_year: firstYear,
-      last_year: lastYear,
-      years: yearRangeLabel(firstYear, lastYear),
-      length_years: calculateCoverageLength(firstYear, lastYear),
+      first_year: publishYears.length ? publishYears[0] : firstYear,
+      last_year: publishYears.length ? publishYears[publishYears.length - 1] : lastYear,
+      years: exactYearCoverageLabel(publishYears, firstYear, lastYear),
+      length_years: publishYears.length ? publishYears.length : calculateCoverageLength(firstYear, lastYear),
       latitude: latitude,
       longitude: longitude,
       download_link: downloadLink,
@@ -3806,10 +3869,12 @@
       known_data_record: knownDataRecord,
       efd_access_summary: efdAccessSummary,
       efd_policy_year_count: efdPolicyYearCount,
+      efd_policy_years: efdPolicyYears,
       efd_policy_first_year: efdPolicyFirstYear,
       efd_policy_last_year: efdPolicyLastYear,
       efd_provenance: efdProvenance,
-      last_updated: lastUpdated
+      last_updated: lastUpdated,
+      publish_years: publishYears
     };
     return finalizeRowComputedState(row);
   }

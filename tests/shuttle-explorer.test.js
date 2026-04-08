@@ -126,15 +126,17 @@ function makeEfdRow(overrides) {
       network_display: 'EuroFlux;ICOS',
       network_tokens: ['EuroFlux', 'ICOS'],
       vegetation_type: 'ENF',
-      first_year: null,
-      last_year: null,
-      years: 'Request via EFD',
+      first_year: 2001,
+      last_year: 2002,
+      years: '2001-2002',
+      length_years: 2,
       download_link: 'https://www.europe-fluxdata.eu/home/data/request-data',
       download_mode: 'request_page',
       processing_lineage: '',
       source_label: 'EFD',
       source_reason: 'Known EFD data record based on the public EFD site details and data-policy pages. Access remains request-based via EFD; some data may require PI approval or PI contact, and current direct download is not implied.',
       source_origin: 'efd',
+      publish_years: [2001, 2002],
       flux_list: 'CO2-E; LE-E',
       access_label: 'Public; Private',
       data_use_label: 'Open; Close',
@@ -142,6 +144,7 @@ function makeEfdRow(overrides) {
       known_data_record: 'true',
       efd_access_summary: 'mixed',
       efd_policy_year_count: '2',
+      efd_policy_years: [2001, 2002],
       efd_policy_first_year: '2001',
       efd_policy_last_year: '2002',
       efd_provenance: 'Derived from the public EFD site-details pages and year-by-year data-policy tables on 2026-04-07.'
@@ -1200,6 +1203,10 @@ test('Minimum years filter defaults to 1 and keeps unknown-year request rows onl
     first_year: null,
     last_year: null,
     publish_years: [],
+    efd_policy_years: [],
+    efd_policy_year_count: '',
+    efd_policy_first_year: '',
+    efd_policy_last_year: '',
     surfacedProducts: [],
     length_years: null
   });
@@ -1208,6 +1215,35 @@ test('Minimum years filter defaults to 1 and keeps unknown-year request rows onl
   assert.equal(hooks.minimumYearsFilterMatches(requestOnlyRow, undefined), true);
   assert.equal(hooks.minimumYearsFilterMatches(requestOnlyRow, 1), true);
   assert.equal(hooks.minimumYearsFilterMatches(requestOnlyRow, 2), false);
+});
+
+test('EFD rows derive exact coverage years and minimum-length counts from explicit policy-bearing years', () => {
+  const row = hooks.mergeCatalogRows([], [], [], [], [], [], [
+    makeEfdRow({
+      site_id: 'NO-Gap',
+      first_year: null,
+      last_year: null,
+      years: 'Request via EFD',
+      length_years: null,
+      publish_years: [],
+      efd_policy_years: '2001; 2003; 2005',
+      efd_policy_year_count: '3',
+      efd_policy_first_year: '2001',
+      efd_policy_last_year: '2005'
+    })
+  ]).rows[0];
+
+  assert.deepEqual(row.publish_years, [2001, 2003, 2005]);
+  assert.deepEqual(row.efd_policy_years, [2001, 2003, 2005]);
+  assert.deepEqual(hooks.siteAvailableYears(row), [2001, 2003, 2005]);
+  assert.equal(hooks.siteAvailableYearCount(row), 3);
+  assert.equal(row.first_year, 2001);
+  assert.equal(row.last_year, 2005);
+  assert.equal(row.years, '2001, 2003, 2005');
+  assert.equal(row.length_years, 3);
+  assert.equal(hooks.minimumYearsFilterMatches(row, 3), true);
+  assert.equal(hooks.minimumYearsFilterMatches(row, 4), false);
+  assert.equal(hooks.renderSurfacedCoverageHtml(row), '2001, 2003, 2005');
 });
 
 test('Minimum years filter excludes sites below the threshold and keeps sites at or above it', () => {
@@ -1725,7 +1761,9 @@ test('EFD rows are only surfaced when no higher-precedence source already repres
   assert.equal(bySite['NO-Efd'].source_label, 'EFD');
   assert.equal(bySite['NO-Efd'].download_mode, 'request_page');
   assert.equal(bySite['NO-Efd'].download_link, 'https://www.europe-fluxdata.eu/home/data/request-data');
-  assert.equal(bySite['NO-Efd'].years, 'Request via EFD');
+  assert.equal(bySite['NO-Efd'].years, '2001-2002');
+  assert.deepEqual(bySite['NO-Efd'].publish_years, [2001, 2002]);
+  assert.equal(bySite['NO-Efd'].length_years, 2);
   assert.deepEqual(bySite['NO-Efd'].source_filter_tags, ['EFD']);
   assert.equal(bySite['NO-Efd'].surfacedProductClassification, 'other_processed');
   assert.deepEqual(bySite['NO-Efd'].availability_filter_labels, ['Other processed']);
@@ -1766,12 +1804,15 @@ test('EFD rows classify as other processed without being mislabeled as FLUXNET o
   assert.equal(row.hasFluxnetAvailable, false);
   assert.deepEqual(row.availability_filter_labels, ['Other processed']);
   assert.deepEqual(hooks.uniqueAvailabilityFilterValues([row]), ['Other processed']);
+  assert.deepEqual(hooks.siteAvailableYears(row), [2001, 2002]);
   assert.equal(hooks.rowMatchesExplorerFilters(row, { selectedSource: 'EFD' }), true);
   assert.equal(hooks.rowMatchesExplorerFilters(row, { selectedSource: 'ICOS' }), false);
   assert.equal(hooks.rowMatchesExplorerFilters(row, { selectedAvailability: 'FLUXNET processed' }), false);
   assert.equal(hooks.rowMatchesExplorerFilters(row, { selectedAvailability: 'Other processed' }), true);
+  assert.equal(hooks.rowMatchesExplorerFilters(row, { minimumYears: 2 }), true);
+  assert.equal(hooks.rowMatchesExplorerFilters(row, { minimumYears: 3 }), false);
   assert.equal(hooks.getSurfacedProductsForRow(row).length, 0);
-  assert.equal(hooks.renderSurfacedCoverageHtml(row), 'Request via EFD');
+  assert.equal(hooks.renderSurfacedCoverageHtml(row), '2001-2002');
   assert.equal(hooks.renderSurfacedCoverageHtml(row).includes('BASE'), false);
   assert.equal(hooks.renderSurfacedCoverageHtml(row).includes('FLUXNET'), false);
 });
@@ -1838,13 +1879,13 @@ test('Source, Availability, and minimum-years controls all exist in the explorer
   const sourceIndex = explorerJs.indexOf('label for=\\"shuttle-source\\">Source</label>');
   const availabilityIndex = explorerJs.indexOf('label for=\\"shuttle-availability\\">Availability</label>');
   const vegetationIndex = explorerJs.indexOf('label for=\\"shuttle-vegetation\\">Veg. type</label>');
-  const minimumYearsIndex = explorerJs.indexOf('label for=\\"shuttle-minimum-years\\">Minimum years available</label>');
+  const minimumYearsIndex = explorerJs.indexOf('label for=\\"shuttle-minimum-years\\">Minimum years available:');
 
   assert.equal(explorerJs.includes('label for=\\"shuttle-source\\">Source</label>'), true);
   assert.equal(explorerJs.includes('data-role=\\"source-filter\\"><option value=\\"\\">All sources</option>'), true);
   assert.equal(explorerJs.includes('label for=\\"shuttle-availability\\">Availability</label>'), true);
   assert.equal(explorerJs.includes('data-role=\\"availability-filter\\"><option value=\\"\\">All sites</option>'), true);
-  assert.equal(explorerJs.includes('label for=\\"shuttle-minimum-years\\">Minimum years available</label>'), true);
+  assert.equal(explorerJs.includes('label for=\\"shuttle-minimum-years\\">Minimum years available:'), true);
   assert.equal(explorerJs.includes('type=\\"range\\" min=\\"1\\" max=\\"1\\" step=\\"1\\" value=\\"1\\" data-role=\\"minimum-years-filter\\"'), true);
   assert.equal(availabilityIndex < sourceIndex, true);
   assert.equal(minimumYearsIndex > vegetationIndex, true);
