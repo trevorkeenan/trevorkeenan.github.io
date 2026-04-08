@@ -106,11 +106,18 @@
 }
 
 .shuttle-explorer__years-filter {
-  gap: 8px;
+  flex-direction: row;
+  align-items: center;
+  gap: 12px;
   padding: 10px 12px;
   border: 1px solid #d5dbe3;
   border-radius: 8px;
   background: #ffffff;
+}
+
+.shuttle-explorer__years-filter label {
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 .shuttle-explorer__range-header {
@@ -229,6 +236,8 @@
 }
 
 .shuttle-explorer__field input.shuttle-explorer__range-input {
+  flex: 1 1 auto;
+  min-width: 0;
   padding: 0;
   border: 0;
   border-radius: 0;
