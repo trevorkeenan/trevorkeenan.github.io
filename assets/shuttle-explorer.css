@@ -96,9 +96,43 @@
   min-width: 0;
 }
 
+.shuttle-explorer__field--full {
+  grid-column: 1 / -1;
+}
+
 .shuttle-explorer__field label {
   font-size: 0.82em;
   color: #4d5b6a;
+}
+
+.shuttle-explorer__years-filter {
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid #d5dbe3;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.shuttle-explorer__range-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.shuttle-explorer__range-value {
+  color: #23364a;
+  font-size: 0.95em;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.shuttle-explorer__range-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 
 .shuttle-explorer__label-row {
@@ -192,6 +226,14 @@
   font: inherit;
   font-size: 0.9em;
   line-height: 1.2;
+}
+
+.shuttle-explorer__field input.shuttle-explorer__range-input {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  accent-color: #2f5374;
 }
 
 .shuttle-explorer__field input:focus,

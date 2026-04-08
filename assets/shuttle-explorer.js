@@ -14,6 +14,7 @@
   var SITE_NAME_METADATA_URL = "assets/site_name_metadata.csv";
   var SITE_VEGETATION_METADATA_URL = "assets/site_vegetation_metadata.csv";
   var DEFAULT_PAGE_SIZE = 10;
+  var DEFAULT_MINIMUM_YEARS_FILTER = 1;
   var MAX_PAGE_BUTTONS = 7;
   var SEARCH_DEBOUNCE_MS = 180;
   var STYLE_ID = "shuttle-explorer-inline-styles";
@@ -1589,6 +1590,68 @@
     return availabilityFilterLabels(row).indexOf(selected) !== -1;
   }
 
+  function normalizeMinimumYearsValue(value, maxValue) {
+    var maximum = parseIntOrNull(maxValue);
+    var normalized = parseIntOrNull(value);
+    if (maximum != null && maximum < DEFAULT_MINIMUM_YEARS_FILTER) {
+      maximum = DEFAULT_MINIMUM_YEARS_FILTER;
+    }
+    if (normalized == null || normalized < DEFAULT_MINIMUM_YEARS_FILTER) {
+      normalized = DEFAULT_MINIMUM_YEARS_FILTER;
+    }
+    if (maximum != null && normalized > maximum) {
+      normalized = maximum;
+    }
+    return normalized;
+  }
+
+  function siteAvailableYears(row) {
+    var cachedYears;
+    var surfacedYears;
+    if (!row || typeof row !== "object") {
+      return [];
+    }
+    cachedYears = Array.isArray(row.available_years) ? row.available_years.slice() : [];
+    if (cachedYears.length) {
+      return cachedYears;
+    }
+    surfacedYears = buildSurfacedYearUnion(
+      Array.isArray(row.surfacedProducts) && row.surfacedProducts.length
+        ? row.surfacedProducts
+        : getSurfacedProductsForRow(row)
+    );
+    if (surfacedYears.length) {
+      return surfacedYears;
+    }
+    return normalizedExactYears(row.publish_years, row.first_year, row.last_year);
+  }
+
+  function siteAvailableYearCount(row) {
+    var cachedCount = parseIntOrNull(row && row.available_year_count);
+    if (cachedCount != null && cachedCount >= 0) {
+      return cachedCount;
+    }
+    return siteAvailableYears(row).length;
+  }
+
+  function maxSiteAvailableYearCount(rows) {
+    return Math.max(
+      DEFAULT_MINIMUM_YEARS_FILTER,
+      (Array.isArray(rows) ? rows : []).reduce(function (maxValue, row) {
+        return Math.max(maxValue, siteAvailableYearCount(row));
+      }, 0)
+    );
+  }
+
+  function minimumYearsFilterMatches(row, minimumYears) {
+    var threshold = normalizeMinimumYearsValue(minimumYears);
+    var availableYears = siteAvailableYearCount(row);
+    if (availableYears > 0) {
+      return availableYears >= threshold;
+    }
+    return threshold <= DEFAULT_MINIMUM_YEARS_FILTER;
+  }
+
   function rowMatchesExplorerFilters(row, filters) {
     var opts = filters || {};
     var search = String(opts.search || "").trim().toLowerCase();
@@ -1597,6 +1660,7 @@
     var selectedAvailability = String(opts.selectedAvailability || "");
     var selectedCountry = String(opts.selectedCountry || "");
     var selectedVegetation = String(opts.selectedVegetation || "");
+    var minimumYears = opts.minimumYears;
     var selectedHubs = opts.selectedHubs && typeof opts.selectedHubs === "object" ? opts.selectedHubs : {};
 
     if (search && String(row && row.search_text || "").indexOf(search) === -1) {
@@ -1618,6 +1682,9 @@
       return false;
     }
     if (Object.keys(selectedHubs).length && !selectedHubs[row.data_hub]) {
+      return false;
+    }
+    if (!minimumYearsFilterMatches(row, minimumYears)) {
       return false;
     }
     return true;
@@ -2778,6 +2845,9 @@
   function applySurfacedProductsToRow(row, primaryProcessedProduct, ameriFluxBaseProduct, surfacedProducts, classification) {
     var products = Array.isArray(surfacedProducts) ? surfacedProducts.slice() : [];
     var unionYears = buildSurfacedYearUnion(products);
+    var availableYears = unionYears.length
+      ? unionYears.slice()
+      : normalizedExactYears(row && row.publish_years, row && row.first_year, row && row.last_year);
     var rowClassification = String(classification || "").trim() || classifySurfacedProducts(products);
 
     if (!rowClassification && isEfdSourceRow(row)) {
@@ -2805,6 +2875,9 @@
         : yearRangeLabel(row.first_year, row.last_year);
       row.length_years = calculateCoverageLength(row.first_year, row.last_year);
     }
+    row.available_years = availableYears;
+    row.available_year_count = availableYears.length;
+    row.available_year_count_known = availableYears.length > 0;
 
     applyRowSourceFilterState(row);
     row.search_text = buildRowSearchText(row);
@@ -4358,7 +4431,12 @@
       ".shuttle-explorer__status.is-ok{background:#f3fbf4;color:#225e2b;border:1px solid #cfe8d4;}",
       ".shuttle-explorer__controls{display:grid;grid-template-columns:2fr 1fr 1fr 1fr 1fr 1fr;gap:10px;margin:0 0 10px;}",
       ".shuttle-explorer__field{display:flex;flex-direction:column;gap:4px;}",
+      ".shuttle-explorer__field--full{grid-column:1 / -1;}",
       ".shuttle-explorer__field label{font-size:.82em;color:#4d5b6a;}",
+      ".shuttle-explorer__years-filter{padding:10px 12px;border:1px solid #d5dbe3;border-radius:8px;background:#ffffff;gap:8px;}",
+      ".shuttle-explorer__range-header{display:flex;justify-content:space-between;align-items:baseline;gap:12px;}",
+      ".shuttle-explorer__range-value{color:#23364a;font-size:.95em;font-weight:600;line-height:1.2;}",
+      ".shuttle-explorer__range-meta{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;}",
       ".shuttle-explorer__label-row{display:inline-flex;align-items:center;gap:6px;}",
       ".shuttle-explorer__tooltip-wrap{position:relative;display:inline-flex;align-items:center;}",
       ".shuttle-explorer__tooltip-toggle{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;padding:0;border:1px solid #b7c1ce;border-radius:999px;background:#fff;color:#2f5374;font-size:.74em;font-weight:700;line-height:1;cursor:help;}",
@@ -4369,6 +4447,7 @@
       ".shuttle-explorer__tooltip a{color:#2f5374;}",
       ".shuttle-explorer__tooltip a:hover,.shuttle-explorer__tooltip a:focus{text-decoration:underline;}",
       ".shuttle-explorer__field input,.shuttle-explorer__field select{width:100%;padding:7px 8px;border:1px solid #b7c1ce;border-radius:6px;background:#fff;font:inherit;}",
+      ".shuttle-explorer__field input.shuttle-explorer__range-input{padding:0;border:0;border-radius:0;background:transparent;accent-color:#2f5374;}",
       ".shuttle-explorer__hub-filters{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 10px;}",
       ".shuttle-explorer__hub-chip{display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border:1px solid #d5dbe3;border-radius:999px;background:#f8fafc;font-size:.88em;}",
       ".shuttle-explorer__row{display:flex;justify-content:space-between;align-items:center;gap:10px;margin:0 0 10px;}",
@@ -4481,6 +4560,17 @@
       "      </span>",
       "    </div>",
       "    <select id=\"shuttle-vegetation\" data-role=\"vegetation-filter\"><option value=\"\">All vegetation types</option></select>",
+      "  </div>",
+      "  <div class=\"shuttle-explorer__field shuttle-explorer__field--full shuttle-explorer__years-filter\">",
+      "    <div class=\"shuttle-explorer__range-header\">",
+      "      <label for=\"shuttle-minimum-years\">Minimum years available</label>",
+      "      <span class=\"shuttle-explorer__range-value\" data-role=\"minimum-years-value\">1</span>",
+      "    </div>",
+      "    <input id=\"shuttle-minimum-years\" class=\"shuttle-explorer__range-input\" type=\"range\" min=\"1\" max=\"1\" step=\"1\" value=\"1\" data-role=\"minimum-years-filter\" />",
+      "    <div class=\"shuttle-explorer__range-meta\">",
+      "      <span class=\"shuttle-explorer__tiny\" data-role=\"minimum-years-range\">1 … 1</span>",
+      "      <span class=\"shuttle-explorer__tiny\">Show only sites with at least this many distinct available years.</span>",
+      "    </div>",
       "  </div>",
       "</div>",
       "<div class=\"shuttle-explorer__hub-filters shuttle-explorer__hidden\" data-role=\"hub-filters\" aria-label=\"Hub filters\"></div>",
@@ -4692,6 +4782,8 @@
       selectedAvailability: "",
       selectedCountry: "",
       selectedVegetation: "",
+      minimumYears: DEFAULT_MINIMUM_YEARS_FILTER,
+      maxAvailableYears: DEFAULT_MINIMUM_YEARS_FILTER,
       selectedHubs: {},
       selectedKeys: {},
       cliPanelVisible: false,
@@ -4728,6 +4820,9 @@
       availabilityFilter: bySelector(this.root, "[data-role='availability-filter']"),
       countryFilter: bySelector(this.root, "[data-role='country-filter']"),
       vegetationFilter: bySelector(this.root, "[data-role='vegetation-filter']"),
+      minimumYearsFilter: bySelector(this.root, "[data-role='minimum-years-filter']"),
+      minimumYearsValue: bySelector(this.root, "[data-role='minimum-years-value']"),
+      minimumYearsRange: bySelector(this.root, "[data-role='minimum-years-range']"),
       vegetationInfoWrap: bySelector(this.root, "[data-role='vegetation-info-wrap']"),
       vegetationInfoToggle: bySelector(this.root, "[data-role='vegetation-info-toggle']"),
       hubFilters: bySelector(this.root, "[data-role='hub-filters']"),
@@ -4863,6 +4958,29 @@
         self.updateDerivedState();
         self.render();
         self.trackFilterChange("vegetation_type", self.state.selectedVegetation);
+      });
+    }
+
+    if (b.minimumYearsFilter) {
+      var applyMinimumYears = function (shouldTrack) {
+        self.state.minimumYears = normalizeMinimumYearsValue(
+          b.minimumYearsFilter.value,
+          self.state.maxAvailableYears
+        );
+        self.state.page = 1;
+        self.syncMinimumYearsFilterControl();
+        self.updateDerivedState();
+        self.render();
+        if (shouldTrack) {
+          self.trackFilterChange("minimum_years", self.state.minimumYears);
+        }
+      };
+
+      b.minimumYearsFilter.addEventListener("input", function () {
+        applyMinimumYears(false);
+      });
+      b.minimumYearsFilter.addEventListener("change", function () {
+        applyMinimumYears(true);
       });
     }
 
@@ -5166,6 +5284,25 @@
     }
   };
 
+  Explorer.prototype.syncMinimumYearsFilterControl = function () {
+    var maximum = maxSiteAvailableYearCount(this.state.rows);
+    var currentValue = normalizeMinimumYearsValue(this.state.minimumYears, maximum);
+    this.state.maxAvailableYears = maximum;
+    this.state.minimumYears = currentValue;
+    if (this.bindings.minimumYearsFilter) {
+      this.bindings.minimumYearsFilter.min = String(DEFAULT_MINIMUM_YEARS_FILTER);
+      this.bindings.minimumYearsFilter.max = String(maximum);
+      this.bindings.minimumYearsFilter.step = "1";
+      this.bindings.minimumYearsFilter.value = String(currentValue);
+    }
+    if (this.bindings.minimumYearsValue) {
+      this.bindings.minimumYearsValue.textContent = String(currentValue);
+    }
+    if (this.bindings.minimumYearsRange) {
+      this.bindings.minimumYearsRange.textContent = DEFAULT_MINIMUM_YEARS_FILTER + " … " + maximum;
+    }
+  };
+
   Explorer.prototype.trackFilterChange = function (filterName, value) {
     gaEvent("fx_filter_change", {
       filter: String(filterName || ""),
@@ -5290,6 +5427,7 @@
     this.state.selectedAvailability = "";
     this.state.selectedCountry = "";
     this.state.selectedVegetation = "";
+    this.state.minimumYears = DEFAULT_MINIMUM_YEARS_FILTER;
     Object.keys(this.state.selectedHubs).forEach(function (hub) {
       self.state.selectedHubs[hub] = true;
     });
@@ -5315,6 +5453,7 @@
     if (this.bindings.vegetationFilter) {
       this.bindings.vegetationFilter.value = "";
     }
+    this.syncMinimumYearsFilterControl();
     qsa(this.bindings.hubFilters, "input[type='checkbox']").forEach(function (input) {
       input.checked = true;
     });
@@ -6822,6 +6961,8 @@
       }
     }
 
+    this.syncMinimumYearsFilterControl();
+
   };
 
   Explorer.prototype.updateDerivedState = function () {
@@ -6832,6 +6973,7 @@
     var selectedAvailability = this.state.selectedAvailability;
     var selectedCountry = this.state.selectedCountry;
     var selectedVegetation = this.state.selectedVegetation;
+    var minimumYears = this.state.minimumYears;
     var selectedHubs = this.state.selectedHubs;
 
     this.state.filteredRows = this.state.rows.filter(function (row) {
@@ -6842,6 +6984,7 @@
         selectedAvailability: selectedAvailability,
         selectedCountry: selectedCountry,
         selectedVegetation: selectedVegetation,
+        minimumYears: minimumYears,
         selectedHubs: selectedHubs
       });
     }).slice().sort(function (a, b) {
@@ -7330,6 +7473,11 @@
     vegetationDisplayLabel: vegetationDisplayLabel,
     calculateCoverageLength: calculateCoverageLength,
     formatCoordinate: formatCoordinate,
+    normalizeMinimumYearsValue: normalizeMinimumYearsValue,
+    siteAvailableYears: siteAvailableYears,
+    siteAvailableYearCount: siteAvailableYearCount,
+    maxSiteAvailableYearCount: maxSiteAvailableYearCount,
+    minimumYearsFilterMatches: minimumYearsFilterMatches,
     shouldEnableBulkToolsActions: shouldEnableBulkToolsActions,
     formatSelectedSiteCount: formatSelectedSiteCount,
     resolveAmeriFluxBulkIdentity: resolveAmeriFluxBulkIdentity,

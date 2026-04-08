@@ -1177,6 +1177,55 @@ test('Coordinate sorting uses underlying numeric values rather than formatted st
   assert.ok(hooks.compareRows(lower, missing, 'latitude', 'asc') < 0);
 });
 
+test('Site available year counting dedupes overlapping site-year coverage and exposes the dataset max', () => {
+  const overlapping = {
+    surfacedProducts: [
+      { exactYears: [2010, 2011, 2012] },
+      { exactYears: [2012, 2013, 2014] }
+    ]
+  };
+  const shorter = makeCatalogRow({
+    site_id: 'US-ShortYears',
+    first_year: 2020,
+    last_year: 2021
+  });
+
+  assert.deepEqual(hooks.siteAvailableYears(overlapping), [2010, 2011, 2012, 2013, 2014]);
+  assert.equal(hooks.siteAvailableYearCount(overlapping), 5);
+  assert.equal(hooks.maxSiteAvailableYearCount([shorter, overlapping]), 5);
+});
+
+test('Minimum years filter defaults to 1 and keeps unknown-year request rows only at the default threshold', () => {
+  const requestOnlyRow = makeEfdRow({
+    first_year: null,
+    last_year: null,
+    publish_years: [],
+    surfacedProducts: [],
+    length_years: null
+  });
+
+  assert.equal(hooks.normalizeMinimumYearsValue('', 9), 1);
+  assert.equal(hooks.minimumYearsFilterMatches(requestOnlyRow, undefined), true);
+  assert.equal(hooks.minimumYearsFilterMatches(requestOnlyRow, 1), true);
+  assert.equal(hooks.minimumYearsFilterMatches(requestOnlyRow, 2), false);
+});
+
+test('Minimum years filter excludes sites below the threshold and keeps sites at or above it', () => {
+  const shortRow = makeCatalogRow({
+    site_id: 'US-Two',
+    first_year: 2010,
+    last_year: 2011
+  });
+  const longRow = makeCatalogRow({
+    site_id: 'US-Five',
+    first_year: 2010,
+    last_year: 2014
+  });
+
+  assert.equal(hooks.rowMatchesExplorerFilters(shortRow, { minimumYears: 3 }), false);
+  assert.equal(hooks.rowMatchesExplorerFilters(longRow, { minimumYears: 3 }), true);
+});
+
 test('AmeriFlux bulk identity helper prefers explicit input values and otherwise falls back to defaults', () => {
   assert.deepEqual(
     hooks.resolveAmeriFluxBulkIdentity('', ''),
@@ -1784,16 +1833,21 @@ test('FLUXNET2015 supplemental rows infer regional networks from country while r
   assert.equal(hooks.rowMatchesExplorerFilters(bySite['XX-Leg'], { selectedSource: 'FLUXNET-2015' }), true);
 });
 
-test('Source and Availability controls both exist in the explorer markup', () => {
+test('Source, Availability, and minimum-years controls all exist in the explorer markup', () => {
   const explorerJs = fs.readFileSync(path.join(__dirname, '..', 'assets', 'shuttle-explorer.js'), 'utf8');
   const sourceIndex = explorerJs.indexOf('label for=\\"shuttle-source\\">Source</label>');
   const availabilityIndex = explorerJs.indexOf('label for=\\"shuttle-availability\\">Availability</label>');
+  const vegetationIndex = explorerJs.indexOf('label for=\\"shuttle-vegetation\\">Veg. type</label>');
+  const minimumYearsIndex = explorerJs.indexOf('label for=\\"shuttle-minimum-years\\">Minimum years available</label>');
 
   assert.equal(explorerJs.includes('label for=\\"shuttle-source\\">Source</label>'), true);
   assert.equal(explorerJs.includes('data-role=\\"source-filter\\"><option value=\\"\\">All sources</option>'), true);
   assert.equal(explorerJs.includes('label for=\\"shuttle-availability\\">Availability</label>'), true);
   assert.equal(explorerJs.includes('data-role=\\"availability-filter\\"><option value=\\"\\">All sites</option>'), true);
+  assert.equal(explorerJs.includes('label for=\\"shuttle-minimum-years\\">Minimum years available</label>'), true);
+  assert.equal(explorerJs.includes('type=\\"range\\" min=\\"1\\" max=\\"1\\" step=\\"1\\" value=\\"1\\" data-role=\\"minimum-years-filter\\"'), true);
   assert.equal(availabilityIndex < sourceIndex, true);
+  assert.equal(minimumYearsIndex > vegetationIndex, true);
 });
 
 test('Explorer summary copy refers to sites rather than records', () => {
@@ -1893,6 +1947,52 @@ test('Source and Availability filters compose for AmeriFlux provenance with FLUX
     .sort();
 
   assert.deepEqual(matchingSiteIds, ['US-Add', 'US-Pro']);
+});
+
+test('Minimum years filter composes with existing source and availability filters', () => {
+  const merged = hooks.mergeCatalogRows(
+    [],
+    [
+      makeCatalogRow({
+        site_id: 'BE-Ico',
+        site_name: 'ICOS Site',
+        country: 'BE',
+        data_hub: 'ICOS',
+        network: 'FLX',
+        source_network: 'FLX',
+        network_display: 'FLX',
+        network_tokens: ['FLX'],
+        first_year: 2001,
+        last_year: 2005,
+        years: '2001-2005',
+        download_link: 'https://example.org/be-ico.zip',
+        source_label: 'ICOS',
+        source_reason: '',
+        source_origin: 'icos_direct'
+      })
+    ],
+    [],
+    [],
+    []
+  );
+  const row = merged.rows[0];
+
+  assert.equal(
+    hooks.rowMatchesExplorerFilters(row, {
+      selectedSource: 'ICOS',
+      selectedAvailability: 'FLUXNET processed',
+      minimumYears: 5
+    }),
+    true
+  );
+  assert.equal(
+    hooks.rowMatchesExplorerFilters(row, {
+      selectedSource: 'ICOS',
+      selectedAvailability: 'FLUXNET processed',
+      minimumYears: 6
+    }),
+    false
+  );
 });
 
 test('Hybrid availability filter isolates sites with FLUXNET and additional processed years', () => {
