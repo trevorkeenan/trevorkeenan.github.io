@@ -133,6 +133,11 @@
   var TABLE_LABEL_FLUXNET_AND_OTHER = "Sites with both FLUXNET and additional processed years";
   var MAX_HTTP_RETRIES = 3;
   var RETRY_BASE_DELAY_MS = 500;
+  var EXTERNAL_REQUEST_TIMEOUT_MS = 8000;
+  var AVAILABILITY_HTTP_RETRIES = 1;
+  var AVAILABILITY_REQUEST_TIMEOUT_MS = 4000;
+  var AMERIFLUX_LIVE_UNAVAILABLE_WARNING = "AmeriFlux live availability is temporarily unavailable; showing committed snapshot data. Some live download actions may be temporarily unavailable.";
+  var AMERIFLUX_LIVE_CACHED_WARNING = "AmeriFlux live availability could not be refreshed; showing cached availability with committed snapshot data. Some live download actions may be temporarily unavailable.";
   var COPY_TABLE_BUTTON_LABEL = "Copy table to clipboard";
   var COPY_TABLE_SUCCESS_LABEL = "Copied!";
   var COPY_TABLE_FAILURE_LABEL = "Copy failed";
@@ -615,6 +620,7 @@
       source: entry.source || "",
       sourceUrl: entry.sourceUrl || "",
       warning: entry.warning || "",
+      downloadWarning: entry.downloadWarning || "",
       snapshotUpdatedDate: entry.snapshotUpdatedDate || "",
       rows: entry.rows,
       droppedRows: entry.droppedRows || 0,
@@ -2346,12 +2352,52 @@
     });
   }
 
+  function fetchWithTimeout(url, options, timeoutMs) {
+    var timeout = Math.max(0, parseInt(timeoutMs, 10) || 0);
+    var fetchOptions = {};
+
+    Object.keys(options || {}).forEach(function (key) {
+      if (key !== "timeoutMs") {
+        fetchOptions[key] = options[key];
+      }
+    });
+
+    if (!timeout || typeof AbortController === "undefined") {
+      return fetch(url, fetchOptions);
+    }
+
+    return new Promise(function (resolve, reject) {
+      var controller = new AbortController();
+      var timer = setTimeout(function () {
+        controller.abort();
+      }, timeout);
+
+      fetchOptions.signal = controller.signal;
+
+      fetch(url, fetchOptions)
+        .then(function (response) {
+          clearTimeout(timer);
+          resolve(response);
+        })
+        .catch(function (error) {
+          clearTimeout(timer);
+          if (error && error.name === "AbortError") {
+            var timeoutError = new Error("Request timed out after " + timeout + " ms for " + url);
+            timeoutError.isTimeout = true;
+            reject(timeoutError);
+            return;
+          }
+          reject(error);
+        });
+    });
+  }
+
   function fetchWithRetry(url, options, retryCount, baseDelayMs) {
     var retries = Math.max(0, parseInt(retryCount, 10) || 0);
     var delayBase = Math.max(50, parseInt(baseDelayMs, 10) || RETRY_BASE_DELAY_MS);
 
     function attempt(attemptNo) {
-      return fetch(url, options || {})
+      return fetchWithTimeout(url, options || {}, options && options.timeoutMs)
         .then(function (res) {
           if (res.ok) {
             return res;
@@ -2618,6 +2664,40 @@
       sitesWithYears: sites.length,
       sites: sites,
       freshnessKey: String(freshnessNamespace || "ameriflux") + ":" + stableHashString(canonical)
+    };
+  }
+
+  function availabilitySourceName(sourceLabel) {
+    var label = String(sourceLabel || "").trim();
+    if (!label) {
+      return "AmeriFlux live availability";
+    }
+    return label + " live availability";
+  }
+
+  function logSupplementalDependencyFailure(sourceLabel, url, error) {
+    if (!(typeof window !== "undefined" && window.console && console.warn)) {
+      return;
+    }
+    console.warn(
+      "[shuttle-explorer] " +
+        availabilitySourceName(sourceLabel) +
+        " unavailable for " +
+        url +
+        ": " +
+        (error && error.message ? error.message : String(error)),
+      error
+    );
+  }
+
+  function buildAvailabilityFallbackResult(sourceLabel, freshnessNamespace, warningText) {
+    return {
+      totalSites: 0,
+      sitesWithYears: 0,
+      sites: [],
+      warning: warningText || "",
+      downloadWarning: warningText || "",
+      freshnessKey: String(freshnessNamespace || sourceLabel || "availability") + ":unavailable"
     };
   }
 
@@ -4063,6 +4143,18 @@
     if (!isFinite(this.retryBaseDelayMs)) {
       this.retryBaseDelayMs = RETRY_BASE_DELAY_MS;
     }
+    this.requestTimeoutMs = parseInt(opts.requestTimeoutMs, 10);
+    if (!isFinite(this.requestTimeoutMs)) {
+      this.requestTimeoutMs = EXTERNAL_REQUEST_TIMEOUT_MS;
+    }
+    this.availabilityRetryCount = parseInt(opts.availabilityRetryCount, 10);
+    if (!isFinite(this.availabilityRetryCount)) {
+      this.availabilityRetryCount = this.retryCount;
+    }
+    this.availabilityTimeoutMs = parseInt(opts.availabilityTimeoutMs, 10);
+    if (!isFinite(this.availabilityTimeoutMs)) {
+      this.availabilityTimeoutMs = this.requestTimeoutMs;
+    }
   }
 
   AmeriFluxSource.prototype.getDownloadIdentity = function () {
@@ -4104,7 +4196,9 @@
       });
     }
 
-    return fetchJsonWithRetry(this.availabilityUrl, {}, this.retryCount, this.retryBaseDelayMs)
+    return fetchJsonWithRetry(this.availabilityUrl, {
+      timeoutMs: this.availabilityTimeoutMs
+    }, this.availabilityRetryCount, this.retryBaseDelayMs)
       .then(function (result) {
         var parsed = parseAmeriFluxAvailabilityPayload(result.payload || {}, self.freshnessNamespace);
         writeAvailabilityCache(self.availabilityCacheKey, parsed);
@@ -4113,20 +4207,23 @@
           sitesWithYears: parsed.sitesWithYears,
           sites: parsed.sites,
           warning: "",
+          downloadWarning: "",
           freshnessKey: parsed.freshnessKey
         };
       })
       .catch(function (error) {
+        logSupplementalDependencyFailure(self.sourceLabel, self.availabilityUrl, error);
         if (cached && Array.isArray(cached.sites) && cached.sites.length) {
           return {
             totalSites: cached.totalSites || 0,
             sitesWithYears: cached.sitesWithYears || 0,
             sites: cached.sites,
-            warning: "AmeriFlux availability refresh failed; using cached AmeriFlux availability.",
+            warning: AMERIFLUX_LIVE_CACHED_WARNING,
+            downloadWarning: AMERIFLUX_LIVE_CACHED_WARNING,
             freshnessKey: cached.freshnessKey || "ameriflux-cache:" + String(cached.cachedAt || "")
           };
         }
-        throw error;
+        return buildAvailabilityFallbackResult(self.sourceLabel, self.freshnessNamespace, AMERIFLUX_LIVE_UNAVAILABLE_WARNING);
       });
   };
 
@@ -4181,7 +4278,8 @@
         "Content-Type": "application/json",
         "Accept": "application/json"
       },
-      body: JSON.stringify(payload)
+      body: JSON.stringify(payload),
+      timeoutMs: this.requestTimeoutMs
     }, this.retryCount, this.retryBaseDelayMs).then(function (result) {
       var responsePayload = result.payload || {};
       var dataUrls = Array.isArray(responsePayload.data_urls) ? responsePayload.data_urls : [];
@@ -4288,10 +4386,12 @@
 
   function combineWarnings() {
     var parts = [];
+    var seen = {};
     var i;
     for (i = 0; i < arguments.length; i += 1) {
       var value = String(arguments[i] || "").trim();
-      if (value) {
+      if (value && !seen[value]) {
+        seen[value] = true;
         parts.push(value);
       }
     }
@@ -4648,6 +4748,7 @@
       "    <span class=\"shuttle-explorer__bulk-summary-count\" data-role=\"selection-count\">0 selected sites</span>",
       "  </summary>",
       "  <div class=\"shuttle-explorer__bulk-body\">",
+      "  <p class=\"shuttle-explorer__bulk-warning shuttle-explorer__hidden\" data-role=\"bulk-warning\"></p>",
       "  <div class=\"shuttle-explorer__bulk-actions shuttle-explorer__hidden\" data-role=\"all-selected-actions\">",
       "    <button type=\"button\" class=\"shuttle-explorer__btn shuttle-explorer__btn--small\" data-role=\"download-all-selected-script\">Download all selected scripts</button>",
       "    <button type=\"button\" class=\"shuttle-explorer__btn shuttle-explorer__btn--small\" data-role=\"copy-all-selected-script\">Copy download all selected script</button>",
@@ -4796,7 +4897,9 @@
       dataProduct: AMERIFLUX_FLUXNET_PRODUCT,
       sourceLabel: AMERIFLUX_SOURCE_ONLY,
       availabilityCacheKey: AMERIFLUX_FLUXNET_AVAILABILITY_CACHE_KEY,
-      freshnessNamespace: "ameriflux-fluxnet"
+      freshnessNamespace: "ameriflux-fluxnet",
+      availabilityRetryCount: AVAILABILITY_HTTP_RETRIES,
+      availabilityTimeoutMs: AVAILABILITY_REQUEST_TIMEOUT_MS
     });
     this.ameriFluxBaseSource = new AmeriFluxSource({
       availabilityUrl: AMERIFLUX_BASE_AVAILABILITY_URL,
@@ -4807,7 +4910,9 @@
       dataProduct: AMERIFLUX_BASE_PRODUCT,
       sourceLabel: BASE_SOURCE_ONLY,
       availabilityCacheKey: AMERIFLUX_BASE_AVAILABILITY_CACHE_KEY,
-      freshnessNamespace: "ameriflux-base"
+      freshnessNamespace: "ameriflux-base",
+      availabilityRetryCount: AVAILABILITY_HTTP_RETRIES,
+      availabilityTimeoutMs: AVAILABILITY_REQUEST_TIMEOUT_MS
     });
     this.fluxnet2015Source = new AmeriFluxSource({
       availabilityUrl: FLUXNET2015_AVAILABILITY_URL,
@@ -4818,7 +4923,9 @@
       dataProduct: FLUXNET2015_PRODUCT,
       sourceLabel: FLUXNET2015_SOURCE_ONLY,
       availabilityCacheKey: FLUXNET2015_AVAILABILITY_CACHE_KEY,
-      freshnessNamespace: "ameriflux-fluxnet2015"
+      freshnessNamespace: "ameriflux-fluxnet2015",
+      availabilityRetryCount: AVAILABILITY_HTTP_RETRIES,
+      availabilityTimeoutMs: AVAILABILITY_REQUEST_TIMEOUT_MS
     });
     this.ameriFluxApiSources = {};
     this.ameriFluxApiSources[AMERIFLUX_FLUXNET_PRODUCT] = this.ameriFluxSource;
@@ -4832,6 +4939,7 @@
       source: "",
       sourceUrl: "",
       warning: "",
+      downloadWarning: "",
       snapshotUpdatedDate: "",
       droppedRows: 0,
       errorMessage: "",
@@ -4893,6 +5001,7 @@
       bulkPanel: bySelector(this.root, "[data-role='bulk-panel']"),
       selectionCount: bySelector(this.root, "[data-role='selection-count']"),
       allSelectedActions: bySelector(this.root, "[data-role='all-selected-actions']"),
+      bulkWarning: bySelector(this.root, "[data-role='bulk-warning']"),
       downloadAllSelectedScript: bySelector(this.root, "[data-role='download-all-selected-script']"),
       copyAllSelectedScript: bySelector(this.root, "[data-role='copy-all-selected-script']"),
       shuttleBulkSection: bySelector(this.root, "[data-role='shuttle-bulk-section']"),
@@ -6739,6 +6848,10 @@
     if (b.selectionCount) {
       b.selectionCount.textContent = formatSelectedSiteCount(selectedCount);
     }
+    if (b.bulkWarning) {
+      b.bulkWarning.textContent = this.state.downloadWarning || "";
+      b.bulkWarning.classList.toggle("shuttle-explorer__hidden", !this.state.downloadWarning);
+    }
 
     if (b.allSelectedActions) {
       b.allSelectedActions.classList.toggle("shuttle-explorer__hidden", !(allowBulkActions && selectionSummary.showAllSelectedActions));
@@ -7292,6 +7405,7 @@
     this.state.source = snapshot && snapshot.source ? snapshot.source : "";
     this.state.sourceUrl = snapshot && snapshot.sourceUrl ? snapshot.sourceUrl : "";
     this.state.warning = snapshot && snapshot.warning ? snapshot.warning : "";
+    this.state.downloadWarning = snapshot && snapshot.downloadWarning ? snapshot.downloadWarning : "";
     this.state.snapshotUpdatedDate = snapshot && snapshot.snapshotUpdatedDate ? snapshot.snapshotUpdatedDate : "";
     this.state.amerifluxTotalSites = snapshot && snapshot.amerifluxTotalSites ? snapshot.amerifluxTotalSites : 0;
     this.state.amerifluxSitesWithYears = snapshot && snapshot.amerifluxSitesWithYears ? snapshot.amerifluxSitesWithYears : 0;
@@ -7309,7 +7423,7 @@
     this.trackExplorerLoadedOnce();
   };
 
-  Explorer.prototype.buildMergedSnapshotState = function (shuttleResult, icosDirectResult, japanFluxResult, efdResult, ameriResult, ameriBaseResult, fluxnet2015Result, ameriFluxSiteInfoResult, fluxnet2015SiteInfoResult, siteNameMetadataResult, vegetationMetadataResult) {
+  function buildMergedSnapshotStateForRoot(jsonUrl, shuttleResult, icosDirectResult, japanFluxResult, efdResult, ameriResult, ameriBaseResult, fluxnet2015Result, ameriFluxSiteInfoResult, fluxnet2015SiteInfoResult, siteNameMetadataResult, vegetationMetadataResult) {
     var ameriFluxSiteInfoLookup = ameriFluxSiteInfoResult && ameriFluxSiteInfoResult.lookup ? ameriFluxSiteInfoResult.lookup : {};
     var fluxnet2015SiteInfoLookup = fluxnet2015SiteInfoResult && fluxnet2015SiteInfoResult.lookup ? fluxnet2015SiteInfoResult.lookup : {};
     var siteNameMetadataLookup = siteNameMetadataResult && siteNameMetadataResult.lookup ? siteNameMetadataResult.lookup : {};
@@ -7343,7 +7457,7 @@
       rows: rows,
       droppedRows: shuttleResult && shuttleResult.droppedRows ? shuttleResult.droppedRows : 0,
       source: "Shuttle + ICOS + JapanFlux + AmeriFlux FLUXNET + AmeriFlux BASE + FLUXNET2015 + EFD",
-      sourceUrl: shuttleResult && shuttleResult.sourceUrl ? shuttleResult.sourceUrl : this.jsonUrl,
+      sourceUrl: shuttleResult && shuttleResult.sourceUrl ? shuttleResult.sourceUrl : jsonUrl,
       warning: combineWarnings(
         shuttleResult && shuttleResult.warning ? shuttleResult.warning : "",
         icosDirectResult && icosDirectResult.warning ? icosDirectResult.warning : "",
@@ -7357,6 +7471,11 @@
         siteNameMetadataResult && siteNameMetadataResult.warning ? siteNameMetadataResult.warning : "",
         vegetationMetadataResult && vegetationMetadataResult.warning ? vegetationMetadataResult.warning : ""
       ),
+      downloadWarning: combineWarnings(
+        ameriResult && ameriResult.downloadWarning ? ameriResult.downloadWarning : "",
+        ameriBaseResult && ameriBaseResult.downloadWarning ? ameriBaseResult.downloadWarning : "",
+        fluxnet2015Result && fluxnet2015Result.downloadWarning ? fluxnet2015Result.downloadWarning : ""
+      ),
       snapshotUpdatedDate: extractSnapshotUpdatedDate(shuttleResult && shuttleResult.meta ? shuttleResult.meta : {}),
       amerifluxTotalSites: ameriResult && ameriResult.totalSites ? ameriResult.totalSites : 0,
       amerifluxSitesWithYears: ameriResult && ameriResult.sitesWithYears ? ameriResult.sitesWithYears : 0,
@@ -7368,10 +7487,28 @@
     };
   };
 
+  Explorer.prototype.buildMergedSnapshotState = function (shuttleResult, icosDirectResult, japanFluxResult, efdResult, ameriResult, ameriBaseResult, fluxnet2015Result, ameriFluxSiteInfoResult, fluxnet2015SiteInfoResult, siteNameMetadataResult, vegetationMetadataResult) {
+    return buildMergedSnapshotStateForRoot(
+      this.jsonUrl,
+      shuttleResult,
+      icosDirectResult,
+      japanFluxResult,
+      efdResult,
+      ameriResult,
+      ameriBaseResult,
+      fluxnet2015Result,
+      ameriFluxSiteInfoResult,
+      fluxnet2015SiteInfoResult,
+      siteNameMetadataResult,
+      vegetationMetadataResult
+    );
+  };
+
   Explorer.prototype.load = function () {
     var self = this;
     var cached = readSnapshotCache(this.jsonUrl, this.csvUrl);
     var hadCache = !!(cached && Array.isArray(cached.rows) && cached.rows.length);
+    var localResultsBundle = null;
 
     this.setMode("loading", "Loading snapshot…", "is-loading");
     if (hadCache) {
@@ -7381,7 +7518,8 @@
         source: cached.source || "cache",
         sourceUrl: cached.sourceUrl || this.jsonUrl,
         warning: cached.warning || "",
-          snapshotUpdatedDate: cached.snapshotUpdatedDate || "",
+        downloadWarning: cached.downloadWarning || "",
+        snapshotUpdatedDate: cached.snapshotUpdatedDate || "",
         amerifluxTotalSites: cached.amerifluxTotalSites || 0,
         amerifluxSitesWithYears: cached.amerifluxSitesWithYears || 0,
         amerifluxOverlapSites: cached.amerifluxOverlapSites || 0,
@@ -7397,9 +7535,6 @@
       this.icosDirectSource.list_sites(),
       this.japanFluxSource.list_sites(),
       this.efdSource.list_sites(),
-      this.ameriFluxSource.list_sites(),
-      this.ameriFluxBaseSource.list_sites(),
-      this.fluxnet2015Source.list_sites(),
       loadAmeriFluxSiteInfo(this.ameriFluxSiteInfoUrl),
       loadFluxnet2015SiteInfo(this.fluxnet2015SiteInfoUrl),
       loadSiteNameMetadata(this.siteNameMetadataUrl),
@@ -7410,13 +7545,58 @@
         var icosDirectResult = results[1] || {};
         var japanFluxResult = results[2] || {};
         var efdResult = results[3] || {};
-        var ameriResult = results[4] || {};
-        var ameriBaseResult = results[5] || {};
-        var fluxnet2015Result = results[6] || {};
-        var ameriFluxSiteInfoResult = results[7] || {};
-        var fluxnet2015SiteInfoResult = results[8] || {};
-        var siteNameMetadataResult = results[9] || {};
-        var vegetationMetadataResult = results[10] || {};
+        var ameriFluxSiteInfoResult = results[4] || {};
+        var fluxnet2015SiteInfoResult = results[5] || {};
+        var siteNameMetadataResult = results[6] || {};
+        var vegetationMetadataResult = results[7] || {};
+        var baseSnapshotState;
+
+        localResultsBundle = {
+          shuttleResult: shuttleResult,
+          icosDirectResult: icosDirectResult,
+          japanFluxResult: japanFluxResult,
+          efdResult: efdResult,
+          ameriFluxSiteInfoResult: ameriFluxSiteInfoResult,
+          fluxnet2015SiteInfoResult: fluxnet2015SiteInfoResult,
+          siteNameMetadataResult: siteNameMetadataResult,
+          vegetationMetadataResult: vegetationMetadataResult
+        };
+        baseSnapshotState = self.buildMergedSnapshotState(
+          shuttleResult,
+          icosDirectResult,
+          japanFluxResult,
+          efdResult,
+          buildAvailabilityFallbackResult(AMERIFLUX_SOURCE_ONLY, "ameriflux-fluxnet", ""),
+          buildAvailabilityFallbackResult(BASE_SOURCE_ONLY, "ameriflux-base", ""),
+          buildAvailabilityFallbackResult(FLUXNET2015_SOURCE_ONLY, "ameriflux-fluxnet2015", ""),
+          ameriFluxSiteInfoResult,
+          fluxnet2015SiteInfoResult,
+          siteNameMetadataResult,
+          vegetationMetadataResult
+        );
+
+        if (!hadCache || self.state.mode !== "ready" || !self.state.rows.length) {
+          self.applyLoadedSnapshotState(baseSnapshotState);
+        }
+
+        return Promise.all([
+          self.ameriFluxSource.list_sites(),
+          self.ameriFluxBaseSource.list_sites(),
+          self.fluxnet2015Source.list_sites()
+        ]);
+      })
+      .then(function (availabilityResults) {
+        var ameriResult = availabilityResults[0] || {};
+        var ameriBaseResult = availabilityResults[1] || {};
+        var fluxnet2015Result = availabilityResults[2] || {};
+        var shuttleResult = localResultsBundle ? localResultsBundle.shuttleResult : {};
+        var icosDirectResult = localResultsBundle ? localResultsBundle.icosDirectResult : {};
+        var japanFluxResult = localResultsBundle ? localResultsBundle.japanFluxResult : {};
+        var efdResult = localResultsBundle ? localResultsBundle.efdResult : {};
+        var ameriFluxSiteInfoResult = localResultsBundle ? localResultsBundle.ameriFluxSiteInfoResult : {};
+        var fluxnet2015SiteInfoResult = localResultsBundle ? localResultsBundle.fluxnet2015SiteInfoResult : {};
+        var siteNameMetadataResult = localResultsBundle ? localResultsBundle.siteNameMetadataResult : {};
+        var vegetationMetadataResult = localResultsBundle ? localResultsBundle.vegetationMetadataResult : {};
         var snapshotState = self.buildMergedSnapshotState(
           shuttleResult,
           icosDirectResult,
@@ -7452,6 +7632,7 @@
           source: snapshotState.source,
           sourceUrl: snapshotState.sourceUrl,
           warning: snapshotState.warning,
+          downloadWarning: snapshotState.downloadWarning,
           snapshotUpdatedDate: snapshotState.snapshotUpdatedDate,
           amerifluxTotalSites: snapshotState.amerifluxTotalSites,
           amerifluxSitesWithYears: snapshotState.amerifluxSitesWithYears,
@@ -7464,7 +7645,9 @@
       })
       .catch(function (error) {
         if (hadCache && self.state.mode === "ready" && self.state.rows.length) {
-          var msg = "Update check failed; showing cached snapshot.";
+          var msg = localResultsBundle
+            ? "Live availability refresh failed; showing cached or snapshot-backed data."
+            : "Snapshot refresh failed; showing cached snapshot.";
           self.state.warning = self.state.warning ? (self.state.warning + " " + msg) : msg;
           self.render();
           return;
@@ -7525,6 +7708,7 @@
     normalizeCountryName: normalizeCountryName,
     inferFluxnet2015NetworkFromCountry: inferFluxnet2015NetworkFromCountry,
     deriveCountry: deriveCountry,
+    normalizeRows: normalizeRows,
     normalizeNetworkToken: normalizeNetworkToken,
     normalizeNetworkTokens: normalizeNetworkTokens,
     normalizeNetworkDisplayValue: normalizeNetworkDisplayValue,
@@ -7584,6 +7768,11 @@
     enrichAmeriFluxSitesWithMetadata: enrichAmeriFluxSitesWithMetadata,
     buildFluxnet2015SiteLookup: buildFluxnet2015SiteLookup,
     enrichFluxnet2015SitesWithMetadata: enrichFluxnet2015SitesWithMetadata,
+    buildMergedSnapshotStateForRoot: buildMergedSnapshotStateForRoot,
+    loadAmeriFluxSiteInfo: loadAmeriFluxSiteInfo,
+    loadFluxnet2015SiteInfo: loadFluxnet2015SiteInfo,
+    loadSiteNameMetadata: loadSiteNameMetadata,
+    loadVegetationMetadata: loadVegetationMetadata,
     createAmeriFluxSource: function (options) {
       return new AmeriFluxSource(options || {});
     }

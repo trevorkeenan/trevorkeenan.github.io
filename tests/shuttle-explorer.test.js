@@ -169,6 +169,41 @@ function makeAvailabilitySite(siteId, publishYears, overrides) {
   );
 }
 
+function loadSnapshotResult(relativePath) {
+  const absolutePath = path.join(__dirname, '..', relativePath);
+  const payload = JSON.parse(fs.readFileSync(absolutePath, 'utf8'));
+  const normalized = hooks.normalizeRows(hooks.payloadJsonToObjects(payload));
+
+  return {
+    rows: normalized.rows,
+    droppedRows: normalized.dropped,
+    source: 'json',
+    sourceUrl: relativePath,
+    warning: '',
+    meta: payload.meta || {}
+  };
+}
+
+function emptyLookupResult() {
+  return {
+    lookup: {},
+    source: 'csv',
+    sourceUrl: '',
+    lastModified: '',
+    warning: '',
+    meta: {}
+  };
+}
+
+function mockHeaders(values) {
+  const map = Object.assign({}, values || {});
+  return {
+    get(name) {
+      return Object.prototype.hasOwnProperty.call(map, name) ? map[name] : '';
+    }
+  };
+}
+
 function expectedJqGuidancePattern() {
   if (process.platform === 'darwin') {
     return /macOS: brew install jq/;
@@ -2947,4 +2982,142 @@ test('Explorer page and runtime do not hardcode stale last-updated dates', () =>
   assert.equal(/last updated:\s*202\d-\d{2}-\d{2}/.test(explorerJs), false);
   assert.equal(/last updated:\s*202\d-\d{2}-\d{2}/.test(explorerHtml), false);
   assert.equal(/Available data is updated as of:\s*202\d-\d{2}-\d{2}/.test(explorerJs), false);
+});
+
+test('Committed snapshot layers normalize without dropped rows under the current schema assumptions', () => {
+  [
+    'assets/shuttle_snapshot.json',
+    'assets/icos_direct_fluxnet.json',
+    'assets/japanflux_direct_snapshot.json',
+    'assets/efd_curated_sites_snapshot.json'
+  ].forEach((relativePath) => {
+    const absolutePath = path.join(__dirname, '..', relativePath);
+    const payload = JSON.parse(fs.readFileSync(absolutePath, 'utf8'));
+    const normalized = hooks.normalizeRows(hooks.payloadJsonToObjects(payload));
+
+    assert.equal(normalized.dropped, 0, relativePath + ' should not drop rows during normalization');
+    assert.equal(normalized.rows.length, payload.rows.length, relativePath + ' should keep every committed row');
+  });
+});
+
+test('Explorer can build a snapshot-only merged state from committed artifacts when AmeriFlux live availability is unavailable', () => {
+  const shuttleResult = loadSnapshotResult('assets/shuttle_snapshot.json');
+  const icosResult = loadSnapshotResult('assets/icos_direct_fluxnet.json');
+  const japanFluxResult = loadSnapshotResult('assets/japanflux_direct_snapshot.json');
+  const efdResult = loadSnapshotResult('assets/efd_curated_sites_snapshot.json');
+  const emptyAvailability = {
+    totalSites: 0,
+    sitesWithYears: 0,
+    sites: [],
+    warning: '',
+    downloadWarning: '',
+    freshnessKey: 'unavailable'
+  };
+  const merged = hooks.buildMergedSnapshotStateForRoot(
+    'assets/shuttle_snapshot.json',
+    shuttleResult,
+    icosResult,
+    japanFluxResult,
+    efdResult,
+    emptyAvailability,
+    emptyAvailability,
+    emptyAvailability,
+    emptyLookupResult(),
+    emptyLookupResult(),
+    emptyLookupResult(),
+    emptyLookupResult()
+  );
+
+  assert.equal(merged.rows.length > 0, true);
+  assert.equal(merged.warning, '');
+  assert.equal(merged.downloadWarning, '');
+  assert.equal(merged.rows.some((row) => row.source_label === 'EFD'), true);
+  assert.equal(merged.rows.some((row) => row.source_label === 'ICOS'), true);
+  assert.equal(merged.rows.some((row) => row.source_label === 'JapanFlux'), true);
+  assert.equal(merged.rows.some((row) => Array.isArray(row.source_filter_tags) && row.source_filter_tags.includes('AmeriFlux-Shuttle')), true);
+  assert.equal(merged.rows.some((row) => row.latitude != null && row.longitude != null), true);
+});
+
+test('AmeriFlux availability failures degrade to snapshot-only mode for HTTP, network, and timeout failures', async () => {
+  const originalFetch = global.fetch;
+  const scenarios = [
+    {
+      name: 'http-503',
+      fetchImpl: async () => ({
+        ok: false,
+        status: 503,
+        text: async () => 'service unavailable',
+        headers: mockHeaders()
+      })
+    },
+    {
+      name: 'network-failure',
+      fetchImpl: async () => {
+        throw new TypeError('Failed to fetch');
+      }
+    },
+    {
+      name: 'timeout',
+      fetchImpl: async (url, options) => new Promise((resolve, reject) => {
+        options.signal.addEventListener('abort', () => {
+          const error = new Error('aborted');
+          error.name = 'AbortError';
+          reject(error);
+        });
+      }),
+      maxDurationMs: 400
+    }
+  ];
+
+  try {
+    for (const scenario of scenarios) {
+      global.fetch = scenario.fetchImpl;
+      const source = hooks.createAmeriFluxSource({
+        availabilityUrl: 'https://example.test/' + scenario.name,
+        sourceLabel: 'AmeriFlux',
+        freshnessNamespace: 'ameriflux-test',
+        retryCount: 0,
+        requestTimeoutMs: 25
+      });
+      const startedAt = Date.now();
+      const result = await source.list_sites();
+
+      assert.equal(result.totalSites, 0, scenario.name + ' should not surface stale live rows');
+      assert.equal(result.sitesWithYears, 0, scenario.name + ' should not surface stale live rows');
+      assert.deepEqual(result.sites, [], scenario.name + ' should fall back to local snapshot-only mode');
+      assert.equal(
+        result.warning,
+        'AmeriFlux live availability is temporarily unavailable; showing committed snapshot data. Some live download actions may be temporarily unavailable.'
+      );
+      assert.equal(result.downloadWarning, result.warning);
+      assert.match(result.freshnessKey, /^ameriflux-test:unavailable$/);
+      if (scenario.maxDurationMs) {
+        assert.equal(Date.now() - startedAt < scenario.maxDurationMs, true, scenario.name + ' should resolve promptly');
+      }
+    }
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('Supplemental metadata loaders return warnings instead of rejecting when a supplemental CSV is malformed', async () => {
+  const originalFetch = global.fetch;
+
+  try {
+    global.fetch = async () => ({
+      ok: true,
+      text: async () => 'site_id,\"broken',
+      headers: mockHeaders()
+    });
+
+    const siteNameResult = await hooks.loadSiteNameMetadata('https://example.test/site_name_metadata.csv');
+    const vegetationResult = await hooks.loadVegetationMetadata('https://example.test/site_vegetation_metadata.csv');
+
+    assert.deepEqual(siteNameResult.lookup, {});
+    assert.match(siteNameResult.warning, /Site-name metadata unavailable/);
+    assert.deepEqual(vegetationResult.lookup, {});
+    assert.match(vegetationResult.warning, /Vegetation metadata unavailable/);
+  } finally {
+    global.fetch = originalFetch;
+  }
 });
