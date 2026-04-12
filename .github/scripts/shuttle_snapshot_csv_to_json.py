@@ -28,6 +28,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--input", required=True, help="Input CSV path (e.g. assets/shuttle_snapshot.csv)")
     parser.add_argument("--output", required=True, help="Output JSON path (e.g. assets/shuttle_snapshot.json)")
     parser.add_argument(
+        "--source-status-input",
+        default="",
+        help="Optional JSON file containing per-source Shuttle refresh status metadata.",
+    )
+    parser.add_argument(
         "--snapshot-updated-at",
         default="",
         help="Snapshot refresh timestamp in ISO-8601 form (e.g. 2026-03-11T06:04:47Z)",
@@ -81,6 +86,23 @@ def load_existing_meta(output_path: Path) -> Dict[str, object]:
     if isinstance(meta, dict):
         return meta
     return {}
+
+
+def load_source_statuses(path_value: str) -> Dict[str, object]:
+    raw_path = (path_value or "").strip()
+    if not raw_path:
+        return {}
+    path = Path(raw_path)
+    if not path.exists():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    statuses = payload.get("source_statuses")
+    if not isinstance(statuses, dict):
+        return {}
+    return {str(key): value for key, value in statuses.items() if isinstance(value, dict)}
 
 
 def normalize_snapshot_updated_at(value: str) -> str:
@@ -208,19 +230,24 @@ def main() -> None:
     version_hash = hashlib.sha256(canonical_data_json.encode("utf-8")).hexdigest()
     version_value = f"sha256:{version_hash}"
     existing_meta = load_existing_meta(output_path)
+    source_statuses = load_source_statuses(args.source_status_input)
     snapshot_updated_at, snapshot_updated_date = choose_snapshot_updated_fields(
         existing_meta,
         version_value,
         args.snapshot_updated_at,
         args.snapshot_updated_date,
     )
+    meta: Dict[str, object] = {
+        "schema_version": 1,
+        "version": version_value,
+        "snapshot_updated_at": snapshot_updated_at,
+        "snapshot_updated_date": snapshot_updated_date,
+    }
+    if source_statuses:
+        meta["source_statuses"] = source_statuses
+
     payload = {
-        "meta": {
-            "schema_version": 1,
-            "version": version_value,
-            "snapshot_updated_at": snapshot_updated_at,
-            "snapshot_updated_date": snapshot_updated_date,
-        },
+        "meta": meta,
         "columns": columns,
         "rows": payload_rows,
     }

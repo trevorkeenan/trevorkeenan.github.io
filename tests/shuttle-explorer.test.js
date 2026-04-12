@@ -1336,6 +1336,26 @@ test('Snapshot updated date helper prefers committed metadata fields and falls b
   assert.equal(hooks.snapshotUpdatedDateDisplayText(''), 'unavailable');
 });
 
+test('Snapshot source-status helper surfaces carried-forward Shuttle sources as a non-blocking warning', () => {
+  assert.equal(
+    hooks.buildSnapshotSourceStatusWarning({
+      source_statuses: {
+        AmeriFlux: {
+          status: 'carried_forward',
+          last_successful_refresh_date: '2026-04-10',
+          reason: 'AmeriFlux candidate retained 54 of 321 previously published sites.'
+        },
+        ICOS: {
+          status: 'fresh',
+          last_successful_refresh_date: '2026-04-11'
+        }
+      }
+    }),
+    'AmeriFlux (2026-04-10) Shuttle snapshot data is being carried forward from the last validated refresh. Site browsing remains available, but this source may be temporarily stale.'
+  );
+  assert.equal(hooks.buildSnapshotSourceStatusWarning({}), '');
+});
+
 test('Attribution text includes the contact sentence and uses the shared snapshot date source', () => {
   const explorerJs = fs.readFileSync(path.join(__dirname, '..', 'assets', 'shuttle-explorer.js'), 'utf8');
 

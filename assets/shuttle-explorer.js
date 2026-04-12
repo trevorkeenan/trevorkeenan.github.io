@@ -470,6 +470,62 @@
       normalizeSnapshotUpdatedDate(meta.snapshot_updated_at);
   }
 
+  function extractSnapshotSourceStatuses(meta) {
+    if (!meta || typeof meta !== "object" || Array.isArray(meta)) {
+      return {};
+    }
+    var statuses = meta.source_statuses;
+    if (!statuses || typeof statuses !== "object" || Array.isArray(statuses)) {
+      return {};
+    }
+    return statuses;
+  }
+
+  function buildSnapshotSourceStatusWarning(meta) {
+    var statuses = extractSnapshotSourceStatuses(meta);
+    var stale = [];
+    Object.keys(statuses).sort().forEach(function (hub) {
+      var entry = statuses[hub];
+      if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+        return;
+      }
+      if (String(entry.status || "").trim().toLowerCase() !== "carried_forward") {
+        return;
+      }
+      stale.push(String(hub).trim() + " (" + snapshotUpdatedDateDisplayText(entry.last_successful_refresh_date || entry.last_successful_refresh_at || "") + ")");
+    });
+    if (!stale.length) {
+      return "";
+    }
+    if (stale.length === 1) {
+      return stale[0] + " Shuttle snapshot data is being carried forward from the last validated refresh. Site browsing remains available, but this source may be temporarily stale.";
+    }
+    return "Some Shuttle snapshot sources are being carried forward from the last validated refresh: " + stale.join(", ") + ". Site browsing remains available, but those sources may be temporarily stale.";
+  }
+
+  function logSnapshotSourceStatusWarnings(meta) {
+    var statuses = extractSnapshotSourceStatuses(meta);
+    if (!window.console || typeof console.warn !== "function") {
+      return;
+    }
+    Object.keys(statuses).sort().forEach(function (hub) {
+      var entry = statuses[hub];
+      if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+        return;
+      }
+      if (String(entry.status || "").trim().toLowerCase() !== "carried_forward") {
+        return;
+      }
+      console.warn(
+        "Shuttle snapshot source carried forward:",
+        hub,
+        String(entry.reason || "No carry-forward reason recorded."),
+        "Last successful refresh:",
+        snapshotUpdatedDateDisplayText(entry.last_successful_refresh_date || entry.last_successful_refresh_at || "")
+      );
+    });
+  }
+
   function snapshotUpdatedDateDisplayText(snapshotUpdatedDate) {
     return normalizeSnapshotUpdatedDate(snapshotUpdatedDate) || "unavailable";
   }
@@ -4048,6 +4104,11 @@
       var coordinateLookup;
 
       if (jsonResult) {
+        var snapshotMeta = extractSnapshotMeta(jsonResult.payload);
+        var snapshotMetaWarning = buildSnapshotSourceStatusWarning(snapshotMeta);
+        if (snapshotMetaWarning) {
+          logSnapshotSourceStatusWarnings(snapshotMeta);
+        }
         csvRows = csvResult ? csvTextToObjects(csvResult.text) : [];
         coordinateLookup = csvRows.length ? buildCoordinateLookup(csvRows) : null;
         return {
@@ -4057,8 +4118,8 @@
           source: "json",
           sourceUrl: jsonUrl,
           lastModified: jsonResult.lastModified || "",
-          meta: extractSnapshotMeta(jsonResult.payload),
-          warning: ""
+          meta: snapshotMeta,
+          warning: snapshotMetaWarning
         };
       }
 
@@ -7726,6 +7787,8 @@
     resolveAmeriFluxBulkIdentity: resolveAmeriFluxBulkIdentity,
     normalizeSnapshotUpdatedDate: normalizeSnapshotUpdatedDate,
     extractSnapshotUpdatedDate: extractSnapshotUpdatedDate,
+    extractSnapshotSourceStatuses: extractSnapshotSourceStatuses,
+    buildSnapshotSourceStatusWarning: buildSnapshotSourceStatusWarning,
     snapshotUpdatedDateDisplayText: snapshotUpdatedDateDisplayText,
     buildAttributionText: buildAttributionText,
     getDownloadEndpointForProduct: getDownloadEndpointForProduct,

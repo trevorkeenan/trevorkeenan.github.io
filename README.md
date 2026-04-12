@@ -18,7 +18,7 @@ This repo includes a GitHub Actions workflow at `.github/workflows/update-shuttl
 - JapanFlux direct source: `scripts/refresh_japanflux_direct.py` queries the ADS REST API for the published JapanFlux2024 inventory, validates direct ZIP candidates when possible, and otherwise falls back to the ADS dataset landing page
 - EFD site source: `scripts/refresh_efd_sites.py` is a curator/build tool that reads the public European Fluxes Database site list plus public per-site detail/policy pages, then writes a committed static inventory of EFD sites with evidence of known data records
 - JSON format: compact browser payload with normalized `snake_case` column names (`{"columns":[...],"rows":[...]}`), keeping key discovery/download fields including explicit `processing_lineage`
-- Safety behavior: the workflow only stages/commits the generated snapshot files, and it refuses to overwrite the Shuttle CSV snapshot if `listall()` returns zero rows
+- Safety behavior: the workflow only stages/commits the generated snapshot files. Shuttle refreshes now validate each source hub against the previously published snapshot and carry forward the last known good per-source rows when a hub refresh is empty, malformed, or suspiciously incomplete instead of publishing a degraded manifest
 
 This supports a no-backend GitHub Pages setup where the site reads stable snapshot paths directly.
 
@@ -132,6 +132,7 @@ AmeriFlux API bulk script behavior:
 ## Dev checks
 
 - Unit tests (Node built-in test runner): `node --test tests/shuttle-explorer.test.js`
+- Shuttle snapshot preservation unit tests: `python3 -m unittest tests.test_refresh_shuttle_snapshot`
 - EFD curator unit tests: `python3 -m unittest tests.test_refresh_efd_sites`
 - JapanFlux refresh unit tests: `python3 -m unittest tests.test_refresh_japanflux_direct`
 - AmeriFlux smoke check (counts; optional AR-Bal download URL if credentials are set): `python3 scripts/ameriflux_api_smoke.py`
