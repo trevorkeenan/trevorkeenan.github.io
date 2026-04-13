@@ -14,6 +14,8 @@
   var SITE_NAME_METADATA_URL = "assets/site_name_metadata.csv";
   var SITE_VEGETATION_METADATA_URL = "assets/site_vegetation_metadata.csv";
   var DEFAULT_ALL_KNOWN_SITES_MAP_JSON_URL = "assets/all_known_flux_sites_map.json";
+  var DEFAULT_GLOBAL_LAND_BOUNDS = [[-60, -180], [85, 180]];
+  var LEAFLET_WORLD_TILE_SIZE = 256;
   var DEFAULT_PAGE_SIZE = 10;
   var DEFAULT_MINIMUM_YEARS_FILTER = 1;
   var MAX_PAGE_BUTTONS = 7;
@@ -5865,42 +5867,48 @@
     return true;
   };
 
-  Explorer.prototype.getPrimaryMapLayer = function () {
-    if (!this.mapMarkerLayer || !this.mapKnownSiteLayer) {
-      return null;
+  Explorer.prototype.getMinimumSingleWorldZoom = function () {
+    var size;
+    var width;
+    if (!this.map || !this.map.getSize) {
+      return 0;
     }
-    if (this.mapMarkerLayer.getLayers().length) {
-      return this.mapMarkerLayer;
+    size = this.map.getSize();
+    width = size && size.x ? size.x : 0;
+    if (!width || width <= LEAFLET_WORLD_TILE_SIZE) {
+      return 0;
     }
-    if (this.mapKnownSiteLayer.getLayers().length) {
-      return this.mapKnownSiteLayer;
-    }
-    return this.mapMarkerLayer;
+    return Math.ceil(Math.log(width / LEAFLET_WORLD_TILE_SIZE) / Math.LN2);
   };
 
-  Explorer.prototype.applyInitialDefaultMapZoomOffset = function () {
+  Explorer.prototype.fitDefaultGlobalMapView = function () {
     var currentZoom;
+    var minimumSingleWorldZoom;
     var maxZoom;
     var nextZoom;
-    if (!this.map || this._initialDefaultMapZoomOffsetApplied) {
+    if (!this.map) {
       return;
     }
+    this.map.fitBounds(DEFAULT_GLOBAL_LAND_BOUNDS, {
+      padding: [24, 24],
+      animate: false
+    });
     currentZoom = this.map.getZoom();
     if (typeof currentZoom !== "number" || !isFinite(currentZoom)) {
       return;
     }
+    minimumSingleWorldZoom = this.getMinimumSingleWorldZoom();
     maxZoom = this.map.getMaxZoom();
-    nextZoom = currentZoom + 1;
+    nextZoom = Math.max(currentZoom, minimumSingleWorldZoom);
     if (typeof maxZoom === "number" && isFinite(maxZoom)) {
       nextZoom = Math.min(nextZoom, maxZoom);
     }
     if (nextZoom !== currentZoom) {
       this.map.setZoom(nextZoom);
     }
-    this._initialDefaultMapZoomOffsetApplied = true;
   };
 
-  Explorer.prototype.invalidateMapSize = function (refit, applyInitialDefaultZoomOffset) {
+  Explorer.prototype.invalidateMapSize = function (refit) {
     var self = this;
     if (!this.map) {
       return;
@@ -5912,9 +5920,6 @@
       self.map.invalidateSize(false);
       if (refit) {
         self.fitMapToMarkers();
-        if (applyInitialDefaultZoomOffset) {
-          self.applyInitialDefaultMapZoomOffset();
-        }
       }
     };
     if (typeof window !== "undefined" && window.requestAnimationFrame) {
@@ -5925,22 +5930,20 @@
   };
 
   Explorer.prototype.fitMapToMarkers = function () {
-    var layer;
     var layers;
     if (!this.map || !this.mapMarkerLayer || !this.mapKnownSiteLayer) {
       return;
     }
-    layer = this.getPrimaryMapLayer();
-    layers = layer ? layer.getLayers() : [];
+    layers = this.mapMarkerLayer.getLayers();
     if (!layers.length) {
-      this.map.setView([20, 0], 2);
+      this.fitDefaultGlobalMapView();
       return;
     }
     if (layers.length === 1) {
       this.map.setView(layers[0].getLatLng(), 6);
       return;
     }
-    this.map.fitBounds(layer.getBounds(), {
+    this.map.fitBounds(this.mapMarkerLayer.getBounds(), {
       padding: [24, 24],
       maxZoom: 6
     });
@@ -6145,10 +6148,7 @@
       }
     }
     this.setMapEmptyState(message);
-    this.invalidateMapSize(
-      mapChanged,
-      mapChanged && !selectionState.selectedRows.length && knownSiteRows.length && !this._initialDefaultMapZoomOffsetApplied
-    );
+    this.invalidateMapSize(mapChanged);
   };
 
   Explorer.prototype.pruneSelection = function () {
