@@ -36,6 +36,13 @@ def make_record(fields: dict[str, str], spec: Optional[module.SourceSpec] = None
     return record
 
 
+def make_accessible_truth(*site_ids: str) -> module.ExplorerAccessibleTruth:
+    truth = module.ExplorerAccessibleTruth()
+    for site_id in site_ids:
+        truth.add_site_identity(site_id=site_id)
+    return truth
+
+
 class BuildAllKnownFluxSitesTests(unittest.TestCase):
     def test_column_normalization_maps_common_aliases(self):
         record = make_record(
@@ -231,6 +238,97 @@ class BuildAllKnownFluxSitesTests(unittest.TestCase):
         self.assertFalse(sites_by_id["US-Var"]["known_site_only"])
         self.assertTrue(sites_by_id["US-Var"]["has_accessible_data"])
         self.assertTrue(sites_by_id["US-Var"]["in_explorer"])
+
+    def test_fluxnet2015_backed_accessible_site_is_not_known_site_only(self):
+        groups = module.merge_records(
+            [
+                make_record(
+                    {
+                        "site_id": "US-BLO",
+                        "site_name": "Blodgett Forest",
+                        "country": "United States",
+                        "latitude": "38.8953",
+                        "longitude": "-120.6328",
+                    },
+                    make_spec(
+                        source_system="explorer_repo_metadata",
+                        default_source_network="FLUXNET2015",
+                        precedence=50,
+                    ),
+                )
+            ]
+        )
+
+        canonical_sites, _ = module.build_canonical_sites(
+            groups,
+            accessible_truth=make_accessible_truth("US-Blo"),
+        )
+
+        self.assertEqual(len(canonical_sites), 1)
+        self.assertEqual(canonical_sites[0]["site_id"], "US-BLO")
+        self.assertTrue(canonical_sites[0]["has_accessible_data"])
+        self.assertTrue(canonical_sites[0]["in_explorer"])
+        self.assertFalse(canonical_sites[0]["known_site_only"])
+
+    def test_accessible_truth_matches_country_plus_site_code_when_site_id_is_missing(self):
+        groups = module.merge_records(
+            [
+                make_record(
+                    {
+                        "tower_code": "Blo",
+                        "station_name": "Blodgett Forest",
+                        "country": "United States",
+                        "latitude": "38.8953",
+                        "longitude": "-120.6328",
+                    }
+                )
+            ]
+        )
+
+        canonical_sites, _ = module.build_canonical_sites(
+            groups,
+            accessible_truth=make_accessible_truth("US-Blo"),
+        )
+
+        self.assertEqual(len(canonical_sites), 1)
+        self.assertEqual(canonical_sites[0]["site_code"], "Blo")
+        self.assertTrue(canonical_sites[0]["has_accessible_data"])
+        self.assertTrue(canonical_sites[0]["in_explorer"])
+        self.assertFalse(canonical_sites[0]["known_site_only"])
+
+    def test_known_site_only_implies_no_accessible_data_with_accessible_truth(self):
+        groups = module.merge_records(
+            [
+                make_record(
+                    {
+                        "Site_ID": "JP-AKO",
+                        "Site_Name": "Ako reference tower",
+                        "Country": "Japan",
+                        "lat": "34.786316",
+                        "lon": "134.370861",
+                    }
+                ),
+                make_record(
+                    {
+                        "site_id": "US-BLO",
+                        "site_name": "Blodgett Forest",
+                        "country": "United States",
+                        "latitude": "38.8953",
+                        "longitude": "-120.6328",
+                    }
+                ),
+            ]
+        )
+
+        canonical_sites, _ = module.build_canonical_sites(
+            groups,
+            accessible_truth=make_accessible_truth("US-Blo"),
+        )
+
+        self.assertEqual(len(canonical_sites), 2)
+        for site in canonical_sites:
+            if site["known_site_only"]:
+                self.assertFalse(site["has_accessible_data"])
 
 
 if __name__ == "__main__":

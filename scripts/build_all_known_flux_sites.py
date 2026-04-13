@@ -15,6 +15,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, Iterator, List, Sequence
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
 import pandas as pd
 from openpyxl import load_workbook
@@ -31,6 +33,11 @@ DEFAULT_EXTERNAL_DIR = Path("/Users/trevorkeenan/Climate Dropbox/Trevor Keenan/2
 EMPTY_TOKENS = {"", "na", "n/a", "null", "-", ".", "--", "none"}
 STRICT_COORDINATE_TOLERANCE = 0.02
 MAX_COORDINATE_TOLERANCE = 0.05
+AVAILABILITY_REQUEST_TIMEOUT_SECONDS = 30
+
+AMERIFLUX_FLUXNET_AVAILABILITY_URL = "https://amfcdn.lbl.gov/api/v2/data_availability/AmeriFlux/FLUXNET/CCBY4.0"
+AMERIFLUX_BASE_AVAILABILITY_URL = "https://amfcdn.lbl.gov/api/v2/data_availability/AmeriFlux/BASE-BADM/CCBY4.0"
+FLUXNET2015_AVAILABILITY_URL = "https://amfcdn.lbl.gov/api/v2/data_availability/FLUXNET/FLUXNET2015/CCBY4.0"
 
 CANONICAL_COLUMNS = [
     "site_id",
@@ -170,6 +177,33 @@ class RawSiteRecord:
             1 if self.has_valid_fluxnet_site_id else 0,
             1 if self.has_country_and_coordinates else 0,
             self.source_spec.precedence,
+        )
+
+
+@dataclass
+class ExplorerAccessibleTruth:
+    site_id_keys: set[str] = field(default_factory=set)
+    country_site_code_keys: set[tuple[str, str]] = field(default_factory=set)
+    warnings: list[str] = field(default_factory=list)
+
+    def add_site_identity(self, *, site_id: str = "", country_code: str = "", site_code: str = "") -> None:
+        site_id_key = normalize_site_id_key(site_id)
+        if site_id_key:
+            self.site_id_keys.add(site_id_key)
+
+        country_site_code_key = derive_country_site_code_key(
+            site_id=site_id,
+            country_code=country_code,
+            site_code=site_code,
+        )
+        if country_site_code_key is not None:
+            self.country_site_code_keys.add(country_site_code_key)
+
+    def add_record(self, record: RawSiteRecord) -> None:
+        self.add_site_identity(
+            site_id=record.site_id,
+            country_code=record.country_code,
+            site_code=record.site_code,
         )
 
 
@@ -405,6 +439,30 @@ def parse_coordinate(value: str, minimum: float, maximum: float) -> tuple[float 
     else:
         precision = 0
     return numeric, precision
+
+
+def normalize_publish_years(value: Any) -> list[int]:
+    if isinstance(value, (list, tuple, set)):
+        raw_values = list(value)
+    else:
+        text = clean_value(value)
+        if not text:
+            return []
+        raw_values = re.split(r"[\s,;|/]+", text)
+
+    years: list[int] = []
+    seen: set[int] = set()
+    for raw in raw_values:
+        text = clean_value(raw)
+        if not re.fullmatch(r"\d{4}", text):
+            continue
+        year = int(text)
+        if year in seen:
+            continue
+        seen.add(year)
+        years.append(year)
+    years.sort()
+    return years
 
 
 def format_float(value: float | None) -> str:
@@ -869,6 +927,26 @@ def choose_site_code(records: Sequence[RawSiteRecord], site_id: str) -> str:
     return derive_site_code(site_id, "")
 
 
+def derive_country_site_code_key(
+    *,
+    site_id: str = "",
+    country_code: str = "",
+    site_code: str = "",
+) -> tuple[str, str] | None:
+    normalized_site_id = normalize_site_id_value(site_id)
+    normalized_country_code = normalize_whitespace(country_code).upper()
+    normalized_site_code = normalize_site_code_key(site_code)
+
+    if not normalized_country_code:
+        normalized_country_code, _ = normalize_country_code("", "", normalized_site_id)
+    if not normalized_site_code:
+        normalized_site_code = normalize_site_code_key(derive_site_code(normalized_site_id, site_code))
+
+    if normalized_country_code and normalized_site_code:
+        return normalized_country_code, normalized_site_code
+    return None
+
+
 def choose_site_name(records: Sequence[RawSiteRecord]) -> str:
     preferred = select_best_record(records, lambda record: bool(record.site_name))
     if preferred is None:
@@ -967,7 +1045,74 @@ def serialize_csv_value(value: Any) -> str:
     return str(value)
 
 
-def build_canonical_sites(groups: Sequence[SiteGroup]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+def group_matches_explorer_accessible_truth(
+    records: Sequence[RawSiteRecord],
+    accessible_truth: ExplorerAccessibleTruth,
+    *,
+    site_id: str,
+    country_code: str,
+    site_code: str,
+) -> bool:
+    site_id_keys = {normalize_site_id_key(site_id)}
+    site_id_keys.update(record.site_id_key for record in records if record.site_id_key)
+    if any(site_id_key and site_id_key in accessible_truth.site_id_keys for site_id_key in site_id_keys):
+        return True
+
+    country_site_code_keys: set[tuple[str, str]] = set()
+    canonical_key = derive_country_site_code_key(
+        site_id=site_id,
+        country_code=country_code,
+        site_code=site_code,
+    )
+    if canonical_key is not None:
+        country_site_code_keys.add(canonical_key)
+
+    for record in records:
+        record_key = derive_country_site_code_key(
+            site_id=record.site_id,
+            country_code=record.country_code,
+            site_code=record.site_code,
+        )
+        if record_key is not None:
+            country_site_code_keys.add(record_key)
+
+    return any(key in accessible_truth.country_site_code_keys for key in country_site_code_keys)
+
+
+def load_accessible_truth_from_availability_sources() -> ExplorerAccessibleTruth:
+    truth = ExplorerAccessibleTruth()
+    availability_sources = [
+        ("AmeriFlux FLUXNET", AMERIFLUX_FLUXNET_AVAILABILITY_URL),
+        ("AmeriFlux BASE", AMERIFLUX_BASE_AVAILABILITY_URL),
+        ("FLUXNET2015", FLUXNET2015_AVAILABILITY_URL),
+    ]
+
+    for label, url in availability_sources:
+        request = Request(url, headers={"User-Agent": "all-known-flux-sites-builder/1.0"})
+        try:
+            with urlopen(request, timeout=AVAILABILITY_REQUEST_TIMEOUT_SECONDS) as response:
+                payload = json.load(response)
+        except (HTTPError, URLError, TimeoutError, json.JSONDecodeError) as exc:
+            truth.warnings.append(f"{label} availability could not be loaded: {exc}")
+            continue
+
+        values = payload.get("values", []) if isinstance(payload, dict) else []
+        for entry in values:
+            if not isinstance(entry, dict):
+                continue
+            site_id = normalize_site_id_value(clean_value(entry.get("site_id")))
+            publish_years = normalize_publish_years(entry.get("publish_years"))
+            if not site_id or not publish_years:
+                continue
+            truth.add_site_identity(site_id=site_id)
+
+    return truth
+
+
+def build_canonical_sites(
+    groups: Sequence[SiteGroup],
+    accessible_truth: ExplorerAccessibleTruth | None = None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     canonical_sites: list[dict[str, Any]] = []
     review_rows: list[dict[str, Any]] = []
 
@@ -982,8 +1127,18 @@ def build_canonical_sites(groups: Sequence[SiteGroup]) -> tuple[list[dict[str, A
         source_network = choose_source_network(records)
         source_system = choose_source_system(records)
         source_files = sorted({record.source_label for record in records})
-        in_explorer = any(record.source_spec.in_explorer for record in records)
-        has_accessible_data = any(record.source_spec.has_accessible_data for record in records)
+        if accessible_truth is None:
+            in_explorer = any(record.source_spec.in_explorer for record in records)
+            has_accessible_data = any(record.source_spec.has_accessible_data for record in records)
+        else:
+            has_accessible_data = group_matches_explorer_accessible_truth(
+                records,
+                accessible_truth,
+                site_id=site_id,
+                country_code=country_code,
+                site_code=site_code,
+            )
+            in_explorer = has_accessible_data
         known_site_only = not has_accessible_data
 
         review_reasons = set(group.review_reasons)
@@ -1110,12 +1265,22 @@ def build_catalog(
     source_specs = discover_repo_sources(repo_root, external_dir) + discover_external_sources(repo_root, external_dir)
     source_file_counts: Counter[str] = Counter()
     all_records: list[RawSiteRecord] = []
+    accessible_truth = ExplorerAccessibleTruth()
 
     for source_spec in source_specs:
-        all_records.extend(load_source_records(source_spec, source_file_counts))
+        source_records = load_source_records(source_spec, source_file_counts)
+        all_records.extend(source_records)
+        if source_spec.has_accessible_data:
+            for record in source_records:
+                accessible_truth.add_record(record)
+
+    live_accessible_truth = load_accessible_truth_from_availability_sources()
+    accessible_truth.site_id_keys.update(live_accessible_truth.site_id_keys)
+    accessible_truth.country_site_code_keys.update(live_accessible_truth.country_site_code_keys)
+    accessible_truth.warnings.extend(live_accessible_truth.warnings)
 
     groups = merge_records(all_records)
-    canonical_sites, review_rows = build_canonical_sites(groups)
+    canonical_sites, review_rows = build_canonical_sites(groups, accessible_truth=accessible_truth)
     map_rows = build_map_rows(canonical_sites)
 
     summary = {
@@ -1131,6 +1296,7 @@ def build_catalog(
         "manual_review_sites": sum(1 for row in canonical_sites if row["needs_manual_review"]),
         "map_rows": len(map_rows),
         "source_file_counts": dict(sorted(source_file_counts.items())),
+        "accessible_truth_warnings": accessible_truth.warnings,
     }
     summary["version"] = version_hash(CANONICAL_COLUMNS, canonical_sites)
 
