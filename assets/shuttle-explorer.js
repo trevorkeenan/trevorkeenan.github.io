@@ -13,6 +13,7 @@
   var FLUXNET2015_SITE_INFO_URL = "assets/siteinfo_fluxnet2015.csv";
   var SITE_NAME_METADATA_URL = "assets/site_name_metadata.csv";
   var SITE_VEGETATION_METADATA_URL = "assets/site_vegetation_metadata.csv";
+  var DEFAULT_ALL_KNOWN_SITES_MAP_JSON_URL = "assets/all_known_flux_sites_map.json";
   var DEFAULT_PAGE_SIZE = 10;
   var DEFAULT_MINIMUM_YEARS_FILTER = 1;
   var MAX_PAGE_BUTTONS = 7;
@@ -4029,6 +4030,48 @@
     return { rows: rows, dropped: dropped };
   }
 
+  function normalizeBooleanValue(value) {
+    if (value === true || value === false) {
+      return value;
+    }
+    var text = String(value == null ? "" : value).trim().toLowerCase();
+    return text === "true" || text === "1" || text === "yes";
+  }
+
+  function normalizeKnownSiteMapRows(rawRows) {
+    var rows = [];
+    (rawRows || []).forEach(function (raw, index) {
+      var siteId = String(raw && raw.site_id || "").trim();
+      var siteCode = String(raw && raw.site_code || "").trim();
+      var siteName = String(raw && raw.site_name || "").trim();
+      var countryCode = String(raw && raw.country_code || "").trim();
+      var country = deriveCountry(siteId || siteCode, raw && (raw.country || countryCode) || "");
+      var latitude = extractRawLatitude(raw || {});
+      var longitude = extractRawLongitude(raw || {});
+      if ((latitude == null || longitude == null) || !(siteId || siteCode || siteName)) {
+        return;
+      }
+      rows.push({
+        _index: index,
+        site_id: siteId,
+        site_code: siteCode,
+        site_name: siteName,
+        country_code: countryCode,
+        country: country,
+        latitude: latitude,
+        longitude: longitude,
+        in_explorer: normalizeBooleanValue(raw && raw.in_explorer),
+        has_accessible_data: normalizeBooleanValue(raw && raw.has_accessible_data),
+        known_site_only: normalizeBooleanValue(raw && raw.known_site_only),
+        source_network: String(raw && raw.source_network || "").trim(),
+        source_category: String(raw && raw.source_category || "").trim() || (
+          normalizeBooleanValue(raw && raw.known_site_only) ? "known_site_only" : "accessible_data_site"
+        )
+      });
+    });
+    return rows;
+  }
+
   function extractSnapshotMeta(payload) {
     if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
       return {};
@@ -4144,6 +4187,18 @@
       error.jsonError = jsonError;
       error.csvError = csvError;
       throw error;
+    });
+  }
+
+  function loadKnownSiteMap(jsonUrl) {
+    return fetchJson(jsonUrl).then(function (result) {
+      return {
+        rows: normalizeKnownSiteMapRows(payloadJsonToObjects(result.payload)),
+        sourceUrl: jsonUrl,
+        lastModified: result.lastModified || "",
+        meta: extractSnapshotMeta(result.payload),
+        warning: ""
+      };
     });
   }
 
@@ -4896,14 +4951,18 @@
       "<section class=\"shuttle-explorer__map-panel shuttle-explorer__hidden\" data-role=\"map-panel\" aria-labelledby=\"shuttle-map-heading\">",
       "  <div class=\"shuttle-explorer__map-header\">",
       "    <div>",
-      "      <h3 id=\"shuttle-map-heading\">Selected sites map</h3>",
-      "      <p class=\"shuttle-explorer__tiny shuttle-explorer__map-summary\" data-role=\"map-summary\">Select one or more sites to show them on the map.</p>",
+      "      <h3 id=\"shuttle-map-heading\">Flux sites map</h3>",
+      "      <p class=\"shuttle-explorer__tiny shuttle-explorer__map-summary\" data-role=\"map-summary\">Select one or more accessible-data sites to highlight them on the map.</p>",
+      "      <div class=\"shuttle-explorer__map-controls\">",
+      "        <label class=\"shuttle-explorer__map-toggle\"><input type=\"checkbox\" data-role=\"known-sites-toggle\" checked /> Show all known sites background layer</label>",
+      "        <p class=\"shuttle-explorer__tiny shuttle-explorer__map-legend\" data-role=\"known-sites-legend\">Blue markers show selected explorer rows. Gold markers are known-site-only locations without accessible explorer data. Gray markers are other known sites.</p>",
+      "      </div>",
       "    </div>",
       "    <button type=\"button\" class=\"shuttle-explorer__btn shuttle-explorer__btn--small shuttle-explorer__hidden\" data-role=\"reset-map-view\">Reset map view</button>",
       "  </div>",
       "  <div class=\"shuttle-explorer__map-shell\">",
-      "    <div class=\"shuttle-explorer__map-canvas\" data-role=\"map-canvas\" aria-label=\"Map of selected FLUXNET sites\"></div>",
-      "    <div class=\"shuttle-explorer__map-empty\" data-role=\"map-empty\" aria-live=\"polite\">Select one or more sites to show them on the map.</div>",
+      "    <div class=\"shuttle-explorer__map-canvas\" data-role=\"map-canvas\" aria-label=\"Map of known and selected FLUXNET sites\"></div>",
+      "    <div class=\"shuttle-explorer__map-empty\" data-role=\"map-empty\" aria-live=\"polite\">Select one or more accessible-data sites to highlight them on the map.</div>",
       "  </div>",
       "</section>",
       "<aside class=\"shuttle-explorer__attribution\" data-role=\"data-notes\">",
@@ -4943,6 +5002,7 @@
     this.fluxnet2015SiteInfoUrl = root.getAttribute("data-fluxnet2015-site-info-src") || FLUXNET2015_SITE_INFO_URL;
     this.siteNameMetadataUrl = root.getAttribute("data-site-name-metadata-src") || SITE_NAME_METADATA_URL;
     this.vegetationMetadataUrl = root.getAttribute("data-vegetation-metadata-src") || SITE_VEGETATION_METADATA_URL;
+    this.allKnownSitesMapJsonUrl = root.getAttribute("data-all-known-sites-map-json-src") || DEFAULT_ALL_KNOWN_SITES_MAP_JSON_URL;
     this.pageSize = Math.max(1, parseInt(root.getAttribute("data-page-size") || String(DEFAULT_PAGE_SIZE), 10) || DEFAULT_PAGE_SIZE);
     var ameriIdentity = resolveAmeriFluxIdentityFromRoot(root);
     this.shuttleSource = new ShuttleSource(this.jsonUrl, this.csvUrl);
@@ -5026,7 +5086,10 @@
       amerifluxOnlySites: 0,
       fluxnet2015TotalSites: 0,
       fluxnet2015SitesWithYears: 0,
-      fluxnet2015OnlySites: 0
+      fluxnet2015OnlySites: 0,
+      knownSiteMapRows: [],
+      knownSiteOverlayEnabled: true,
+      knownSiteMapWarning: ""
     };
 
     createLayout(root);
@@ -5089,6 +5152,8 @@
       bulkStatus: bySelector(this.root, "[data-role='bulk-status']"),
       mapPanel: bySelector(this.root, "[data-role='map-panel']"),
       mapSummary: bySelector(this.root, "[data-role='map-summary']"),
+      knownSitesToggle: bySelector(this.root, "[data-role='known-sites-toggle']"),
+      knownSitesLegend: bySelector(this.root, "[data-role='known-sites-legend']"),
       mapCanvas: bySelector(this.root, "[data-role='map-canvas']"),
       mapEmpty: bySelector(this.root, "[data-role='map-empty']"),
       resetMapView: bySelector(this.root, "[data-role='reset-map-view']"),
@@ -5375,6 +5440,13 @@
     if (b.resetMapView) {
       b.resetMapView.addEventListener("click", function () {
         self.resetMapView();
+      });
+    }
+
+    if (b.knownSitesToggle) {
+      b.knownSitesToggle.addEventListener("change", function () {
+        self.state.knownSiteOverlayEnabled = !!b.knownSitesToggle.checked;
+        self.render();
       });
     }
 
@@ -5778,6 +5850,7 @@
       attribution: "&copy; OpenStreetMap contributors",
       maxZoom: 18
     }).addTo(this.map);
+    this.mapKnownSiteLayer = L.featureGroup().addTo(this.map);
     this.mapMarkerLayer = L.featureGroup().addTo(this.map);
     if (this.map.attributionControl && this.map.attributionControl.setPrefix) {
       this.map.attributionControl.setPrefix("");
@@ -5790,6 +5863,19 @@
       window.addEventListener("resize", this._mapResizeHandler);
     }
     return true;
+  };
+
+  Explorer.prototype.getPrimaryMapLayer = function () {
+    if (!this.mapMarkerLayer || !this.mapKnownSiteLayer) {
+      return null;
+    }
+    if (this.mapMarkerLayer.getLayers().length) {
+      return this.mapMarkerLayer;
+    }
+    if (this.mapKnownSiteLayer.getLayers().length) {
+      return this.mapKnownSiteLayer;
+    }
+    return this.mapMarkerLayer;
   };
 
   Explorer.prototype.invalidateMapSize = function (refit) {
@@ -5814,11 +5900,13 @@
   };
 
   Explorer.prototype.fitMapToMarkers = function () {
+    var layer;
     var layers;
-    if (!this.map || !this.mapMarkerLayer) {
+    if (!this.map || !this.mapMarkerLayer || !this.mapKnownSiteLayer) {
       return;
     }
-    layers = this.mapMarkerLayer.getLayers();
+    layer = this.getPrimaryMapLayer();
+    layers = layer ? layer.getLayers() : [];
     if (!layers.length) {
       this.map.setView([20, 0], 2);
       return;
@@ -5827,7 +5915,7 @@
       this.map.setView(layers[0].getLatLng(), 6);
       return;
     }
-    this.map.fitBounds(this.mapMarkerLayer.getBounds(), {
+    this.map.fitBounds(layer.getBounds(), {
       padding: [24, 24],
       maxZoom: 6
     });
@@ -5840,7 +5928,8 @@
     this.fitMapToMarkers();
   };
 
-  Explorer.prototype.buildMapPopupHtml = function (row) {
+  Explorer.prototype.buildMapPopupHtml = function (row, options) {
+    var opts = options || {};
     var lines = [
       "<div class=\"shuttle-explorer__map-popup\">",
       "  <strong>" + escapeHtml(row.site_id || "") + "</strong>"
@@ -5852,11 +5941,21 @@
     if (row.country) {
       lines.push("  <div class=\"shuttle-explorer__map-popup-meta\">" + escapeHtml(row.country) + "</div>");
     }
+    if (row.source_network) {
+      lines.push("  <div class=\"shuttle-explorer__map-popup-meta\">" + escapeHtml(row.source_network) + "</div>");
+    }
+    if (opts.showCategory) {
+      if (row.known_site_only) {
+        lines.push("  <div class=\"shuttle-explorer__map-popup-meta\">Known site only; accessible explorer data are not currently available.</div>");
+      } else if (row.has_accessible_data) {
+        lines.push("  <div class=\"shuttle-explorer__map-popup-meta\">Site with accessible data.</div>");
+      }
+    }
     lines.push("</div>");
     return lines.join("");
   };
 
-  Explorer.prototype.renderMapMarkers = function (rows) {
+  Explorer.prototype.renderSelectedMapMarkers = function (rows) {
     var self = this;
     var L;
     if (!this.ensureMap() || !this.mapMarkerLayer) {
@@ -5872,7 +5971,7 @@
         fillColor: "#5f8bb3",
         fillOpacity: 0.9
       });
-      marker.bindPopup(self.buildMapPopupHtml(row), {
+      marker.bindPopup(self.buildMapPopupHtml(row, { showCategory: false }), {
         autoPan: true
       });
       marker.on("click", function () {
@@ -5883,6 +5982,37 @@
         }
       });
       self.mapMarkerLayer.addLayer(marker);
+    });
+  };
+
+  Explorer.prototype.renderKnownSiteMapMarkers = function (rows) {
+    var self = this;
+    var L;
+    if (!this.ensureMap() || !this.mapKnownSiteLayer) {
+      return;
+    }
+    L = window.L;
+    this.mapKnownSiteLayer.clearLayers();
+    (rows || []).forEach(function (row) {
+      var knownSiteOnly = !!row.known_site_only;
+      var marker = L.circleMarker([row.latitude, row.longitude], {
+        radius: knownSiteOnly ? 4.5 : 4,
+        weight: knownSiteOnly ? 1.4 : 1.1,
+        color: knownSiteOnly ? "#9b6a08" : "#7a8794",
+        fillColor: knownSiteOnly ? "#f3d58a" : "#d5dbe3",
+        fillOpacity: knownSiteOnly ? 0.45 : 0.55
+      });
+      marker.bindPopup(self.buildMapPopupHtml(row, { showCategory: true }), {
+        autoPan: true
+      });
+      marker.on("click", function () {
+        if (self.map) {
+          self.map.panTo(marker.getLatLng(), {
+            animate: true
+          });
+        }
+      });
+      self.mapKnownSiteLayer.addLayer(marker);
     });
   };
 
@@ -5897,8 +6027,12 @@
 
   Explorer.prototype.renderMap = function () {
     var b = this.bindings;
+    var knownSiteRows;
+    var knownSiteOnlyCount = 0;
+    var knownAccessibleCount = 0;
     var selectionState;
-    var selectionChanged;
+    var mapChanged = false;
+    var mapSignature;
     var summary;
     var message = "";
     if (!b.mapPanel) {
@@ -5906,14 +6040,49 @@
     }
 
     selectionState = this.getMapSelectionState();
+    knownSiteRows = this.state.knownSiteOverlayEnabled
+      ? (Array.isArray(this.state.knownSiteMapRows) ? this.state.knownSiteMapRows : [])
+      : [];
+    knownSiteRows.forEach(function (row) {
+      if (row && row.known_site_only) {
+        knownSiteOnlyCount += 1;
+      } else {
+        knownAccessibleCount += 1;
+      }
+    });
+
+    if (b.knownSitesToggle) {
+      b.knownSitesToggle.checked = !!this.state.knownSiteOverlayEnabled;
+    }
+    if (b.knownSitesLegend) {
+      if (this.state.knownSiteOverlayEnabled && knownSiteRows.length) {
+        b.knownSitesLegend.textContent = "Blue markers show selected explorer rows. Gold markers are " +
+          knownSiteOnlyCount + " known-site-only " + (knownSiteOnlyCount === 1 ? "location" : "locations") +
+          " without accessible explorer data. Gray markers are other known sites.";
+      } else if (this.state.knownSiteOverlayEnabled && this.state.knownSiteMapWarning) {
+        b.knownSitesLegend.textContent = this.state.knownSiteMapWarning;
+      } else {
+        b.knownSitesLegend.textContent = "Blue markers show selected explorer rows. Turn the background layer on to show the broader known-sites catalog.";
+      }
+    }
 
     if (b.mapSummary) {
-      if (!selectionState.selectedRows.length) {
-        summary = "Select one or more sites to show them on the map.";
+      if (this.state.knownSiteOverlayEnabled && knownSiteRows.length && !selectionState.selectedRows.length) {
+        summary = "Showing " + knownSiteRows.length + " known flux " + (knownSiteRows.length === 1 ? "site" : "sites") +
+          ", including " + knownSiteOnlyCount + " known-site-only " + (knownSiteOnlyCount === 1 ? "location" : "locations") +
+          " and " + knownAccessibleCount + " site" + (knownAccessibleCount === 1 ? "" : "s") + " with accessible data.";
+      } else if (!selectionState.selectedRows.length) {
+        summary = "Select one or more accessible-data sites to highlight them on the map.";
       } else if (!selectionState.mappableRows.length) {
         summary = selectionState.selectedRows.length + " selected " + (selectionState.selectedRows.length === 1 ? "site" : "sites") + ", but coordinates are unavailable in the current snapshot.";
+        if (this.state.knownSiteOverlayEnabled && knownSiteRows.length) {
+          summary += " The known-sites background layer remains available.";
+        }
       } else {
-        summary = "Showing " + selectionState.mappableRows.length + " selected " + (selectionState.mappableRows.length === 1 ? "site" : "sites") + " on the map.";
+        summary = "Showing " + selectionState.mappableRows.length + " selected accessible-data " + (selectionState.mappableRows.length === 1 ? "site" : "sites") + " on the map.";
+        if (this.state.knownSiteOverlayEnabled && knownSiteRows.length) {
+          summary += " Background layer: " + knownSiteRows.length + " known sites.";
+        }
         if (selectionState.missingCoordinates) {
           summary += " " + selectionState.missingCoordinates + " selected " + (selectionState.missingCoordinates === 1 ? "site was" : "sites were") + " omitted because coordinates are unavailable.";
         }
@@ -5929,23 +6098,29 @@
       return;
     }
 
-    selectionChanged = selectionState.signature !== this._mapSelectionSignature;
-    if (selectionChanged) {
-      this._mapSelectionSignature = selectionState.signature;
-      this.renderMapMarkers(selectionState.mappableRows);
+    mapSignature = selectionState.signature + "::known:" + String(this.state.knownSiteOverlayEnabled) + ":" + String(knownSiteRows.length);
+    if (mapSignature !== this._mapSelectionSignature) {
+      this._mapSelectionSignature = mapSignature;
+      mapChanged = true;
+      this.renderKnownSiteMapMarkers(knownSiteRows);
+      this.renderSelectedMapMarkers(selectionState.mappableRows);
     }
 
     if (b.resetMapView) {
-      b.resetMapView.classList.toggle("shuttle-explorer__hidden", !selectionState.mappableRows.length);
+      b.resetMapView.classList.toggle("shuttle-explorer__hidden", !(selectionState.mappableRows.length || knownSiteRows.length));
     }
 
-    if (!selectionState.selectedRows.length) {
-      message = "Select one or more sites to show them on the map.";
+    if (!selectionState.selectedRows.length && !knownSiteRows.length) {
+      message = this.state.knownSiteOverlayEnabled
+        ? (this.state.knownSiteMapWarning || "Known-sites map layer is unavailable.")
+        : "Select one or more accessible-data sites to highlight them on the map.";
     } else if (!selectionState.mappableRows.length) {
-      message = "The selected sites do not include map coordinates in the current metadata snapshot.";
+      if (selectionState.selectedRows.length) {
+        message = "The selected sites do not include map coordinates in the current metadata snapshot.";
+      }
     }
     this.setMapEmptyState(message);
-    this.invalidateMapSize(selectionChanged);
+    this.invalidateMapSize(mapChanged);
   };
 
   Explorer.prototype.pruneSelection = function () {
@@ -7565,6 +7740,28 @@
     );
   };
 
+  Explorer.prototype.loadKnownSiteMapOverlay = function () {
+    var self = this;
+    return loadKnownSiteMap(this.allKnownSitesMapJsonUrl).then(function (result) {
+      self.state.knownSiteMapRows = Array.isArray(result && result.rows) ? result.rows : [];
+      self.state.knownSiteMapWarning = String(result && result.warning || "");
+      self.render();
+      return result;
+    }).catch(function (error) {
+      self.state.knownSiteMapRows = [];
+      self.state.knownSiteMapWarning = "Known-sites map layer unavailable.";
+      if (typeof window !== "undefined" && window.console && console.warn) {
+        console.warn("Failed to load known-sites map layer", error);
+      }
+      self.render();
+      return {
+        rows: [],
+        sourceUrl: self.allKnownSitesMapJsonUrl,
+        warning: self.state.knownSiteMapWarning
+      };
+    });
+  };
+
   Explorer.prototype.load = function () {
     var self = this;
     var cached = readSnapshotCache(this.jsonUrl, this.csvUrl);
@@ -7572,6 +7769,7 @@
     var localResultsBundle = null;
 
     this.setMode("loading", "Loading snapshot…", "is-loading");
+    this.loadKnownSiteMapOverlay();
     if (hadCache) {
       this.applyLoadedSnapshotState({
         rows: cached.rows,
@@ -7770,6 +7968,7 @@
     inferFluxnet2015NetworkFromCountry: inferFluxnet2015NetworkFromCountry,
     deriveCountry: deriveCountry,
     normalizeRows: normalizeRows,
+    normalizeKnownSiteMapRows: normalizeKnownSiteMapRows,
     normalizeNetworkToken: normalizeNetworkToken,
     normalizeNetworkTokens: normalizeNetworkTokens,
     normalizeNetworkDisplayValue: normalizeNetworkDisplayValue,
@@ -7832,6 +8031,7 @@
     buildFluxnet2015SiteLookup: buildFluxnet2015SiteLookup,
     enrichFluxnet2015SitesWithMetadata: enrichFluxnet2015SitesWithMetadata,
     buildMergedSnapshotStateForRoot: buildMergedSnapshotStateForRoot,
+    loadKnownSiteMap: loadKnownSiteMap,
     loadAmeriFluxSiteInfo: loadAmeriFluxSiteInfo,
     loadFluxnet2015SiteInfo: loadFluxnet2015SiteInfo,
     loadSiteNameMetadata: loadSiteNameMetadata,

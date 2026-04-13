@@ -313,6 +313,23 @@ test('Explorer uses curated local EFD assets rather than the old public-snapshot
   assert.equal(explorerHtml.includes('data-efd-curated-csv-src="assets/efd_curated_sites_snapshot.csv"'), true);
 });
 
+test('Known-sites map asset exists and normalizes for the separate map overlay', () => {
+  const explorerJs = fs.readFileSync(path.join(__dirname, '..', 'assets', 'shuttle-explorer.js'), 'utf8');
+  const explorerHtml = fs.readFileSync(path.join(__dirname, '..', 'fluxnet-explorer.html'), 'utf8');
+  const relativePath = 'assets/all_known_flux_sites_map.json';
+  const absolutePath = path.join(__dirname, '..', relativePath);
+  const payload = JSON.parse(fs.readFileSync(absolutePath, 'utf8'));
+  const rows = hooks.normalizeKnownSiteMapRows(hooks.payloadJsonToObjects(payload));
+
+  assert.equal(explorerJs.includes('"assets/all_known_flux_sites_map.json"'), true);
+  assert.equal(explorerHtml.includes('data-all-known-sites-map-json-src="assets/all_known_flux_sites_map.json"'), true);
+  assert.equal(Array.isArray(rows), true);
+  assert.equal(rows.length > 0, true);
+  assert.equal(rows.some((row) => row.known_site_only === true), true);
+  assert.equal(rows.some((row) => row.has_accessible_data === true), true);
+  assert.equal(rows.some((row) => row.known_site_only === true && row.has_accessible_data === true), false);
+});
+
 test('Merge precedence is Shuttle > ICOS > AmeriFlux > FLUXNET2015 with no duplicates', () => {
   const shuttleRows = [
     {
