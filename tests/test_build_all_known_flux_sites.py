@@ -43,6 +43,54 @@ def make_accessible_truth(*site_ids: str) -> module.ExplorerAccessibleTruth:
     return truth
 
 
+def make_country_lookup() -> module.CountryBoundaryLookup:
+    return module.CountryBoundaryLookup.from_geojson(
+        {
+            "type": "FeatureCollection",
+            "features": [
+                {
+                    "type": "Feature",
+                    "properties": {
+                        "ISO_A2": "JP",
+                        "NAME_EN": "Japan",
+                    },
+                    "geometry": {
+                        "type": "Polygon",
+                        "coordinates": [
+                            [
+                                [129.0, 30.0],
+                                [146.0, 30.0],
+                                [146.0, 46.0],
+                                [129.0, 46.0],
+                                [129.0, 30.0],
+                            ]
+                        ],
+                    },
+                },
+                {
+                    "type": "Feature",
+                    "properties": {
+                        "ISO_A2": "GB",
+                        "NAME_EN": "United Kingdom",
+                    },
+                    "geometry": {
+                        "type": "Polygon",
+                        "coordinates": [
+                            [
+                                [-9.0, 49.0],
+                                [3.0, 49.0],
+                                [3.0, 61.0],
+                                [-9.0, 61.0],
+                                [-9.0, 49.0],
+                            ]
+                        ],
+                    },
+                },
+            ],
+        }
+    )
+
+
 class BuildAllKnownFluxSitesTests(unittest.TestCase):
     def test_column_normalization_maps_common_aliases(self):
         record = make_record(
@@ -187,6 +235,154 @@ class BuildAllKnownFluxSitesTests(unittest.TestCase):
 
         self.assertEqual(record.country_code, "AR")
         self.assertEqual(record.country, "Argentina")
+
+    def test_country_code_from_coordinates_uses_country_polygons(self):
+        groups = module.merge_records(
+            [
+                make_record(
+                    {
+                        "site_code": "AKO",
+                        "site_name": "Akou green belt",
+                        "latitude": "34.786316",
+                        "longitude": "134.370861",
+                    }
+                )
+            ]
+        )
+
+        canonical_sites, review_rows = module.build_canonical_sites(
+            groups,
+            country_lookup=make_country_lookup(),
+        )
+
+        self.assertEqual(len(canonical_sites), 1)
+        self.assertEqual(canonical_sites[0]["country_code"], "JP")
+        self.assertEqual(canonical_sites[0]["country"], "Japan")
+        self.assertFalse(any("country_code could not be inferred confidently" in row["review_reason"] for row in review_rows))
+
+    def test_country_code_from_coordinates_uses_nearest_country_for_near_coastal_points(self):
+        groups = module.merge_records(
+            [
+                make_record(
+                    {
+                        "site_code": "OffshoreJP",
+                        "site_name": "Nearshore Japan site",
+                        "latitude": "34.5",
+                        "longitude": "146.05",
+                    }
+                )
+            ]
+        )
+
+        canonical_sites, review_rows = module.build_canonical_sites(
+            groups,
+            country_lookup=make_country_lookup(),
+        )
+
+        self.assertEqual(len(canonical_sites), 1)
+        self.assertEqual(canonical_sites[0]["country_code"], "JP")
+        self.assertFalse(any("country_code could not be inferred confidently" in row["review_reason"] for row in review_rows))
+
+    def test_gb_country_codes_are_canonicalized_to_uk(self):
+        record = make_record(
+            {
+                "site_id": "UK-Ham",
+                "country_code": "GB",
+                "country": "United Kingdom",
+            }
+        )
+
+        self.assertEqual(record.country_code, "UK")
+        self.assertEqual(record.country, "United Kingdom")
+
+    def test_uk_coordinate_lookup_uses_uk_code_alias(self):
+        groups = module.merge_records(
+            [
+                make_record(
+                    {
+                        "site_id": "UK-Ham",
+                        "site_name": "Hampshire",
+                        "latitude": "51.153533",
+                        "longitude": "-0.8583",
+                        "country_code": "GB",
+                    }
+                )
+            ]
+        )
+
+        canonical_sites, review_rows = module.build_canonical_sites(
+            groups,
+            country_lookup=make_country_lookup(),
+        )
+
+        self.assertEqual(len(canonical_sites), 1)
+        self.assertEqual(canonical_sites[0]["country_code"], "UK")
+        self.assertFalse(any("ambiguous country_code across contributing records" in row["review_reason"] for row in review_rows))
+
+    def test_country_prefixed_site_id_is_adopted_over_bare_code_duplicate(self):
+        groups = module.merge_records(
+            [
+                make_record(
+                    {
+                        "site_id": "TW-GDP",
+                        "site_code": "GDP",
+                        "country_code": "TW",
+                        "latitude": "25.116667",
+                        "longitude": "121.466666",
+                    }
+                ),
+                make_record(
+                    {
+                        "site_id": "GDP",
+                        "site_name": "Guandu Nature Park Flux Station",
+                        "latitude": "25.116667",
+                        "longitude": "121.466666",
+                    }
+                ),
+            ]
+        )
+
+        canonical_sites, review_rows = module.build_canonical_sites(
+            groups,
+            country_lookup=make_country_lookup(),
+        )
+
+        self.assertEqual(len(canonical_sites), 1)
+        self.assertEqual(canonical_sites[0]["site_id"], "TW-GDP")
+        self.assertEqual(canonical_sites[0]["site_code"], "GDP")
+        self.assertEqual(canonical_sites[0]["site_name"], "Guandu Nature Park Flux Station")
+        self.assertEqual(review_rows, [])
+
+    def test_review_rows_include_coordinate_details_for_conflicting_coordinates(self):
+        groups = module.merge_records(
+            [
+                make_record(
+                    {
+                        "site_id": "US-WI9",
+                        "site_name": "Young Jack pine (YJP)",
+                        "country_code": "US",
+                        "latitude": "46.7385",
+                        "longitude": "-91.0746",
+                    }
+                ),
+                make_record(
+                    {
+                        "site_id": "US-WI9",
+                        "site_name": "Young Jack pine (YJP)",
+                        "country_code": "US",
+                        "latitude": "46.6188",
+                        "longitude": "-91.0814",
+                    }
+                ),
+            ]
+        )
+
+        _, review_rows = module.build_canonical_sites(groups)
+
+        self.assertEqual(len(review_rows), 1)
+        self.assertIn("max_distance_km=", review_rows[0]["coordinate_details"])
+        self.assertIn("(46.7385, -91.0746)", review_rows[0]["coordinate_details"])
+        self.assertIn("(46.6188, -91.0814)", review_rows[0]["coordinate_details"])
 
     def test_known_site_only_flag_is_preserved_for_external_only_sites(self):
         external_only = make_record(

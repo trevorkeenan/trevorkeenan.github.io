@@ -13,6 +13,7 @@ import unicodedata
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, Iterable, Iterator, List, Sequence
 from urllib.error import HTTPError, URLError
@@ -34,10 +35,19 @@ EMPTY_TOKENS = {"", "na", "n/a", "null", "-", ".", "--", "none"}
 STRICT_COORDINATE_TOLERANCE = 0.02
 MAX_COORDINATE_TOLERANCE = 0.05
 AVAILABILITY_REQUEST_TIMEOUT_SECONDS = 30
+MAX_NEAREST_COUNTRY_DISTANCE = 0.3
+MIN_NEAREST_COUNTRY_MARGIN = 0.05
+MIN_NEAREST_COUNTRY_RATIO = 1.5
 
 AMERIFLUX_FLUXNET_AVAILABILITY_URL = "https://amfcdn.lbl.gov/api/v2/data_availability/AmeriFlux/FLUXNET/CCBY4.0"
 AMERIFLUX_BASE_AVAILABILITY_URL = "https://amfcdn.lbl.gov/api/v2/data_availability/AmeriFlux/BASE-BADM/CCBY4.0"
 FLUXNET2015_AVAILABILITY_URL = "https://amfcdn.lbl.gov/api/v2/data_availability/FLUXNET/FLUXNET2015/CCBY4.0"
+NATURAL_EARTH_COUNTRIES_GEOJSON_URL = "https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_50m_admin_0_countries.geojson"
+NATURAL_EARTH_COUNTRIES_CACHE_PATH = Path.home() / ".cache" / "fluxnet-data-explorer" / "ne_50m_admin_0_countries.geojson"
+
+COUNTRY_CODE_ALIASES = {
+    "GB": "UK",
+}
 
 CANONICAL_COLUMNS = [
     "site_id",
@@ -85,8 +95,11 @@ REVIEW_COLUMNS = [
     "source_network",
     "source_files",
     "source_count",
+    "coordinate_details",
     "review_reason",
 ]
+
+MULTIPLE_CANDIDATE_REVIEW_PREFIX = "multiple possible candidate merges were observed:"
 
 SITE_ID_FIELDS = (
     "site_id",
@@ -205,6 +218,101 @@ class ExplorerAccessibleTruth:
             country_code=record.country_code,
             site_code=record.site_code,
         )
+
+
+@dataclass(frozen=True)
+class CountryBoundaryPart:
+    country_code: str
+    country_name: str
+    bbox: tuple[float, float, float, float]
+    rings: tuple[tuple[tuple[float, float], ...], ...]
+
+    @property
+    def bbox_area(self) -> float:
+        return max(self.bbox[2] - self.bbox[0], 0.0) * max(self.bbox[3] - self.bbox[1], 0.0)
+
+
+@dataclass
+class CountryBoundaryLookup:
+    parts: list[CountryBoundaryPart]
+    warnings: list[str] = field(default_factory=list)
+
+    @classmethod
+    def from_geojson(cls, payload: dict[str, Any]) -> "CountryBoundaryLookup":
+        parts: list[CountryBoundaryPart] = []
+        for feature in payload.get("features", []):
+            if not isinstance(feature, dict):
+                continue
+            properties = feature.get("properties", {}) or {}
+            country_code = resolve_country_boundary_code(properties)
+            country_name = normalize_country_name(
+                clean_value(properties.get("NAME_EN") or properties.get("NAME") or properties.get("ADMIN")),
+                country_code,
+            )
+            geometry = feature.get("geometry", {}) or {}
+            for rings in iter_country_boundary_rings(geometry):
+                bbox = boundary_bbox(rings)
+                if bbox is None:
+                    continue
+                parts.append(
+                    CountryBoundaryPart(
+                        country_code=country_code,
+                        country_name=country_name,
+                        bbox=bbox,
+                        rings=rings,
+                    )
+                )
+        parts.sort(key=lambda part: (part.bbox_area, part.country_code, part.country_name))
+        return cls(parts=parts)
+
+    def lookup(self, latitude: float | None, longitude: float | None) -> tuple[str, str] | None:
+        if latitude is None or longitude is None:
+            return None
+        candidate_parts = [
+            part
+            for part in self.parts
+            if point_in_bbox(longitude, latitude, part.bbox)
+        ]
+        for part in candidate_parts:
+            if point_in_polygon_rings(longitude, latitude, part.rings):
+                return part.country_code, part.country_name
+        nearest_match = self.lookup_nearest(latitude, longitude)
+        if nearest_match is not None:
+            return nearest_match
+        return None
+
+    def lookup_nearest(self, latitude: float | None, longitude: float | None) -> tuple[str, str] | None:
+        if latitude is None or longitude is None:
+            return None
+
+        best_by_country: dict[str, tuple[float, str]] = {}
+        for part in self.parts:
+            bbox_distance = distance_to_bbox(longitude, latitude, part.bbox)
+            if bbox_distance > MAX_NEAREST_COUNTRY_DISTANCE:
+                continue
+            distance = distance_to_boundary_part(longitude, latitude, part)
+            if distance > MAX_NEAREST_COUNTRY_DISTANCE:
+                continue
+            current = best_by_country.get(part.country_code)
+            if current is None or distance < current[0]:
+                best_by_country[part.country_code] = (distance, part.country_name)
+
+        ranked = sorted(best_by_country.items(), key=lambda item: (item[1][0], item[0]))
+        if not ranked:
+            return None
+
+        best_country_code, (best_distance, best_country_name) = ranked[0]
+        if best_distance > MAX_NEAREST_COUNTRY_DISTANCE:
+            return None
+        if len(ranked) == 1:
+            return best_country_code, best_country_name
+
+        second_distance = ranked[1][1][0]
+        if second_distance - best_distance >= MIN_NEAREST_COUNTRY_MARGIN:
+            return best_country_code, best_country_name
+        if best_distance == 0 or second_distance / best_distance >= MIN_NEAREST_COUNTRY_RATIO:
+            return best_country_code, best_country_name
+        return None
 
 
 @dataclass
@@ -342,6 +450,11 @@ def normalize_site_code_key(value: str) -> str:
     return text.upper()
 
 
+def canonicalize_country_code(value: str) -> str:
+    code = normalize_whitespace(value).upper()
+    return COUNTRY_CODE_ALIASES.get(code, code)
+
+
 def build_country_lookups() -> tuple[dict[str, str], dict[str, str]]:
     code_to_name: dict[str, str] = {}
     name_to_code: dict[str, str] = {}
@@ -360,10 +473,10 @@ def build_country_lookups() -> tuple[dict[str, str], dict[str, str]]:
         "u s": "US",
         "united states": "US",
         "united states of america": "US",
-        "uk": "GB",
-        "u k": "GB",
-        "united kingdom": "GB",
-        "great britain": "GB",
+        "uk": "UK",
+        "u k": "UK",
+        "united kingdom": "UK",
+        "great britain": "UK",
         "russian federation": "RU",
         "people s republic of china": "CN",
         "peoples republic of china": "CN",
@@ -379,6 +492,8 @@ def build_country_lookups() -> tuple[dict[str, str], dict[str, str]]:
         "palestine": "PS",
         "vatican city": "VA",
     }
+    code_to_name["UK"] = "United Kingdom"
+    code_to_name["GB"] = "United Kingdom"
     name_to_code.update(aliases)
     return code_to_name, name_to_code
 
@@ -391,17 +506,17 @@ def normalize_country_code(
     country_value: str,
     site_id_value: str,
 ) -> tuple[str, str]:
-    code = normalize_whitespace(country_code_value).upper()
+    code = canonicalize_country_code(country_code_value)
     if re.fullmatch(r"[A-Z]{2}", code):
         return code, "explicit_code"
 
     country_name = normalize_name_key(country_value)
     if country_name and country_name in COUNTRY_NAME_TO_CODE:
-        return COUNTRY_NAME_TO_CODE[country_name], "country_name"
+        return canonicalize_country_code(COUNTRY_NAME_TO_CODE[country_name]), "country_name"
 
     site_id_key = normalize_site_id_key(site_id_value)
     if re.fullmatch(r"[A-Z]{2}-[A-Z0-9]{2,}", site_id_key):
-        return site_id_key.split("-", 1)[0], "site_id_prefix"
+        return canonicalize_country_code(site_id_key.split("-", 1)[0]), "site_id_prefix"
 
     return "", ""
 
@@ -409,7 +524,8 @@ def normalize_country_code(
 def normalize_country_name(country_value: str, country_code: str) -> str:
     country = normalize_whitespace(country_value)
     if re.fullmatch(r"[A-Za-z]{2}", country):
-        return COUNTRY_CODE_TO_NAME.get(country.upper(), country.upper())
+        normalized_code = canonicalize_country_code(country)
+        return COUNTRY_CODE_TO_NAME.get(normalized_code, normalized_code)
     if country:
         normalized = normalize_name_key(country)
         resolved_code = COUNTRY_NAME_TO_CODE.get(normalized, "")
@@ -417,8 +533,183 @@ def normalize_country_name(country_value: str, country_code: str) -> str:
             return COUNTRY_CODE_TO_NAME[resolved_code]
         return country
     if country_code:
-        return COUNTRY_CODE_TO_NAME.get(country_code, country_code)
+        normalized_code = canonicalize_country_code(country_code)
+        return COUNTRY_CODE_TO_NAME.get(normalized_code, normalized_code)
     return ""
+
+
+def resolve_country_boundary_code(properties: dict[str, Any]) -> str:
+    for key in ("ISO_A2_EH", "ISO_A2", "WB_A2", "ADM0_ISO"):
+        candidate = canonicalize_country_code(clean_value(properties.get(key)))
+        if re.fullmatch(r"[A-Z]{2}", candidate):
+            return candidate
+    return ""
+
+
+def iter_country_boundary_rings(geometry: dict[str, Any]) -> Iterator[tuple[tuple[tuple[float, float], ...], ...]]:
+    geometry_type = clean_value(geometry.get("type"))
+    coordinates = geometry.get("coordinates", [])
+    if geometry_type == "Polygon":
+        rings = normalize_boundary_rings(coordinates)
+        if rings:
+            yield rings
+        return
+    if geometry_type == "MultiPolygon":
+        for polygon in coordinates:
+            rings = normalize_boundary_rings(polygon)
+            if rings:
+                yield rings
+
+
+def normalize_boundary_rings(raw_rings: Any) -> tuple[tuple[tuple[float, float], ...], ...]:
+    rings: list[tuple[tuple[float, float], ...]] = []
+    if not isinstance(raw_rings, list):
+        return ()
+    for raw_ring in raw_rings:
+        ring: list[tuple[float, float]] = []
+        if not isinstance(raw_ring, list):
+            continue
+        for point in raw_ring:
+            if not isinstance(point, (list, tuple)) or len(point) < 2:
+                continue
+            try:
+                longitude = float(point[0])
+                latitude = float(point[1])
+            except (TypeError, ValueError):
+                continue
+            ring.append((longitude, latitude))
+        if len(ring) >= 4:
+            rings.append(tuple(ring))
+    return tuple(rings)
+
+
+def boundary_bbox(rings: tuple[tuple[tuple[float, float], ...], ...]) -> tuple[float, float, float, float] | None:
+    coordinates = [point for ring in rings for point in ring]
+    if not coordinates:
+        return None
+    longitudes = [point[0] for point in coordinates]
+    latitudes = [point[1] for point in coordinates]
+    return min(longitudes), min(latitudes), max(longitudes), max(latitudes)
+
+
+def point_in_bbox(longitude: float, latitude: float, bbox: tuple[float, float, float, float]) -> bool:
+    return bbox[0] <= longitude <= bbox[2] and bbox[1] <= latitude <= bbox[3]
+
+
+def point_in_polygon_rings(longitude: float, latitude: float, rings: tuple[tuple[tuple[float, float], ...], ...]) -> bool:
+    if not rings:
+        return False
+    if not point_in_ring(longitude, latitude, rings[0]):
+        return False
+    for hole in rings[1:]:
+        if point_in_ring(longitude, latitude, hole):
+            return False
+    return True
+
+
+def point_in_ring(longitude: float, latitude: float, ring: tuple[tuple[float, float], ...]) -> bool:
+    inside = False
+    if len(ring) < 4:
+        return False
+    previous_longitude, previous_latitude = ring[-1]
+    for current_longitude, current_latitude in ring:
+        if point_on_segment(
+            longitude,
+            latitude,
+            previous_longitude,
+            previous_latitude,
+            current_longitude,
+            current_latitude,
+        ):
+            return True
+        intersects = ((current_latitude > latitude) != (previous_latitude > latitude))
+        if intersects:
+            intersection_longitude = (
+                (previous_longitude - current_longitude) * (latitude - current_latitude)
+                / (previous_latitude - current_latitude)
+            ) + current_longitude
+            if longitude <= intersection_longitude:
+                inside = not inside
+        previous_longitude, previous_latitude = current_longitude, current_latitude
+    return inside
+
+
+def point_on_segment(
+    longitude: float,
+    latitude: float,
+    left_longitude: float,
+    left_latitude: float,
+    right_longitude: float,
+    right_latitude: float,
+) -> bool:
+    epsilon = 1e-9
+    cross_product = (
+        (longitude - left_longitude) * (right_latitude - left_latitude)
+        - (latitude - left_latitude) * (right_longitude - left_longitude)
+    )
+    if abs(cross_product) > epsilon:
+        return False
+    min_longitude = min(left_longitude, right_longitude) - epsilon
+    max_longitude = max(left_longitude, right_longitude) + epsilon
+    min_latitude = min(left_latitude, right_latitude) - epsilon
+    max_latitude = max(left_latitude, right_latitude) + epsilon
+    return min_longitude <= longitude <= max_longitude and min_latitude <= latitude <= max_latitude
+
+
+def distance_to_bbox(longitude: float, latitude: float, bbox: tuple[float, float, float, float]) -> float:
+    longitude_distance = 0.0
+    latitude_distance = 0.0
+    if longitude < bbox[0]:
+        longitude_distance = bbox[0] - longitude
+    elif longitude > bbox[2]:
+        longitude_distance = longitude - bbox[2]
+    if latitude < bbox[1]:
+        latitude_distance = bbox[1] - latitude
+    elif latitude > bbox[3]:
+        latitude_distance = latitude - bbox[3]
+    return math.hypot(longitude_distance, latitude_distance)
+
+
+def point_to_segment_distance(
+    longitude: float,
+    latitude: float,
+    left_longitude: float,
+    left_latitude: float,
+    right_longitude: float,
+    right_latitude: float,
+) -> float:
+    delta_longitude = right_longitude - left_longitude
+    delta_latitude = right_latitude - left_latitude
+    segment_length_squared = delta_longitude * delta_longitude + delta_latitude * delta_latitude
+    if segment_length_squared == 0:
+        return math.hypot(longitude - left_longitude, latitude - left_latitude)
+    projection = (
+        (longitude - left_longitude) * delta_longitude
+        + (latitude - left_latitude) * delta_latitude
+    ) / segment_length_squared
+    projection = max(0.0, min(1.0, projection))
+    closest_longitude = left_longitude + projection * delta_longitude
+    closest_latitude = left_latitude + projection * delta_latitude
+    return math.hypot(longitude - closest_longitude, latitude - closest_latitude)
+
+
+def distance_to_boundary_part(longitude: float, latitude: float, part: CountryBoundaryPart) -> float:
+    best_distance = float("inf")
+    for ring in part.rings:
+        previous_longitude, previous_latitude = ring[-1]
+        for current_longitude, current_latitude in ring:
+            distance = point_to_segment_distance(
+                longitude,
+                latitude,
+                previous_longitude,
+                previous_latitude,
+                current_longitude,
+                current_latitude,
+            )
+            if distance < best_distance:
+                best_distance = distance
+            previous_longitude, previous_latitude = current_longitude, current_latitude
+    return best_distance
 
 
 def parse_coordinate(value: str, minimum: float, maximum: float) -> tuple[float | None, int]:
@@ -463,6 +754,43 @@ def normalize_publish_years(value: Any) -> list[int]:
         years.append(year)
     years.sort()
     return years
+
+
+def read_json_from_url_or_cache(url: str, cache_path: Path) -> dict[str, Any]:
+    if cache_path.exists():
+        return json.loads(cache_path.read_text(encoding="utf-8"))
+
+    request = Request(url, headers={"User-Agent": "all-known-flux-sites-builder/1.0"})
+    with urlopen(request, timeout=AVAILABILITY_REQUEST_TIMEOUT_SECONDS) as response:
+        payload = json.load(response)
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    cache_path.write_text(json.dumps(payload, ensure_ascii=True), encoding="utf-8")
+    return payload
+
+
+@lru_cache(maxsize=1)
+def load_country_boundary_lookup() -> CountryBoundaryLookup:
+    try:
+        payload = read_json_from_url_or_cache(
+            NATURAL_EARTH_COUNTRIES_GEOJSON_URL,
+            NATURAL_EARTH_COUNTRIES_CACHE_PATH,
+        )
+    except (HTTPError, URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
+        return CountryBoundaryLookup(parts=[], warnings=[f"Country boundary lookup could not be loaded: {exc}"])
+    return CountryBoundaryLookup.from_geojson(payload)
+
+
+def infer_country_from_coordinates(
+    latitude: float | None,
+    longitude: float | None,
+    country_lookup: CountryBoundaryLookup | None,
+) -> tuple[str, str]:
+    if country_lookup is None:
+        return "", ""
+    match = country_lookup.lookup(latitude, longitude)
+    if match is None:
+        return "", ""
+    return match
 
 
 def format_float(value: float | None) -> str:
@@ -715,6 +1043,166 @@ def record_coordinates(record: RawSiteRecord) -> tuple[float, float] | None:
     return (record.latitude or 0.0, record.longitude or 0.0)
 
 
+def haversine_distance_km(
+    left: tuple[float, float],
+    right: tuple[float, float],
+) -> float:
+    left_latitude, left_longitude = left
+    right_latitude, right_longitude = right
+    earth_radius_km = 6371.0
+    latitude_delta = math.radians(right_latitude - left_latitude)
+    longitude_delta = math.radians(right_longitude - left_longitude)
+    left_radians = math.radians(left_latitude)
+    right_radians = math.radians(right_latitude)
+    haversine = (
+        math.sin(latitude_delta / 2.0) ** 2
+        + math.cos(left_radians) * math.cos(right_radians) * math.sin(longitude_delta / 2.0) ** 2
+    )
+    return earth_radius_km * 2.0 * math.atan2(math.sqrt(haversine), math.sqrt(1.0 - haversine))
+
+
+def summarize_coordinate_details(records: Sequence[RawSiteRecord]) -> str:
+    grouped_sources: dict[tuple[str, str], list[str]] = defaultdict(list)
+    coordinates: list[tuple[float, float]] = []
+
+    for record in records:
+        coords = record_coordinates(record)
+        if coords is None:
+            continue
+        coordinates.append(coords)
+        grouped_sources[(format_float(coords[0]), format_float(coords[1]))].append(record.source_label)
+
+    if not grouped_sources:
+        return ""
+
+    entries = []
+    for (latitude, longitude), sources in sorted(grouped_sources.items()):
+        entries.append(f"({latitude}, {longitude}) <= {', '.join(sorted(set(sources)))}")
+
+    if len(grouped_sources) < 2:
+        return " | ".join(entries)
+
+    max_distance_km = max(
+        haversine_distance_km(left, right)
+        for index, left in enumerate(coordinates)
+        for right in coordinates[index + 1 :]
+    )
+    return f"max_distance_km={max_distance_km:.2f}; " + " | ".join(entries)
+
+
+def choose_group_country(
+    records: Sequence[RawSiteRecord],
+    site_id: str,
+    latitude: float | None,
+    longitude: float | None,
+    country_lookup: CountryBoundaryLookup | None,
+) -> tuple[str, str]:
+    coordinate_country_code, _ = infer_country_from_coordinates(latitude, longitude, country_lookup)
+    country_code, _ = choose_country_code(records, site_id, coordinate_country_code=coordinate_country_code)
+    return country_code, coordinate_country_code
+
+
+def group_summary(
+    group: SiteGroup,
+    country_lookup: CountryBoundaryLookup | None,
+) -> dict[str, Any]:
+    records = group.records
+    site_id = choose_site_id(records)
+    site_code = choose_site_code(records, site_id)
+    site_name = choose_site_name(records)
+    latitude, longitude = choose_coordinates(records)
+    country_code, coordinate_country_code = choose_group_country(records, site_id, latitude, longitude, country_lookup)
+    return {
+        "site_id": site_id,
+        "site_id_key": normalize_site_id_key(site_id),
+        "site_code": site_code,
+        "site_code_key": normalize_site_code_key(site_code),
+        "site_name": site_name,
+        "site_name_key": normalize_name_key(site_name),
+        "country_code": country_code,
+        "coordinate_country_code": coordinate_country_code,
+        "latitude": latitude,
+        "longitude": longitude,
+        "has_coordinates": latitude is not None and longitude is not None,
+        "has_fluxnet_site_id": is_fluxnet_style_site_id(site_id),
+    }
+
+
+def should_merge_into_country_prefixed_group(
+    target_summary: dict[str, Any],
+    source_summary: dict[str, Any],
+) -> bool:
+    if not target_summary["has_fluxnet_site_id"] or source_summary["has_fluxnet_site_id"]:
+        return False
+    if not target_summary["site_code_key"] or target_summary["site_code_key"] != source_summary["site_code_key"]:
+        return False
+    if not target_summary["country_code"] or target_summary["country_code"] != source_summary["country_code"]:
+        return False
+
+    if target_summary["has_coordinates"] and source_summary["has_coordinates"]:
+        return coordinates_close(
+            (target_summary["latitude"], target_summary["longitude"]),
+            (source_summary["latitude"], source_summary["longitude"]),
+        )
+
+    if target_summary["site_name_key"] and target_summary["site_name_key"] == source_summary["site_name_key"]:
+        return True
+
+    return False
+
+
+def non_resolved_review_reasons(reasons: set[str]) -> set[str]:
+    return {
+        reason
+        for reason in reasons
+        if not reason.startswith(MULTIPLE_CANDIDATE_REVIEW_PREFIX)
+    }
+
+
+def consolidate_country_prefixed_site_id_groups(
+    groups: Sequence[SiteGroup],
+    country_lookup: CountryBoundaryLookup | None,
+) -> list[SiteGroup]:
+    summaries = [group_summary(group, country_lookup) for group in groups]
+    merge_target_by_index: dict[int, int] = {}
+
+    for source_index, source_summary in enumerate(summaries):
+        if source_summary["has_fluxnet_site_id"]:
+            continue
+        candidate_targets = [
+            target_index
+            for target_index, target_summary in enumerate(summaries)
+            if target_index != source_index
+            and should_merge_into_country_prefixed_group(target_summary, source_summary)
+        ]
+        if len(candidate_targets) == 1:
+            merge_target_by_index[source_index] = candidate_targets[0]
+
+    merged_groups: list[SiteGroup] = []
+    merged_group_index_by_original: dict[int, int] = {}
+
+    for original_index, group in enumerate(groups):
+        if original_index in merge_target_by_index:
+            continue
+        merged_groups.append(
+            SiteGroup(
+                records=list(group.records),
+                review_reasons=set(group.review_reasons),
+            )
+        )
+        merged_group_index_by_original[original_index] = len(merged_groups) - 1
+
+    for source_index, target_original_index in merge_target_by_index.items():
+        target_merged_index = merged_group_index_by_original.get(target_original_index)
+        if target_merged_index is None:
+            continue
+        merged_group = merged_groups[target_merged_index]
+        merged_group.records.extend(groups[source_index].records)
+        merged_group.review_reasons.update(non_resolved_review_reasons(groups[source_index].review_reasons))
+
+    return merged_groups
+
+
 def group_site_id_keys(group: SiteGroup) -> set[str]:
     return {record.site_id_key for record in group.records if record.site_id_key}
 
@@ -955,7 +1443,11 @@ def choose_site_name(records: Sequence[RawSiteRecord]) -> str:
     return max(candidates, key=lambda value: (len(value), value))
 
 
-def choose_country_code(records: Sequence[RawSiteRecord], site_id: str) -> tuple[str, str]:
+def choose_country_code(
+    records: Sequence[RawSiteRecord],
+    site_id: str,
+    coordinate_country_code: str = "",
+) -> tuple[str, str]:
     def source_rank(record: RawSiteRecord) -> int:
         confidence = {
             "explicit_code": 3,
@@ -966,6 +1458,10 @@ def choose_country_code(records: Sequence[RawSiteRecord], site_id: str) -> tuple
         return confidence
 
     candidates = [record for record in records if record.country_code]
+    distinct_codes = {record.country_code for record in candidates}
+    if coordinate_country_code:
+        if not distinct_codes or len(distinct_codes) > 1 or coordinate_country_code not in distinct_codes:
+            return coordinate_country_code, "coordinates"
     if candidates:
         best = max(
             candidates,
@@ -977,17 +1473,31 @@ def choose_country_code(records: Sequence[RawSiteRecord], site_id: str) -> tuple
         )
         return best.country_code, best.country_code_source
 
+    if coordinate_country_code:
+        return coordinate_country_code, "coordinates"
+
     inferred, source = normalize_country_code("", "", site_id)
     return inferred, source
 
 
-def choose_country_name(records: Sequence[RawSiteRecord], country_code: str) -> str:
+def choose_country_name(
+    records: Sequence[RawSiteRecord],
+    country_code: str,
+    coordinate_country_name: str = "",
+) -> str:
+    normalized_coordinate_name = (
+        normalize_country_name(coordinate_country_name, country_code)
+        if coordinate_country_name
+        else ""
+    )
     candidates = [record.country for record in records if record.country]
     if candidates:
         best = max(candidates, key=lambda value: (len(value), value))
         normalized = normalize_country_name(best, country_code)
         if normalized:
             return normalized
+    if normalized_coordinate_name:
+        return normalized_coordinate_name
     return COUNTRY_CODE_TO_NAME.get(country_code, country_code)
 
 
@@ -1112,21 +1622,38 @@ def load_accessible_truth_from_availability_sources() -> ExplorerAccessibleTruth
 def build_canonical_sites(
     groups: Sequence[SiteGroup],
     accessible_truth: ExplorerAccessibleTruth | None = None,
+    country_lookup: CountryBoundaryLookup | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     canonical_sites: list[dict[str, Any]] = []
     review_rows: list[dict[str, Any]] = []
 
-    for group in groups:
+    resolved_groups = consolidate_country_prefixed_site_id_groups(groups, country_lookup)
+
+    for group in resolved_groups:
         records = group.records
         site_id = choose_site_id(records)
         site_code = choose_site_code(records, site_id)
         site_name = choose_site_name(records)
-        country_code, country_code_source = choose_country_code(records, site_id)
-        country = choose_country_name(records, country_code)
         latitude, longitude = choose_coordinates(records)
+        coordinate_country_code, coordinate_country_name = infer_country_from_coordinates(
+            latitude,
+            longitude,
+            country_lookup,
+        )
+        country_code, country_code_source = choose_country_code(
+            records,
+            site_id,
+            coordinate_country_code=coordinate_country_code,
+        )
+        country = choose_country_name(
+            records,
+            country_code,
+            coordinate_country_name=coordinate_country_name if coordinate_country_code == country_code else "",
+        )
         source_network = choose_source_network(records)
         source_system = choose_source_system(records)
         source_files = sorted({record.source_label for record in records})
+        coordinate_details = summarize_coordinate_details(records)
         if accessible_truth is None:
             in_explorer = any(record.source_spec.in_explorer for record in records)
             has_accessible_data = any(record.source_spec.has_accessible_data for record in records)
@@ -1147,7 +1674,8 @@ def build_canonical_sites(
         if materially_conflicting_coordinates(records):
             review_reasons.add("materially conflicting coordinates were present across contributing records")
         country_codes = distinct_country_codes(records)
-        if len(country_codes) > 1:
+        unresolved_country_codes = {code for code in country_codes if code != country_code}
+        if len(unresolved_country_codes) > 0 and country_code_source != "coordinates":
             review_reasons.add("ambiguous country_code across contributing records")
         if not country_code and any(record.country or record.site_id for record in records):
             review_reasons.add("country_code could not be inferred confidently")
@@ -1191,6 +1719,7 @@ def build_canonical_sites(
                     "source_network": source_network,
                     "source_files": "; ".join(source_files),
                     "source_count": len(source_files),
+                    "coordinate_details": coordinate_details,
                     "review_reason": review_reason,
                 }
             )
@@ -1266,6 +1795,7 @@ def build_catalog(
     source_file_counts: Counter[str] = Counter()
     all_records: list[RawSiteRecord] = []
     accessible_truth = ExplorerAccessibleTruth()
+    country_lookup = load_country_boundary_lookup()
 
     for source_spec in source_specs:
         source_records = load_source_records(source_spec, source_file_counts)
@@ -1280,7 +1810,11 @@ def build_catalog(
     accessible_truth.warnings.extend(live_accessible_truth.warnings)
 
     groups = merge_records(all_records)
-    canonical_sites, review_rows = build_canonical_sites(groups, accessible_truth=accessible_truth)
+    canonical_sites, review_rows = build_canonical_sites(
+        groups,
+        accessible_truth=accessible_truth,
+        country_lookup=country_lookup,
+    )
     map_rows = build_map_rows(canonical_sites)
 
     summary = {
@@ -1297,6 +1831,7 @@ def build_catalog(
         "map_rows": len(map_rows),
         "source_file_counts": dict(sorted(source_file_counts.items())),
         "accessible_truth_warnings": accessible_truth.warnings,
+        "country_lookup_warnings": country_lookup.warnings,
     }
     summary["version"] = version_hash(CANONICAL_COLUMNS, canonical_sites)
 

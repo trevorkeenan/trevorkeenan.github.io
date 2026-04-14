@@ -330,6 +330,23 @@ test('Known-sites map asset exists and normalizes for the separate map overlay',
   assert.equal(rows.some((row) => row.known_site_only === true && row.has_accessible_data === true), false);
 });
 
+test('Known-sites map copy uses the simplified popup text and visual legend labels', () => {
+  const explorerJs = fs.readFileSync(path.join(__dirname, '..', 'assets', 'shuttle-explorer.js'), 'utf8');
+  const explorerCss = fs.readFileSync(path.join(__dirname, '..', 'assets', 'shuttle-explorer.css'), 'utf8');
+
+  assert.equal(explorerJs.includes('Show all known sites</label>'), true);
+  assert.equal(explorerJs.includes('Show all known sites background layer'), false);
+  assert.equal(explorerJs.includes('Site location known but data holdings unavailable.'), true);
+  assert.equal(explorerJs.includes('Known site only; accessible explorer data are not currently available.'), false);
+  assert.equal(explorerJs.includes('additional sites with accessible data'), true);
+  assert.equal(explorerJs.includes('additional sites without shared data'), true);
+  assert.equal(explorerJs.includes('selected sites'), true);
+  assert.equal(explorerJs.includes('without shared data.'), true);
+  assert.equal(explorerCss.includes('.shuttle-explorer__map-legend-swatch--selected {'), true);
+  assert.equal(explorerCss.includes('.shuttle-explorer__map-legend-swatch--accessible {'), true);
+  assert.equal(explorerCss.includes('.shuttle-explorer__map-legend-swatch--unshared {'), true);
+});
+
 test('Merge precedence is Shuttle > ICOS > AmeriFlux > FLUXNET2015 with no duplicates', () => {
   const shuttleRows = [
     {

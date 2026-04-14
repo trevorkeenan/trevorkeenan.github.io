@@ -4494,6 +4494,16 @@
     return "We appreciate acknowledgement of the QED FLUXNET Data Explorer when convenient. Contact TF Keenan (<a href=\"mailto:trevorkeenan@berkeley.edu\">trevorkeenan@berkeley.edu</a>) with any questions or suggestions. Funding for the FLUXNET Data Explorer was generously provided by the NSF AccelNet program. Available data is updated as of: " + escapeHtml(snapshotUpdatedDateDisplayText(snapshotUpdatedDate)) + ".";
   }
 
+  function buildKnownSitesLegendHtml() {
+    return [
+      "<div class=\"shuttle-explorer__tiny shuttle-explorer__map-legend\" data-role=\"known-sites-legend\" aria-label=\"Map legend\">",
+      "  <span class=\"shuttle-explorer__map-legend-item\"><span class=\"shuttle-explorer__map-legend-swatch shuttle-explorer__map-legend-swatch--selected\" aria-hidden=\"true\"></span><span>selected sites</span></span>",
+      "  <span class=\"shuttle-explorer__map-legend-item\"><span class=\"shuttle-explorer__map-legend-swatch shuttle-explorer__map-legend-swatch--accessible\" aria-hidden=\"true\"></span><span>additional sites with accessible data</span></span>",
+      "  <span class=\"shuttle-explorer__map-legend-item\"><span class=\"shuttle-explorer__map-legend-swatch shuttle-explorer__map-legend-swatch--unshared\" aria-hidden=\"true\"></span><span>additional sites without shared data</span></span>",
+      "</div>"
+    ].join("");
+  }
+
   function csvEscape(value) {
     var s = String(value == null ? "" : value);
     if (/[",\r\n]/.test(s)) {
@@ -4800,6 +4810,12 @@
       ".shuttle-explorer__attribution li + li{margin-top:6px;}",
       ".shuttle-explorer__attribution-row{display:flex;justify-content:space-between;align-items:center;gap:10px;margin:8px 0 0;}",
       ".shuttle-explorer__tiny{font-size:.82em;color:#556779;}",
+      ".shuttle-explorer__map-legend{display:flex;flex-wrap:wrap;gap:8px 14px;margin:0;max-width:680px;}",
+      ".shuttle-explorer__map-legend-item{display:inline-flex;align-items:center;gap:6px;line-height:1.3;}",
+      ".shuttle-explorer__map-legend-swatch{display:inline-block;width:10px;height:10px;border-radius:999px;flex:0 0 auto;}",
+      ".shuttle-explorer__map-legend-swatch--selected{border:1.5px solid #2f5374;background:#5f8bb3;}",
+      ".shuttle-explorer__map-legend-swatch--accessible{border:1.1px solid #7a8794;background:#d5dbe3;}",
+      ".shuttle-explorer__map-legend-swatch--unshared{border:1.4px solid #9b6a08;background:#f3d58a;}",
       "@media (max-width: 860px){.shuttle-explorer__controls{grid-template-columns:1fr;}.shuttle-explorer__row{flex-direction:column;align-items:flex-start;}.shuttle-explorer__bulk-identity-grid{grid-template-columns:1fr;}}"
     ].join("");
     document.head.appendChild(style);
@@ -4956,8 +4972,8 @@
       "      <h3 id=\"shuttle-map-heading\">Flux sites map</h3>",
       "      <p class=\"shuttle-explorer__tiny shuttle-explorer__map-summary\" data-role=\"map-summary\">Select one or more accessible-data sites to highlight them on the map.</p>",
       "      <div class=\"shuttle-explorer__map-controls\">",
-      "        <label class=\"shuttle-explorer__map-toggle\"><input type=\"checkbox\" data-role=\"known-sites-toggle\" checked /> Show all known sites background layer</label>",
-      "        <p class=\"shuttle-explorer__tiny shuttle-explorer__map-legend\" data-role=\"known-sites-legend\">Blue markers show selected explorer rows. Gold markers are known-site-only locations without accessible explorer data. Gray markers are other known sites.</p>",
+      "        <label class=\"shuttle-explorer__map-toggle\"><input type=\"checkbox\" data-role=\"known-sites-toggle\" checked /> Show all known sites</label>",
+      "        " + buildKnownSitesLegendHtml(),
       "      </div>",
       "    </div>",
       "    <button type=\"button\" class=\"shuttle-explorer__btn shuttle-explorer__btn--small shuttle-explorer__hidden\" data-role=\"reset-map-view\">Reset map view</button>",
@@ -5969,15 +5985,8 @@
     if (row.country) {
       lines.push("  <div class=\"shuttle-explorer__map-popup-meta\">" + escapeHtml(row.country) + "</div>");
     }
-    if (row.source_network) {
-      lines.push("  <div class=\"shuttle-explorer__map-popup-meta\">" + escapeHtml(row.source_network) + "</div>");
-    }
-    if (opts.showCategory) {
-      if (row.known_site_only) {
-        lines.push("  <div class=\"shuttle-explorer__map-popup-meta\">Known site only; accessible explorer data are not currently available.</div>");
-      } else if (row.has_accessible_data) {
-        lines.push("  <div class=\"shuttle-explorer__map-popup-meta\">Site with accessible data.</div>");
-      }
+    if (opts.showCategory && row.known_site_only) {
+      lines.push("  <div class=\"shuttle-explorer__map-popup-meta\">Site location known but data holdings unavailable.</div>");
     }
     lines.push("</div>");
     return lines.join("");
@@ -6082,23 +6091,12 @@
     if (b.knownSitesToggle) {
       b.knownSitesToggle.checked = !!this.state.knownSiteOverlayEnabled;
     }
-    if (b.knownSitesLegend) {
-      if (this.state.knownSiteOverlayEnabled && knownSiteRows.length) {
-        b.knownSitesLegend.textContent = "Blue markers show selected explorer rows. Gold markers are " +
-          knownSiteOnlyCount + " known-site-only " + (knownSiteOnlyCount === 1 ? "location" : "locations") +
-          " without accessible explorer data. Gray markers are other known sites.";
-      } else if (this.state.knownSiteOverlayEnabled && this.state.knownSiteMapWarning) {
-        b.knownSitesLegend.textContent = this.state.knownSiteMapWarning;
-      } else {
-        b.knownSitesLegend.textContent = "Blue markers show selected explorer rows. Turn the background layer on to show the broader known-sites catalog.";
-      }
-    }
-
     if (b.mapSummary) {
       if (this.state.knownSiteOverlayEnabled && knownSiteRows.length && !selectionState.selectedRows.length) {
         summary = "Showing " + knownSiteRows.length + " known flux " + (knownSiteRows.length === 1 ? "site" : "sites") +
-          ", including " + knownSiteOnlyCount + " known-site-only " + (knownSiteOnlyCount === 1 ? "location" : "locations") +
-          " and " + knownAccessibleCount + " site" + (knownAccessibleCount === 1 ? "" : "s") + " with accessible data.";
+          ", including " + knownAccessibleCount + " site" + (knownAccessibleCount === 1 ? "" : "s") +
+          " with accessible data and " + knownSiteOnlyCount + " other " + (knownSiteOnlyCount === 1 ? "site" : "sites") +
+          " without shared data.";
       } else if (!selectionState.selectedRows.length) {
         summary = "Select one or more accessible-data sites to highlight them on the map.";
       } else if (!selectionState.mappableRows.length) {
