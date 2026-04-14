@@ -336,15 +336,72 @@ test('Known-sites map copy uses the simplified popup text and visual legend labe
 
   assert.equal(explorerJs.includes('Show all known sites</label>'), true);
   assert.equal(explorerJs.includes('Show all known sites background layer'), false);
+  assert.equal(explorerJs.includes('Download site CSV'), true);
   assert.equal(explorerJs.includes('Site location known but data holdings unavailable.'), true);
   assert.equal(explorerJs.includes('Known site only; accessible explorer data are not currently available.'), false);
-  assert.equal(explorerJs.includes('additional sites with accessible data'), true);
-  assert.equal(explorerJs.includes('additional sites without shared data'), true);
+  assert.equal(explorerJs.includes('sites with accessible data'), true);
+  assert.equal(explorerJs.includes('sites without shared data'), true);
+  assert.equal(explorerJs.includes('additional sites with accessible data'), false);
+  assert.equal(explorerJs.includes('additional sites without shared data'), false);
   assert.equal(explorerJs.includes('selected sites'), true);
   assert.equal(explorerJs.includes('without shared data.'), true);
+  assert.equal(explorerCss.includes('.shuttle-explorer__map-actions {'), true);
   assert.equal(explorerCss.includes('.shuttle-explorer__map-legend-swatch--selected {'), true);
   assert.equal(explorerCss.includes('.shuttle-explorer__map-legend-swatch--accessible {'), true);
   assert.equal(explorerCss.includes('.shuttle-explorer__map-legend-swatch--unshared {'), true);
+});
+
+test('Known-sites helpers export availability labels and swapped marker colors', () => {
+  const accessibleRow = {
+    site_id: 'US-Acc',
+    site_name: 'Accessible Site',
+    latitude: 40.1,
+    longitude: -120.2,
+    country: 'United States',
+    has_accessible_data: true,
+    known_site_only: false
+  };
+  const noPublicRow = {
+    site_id: 'US-Npd',
+    site_name: 'No Public Data Site',
+    latitude: 41.2,
+    longitude: -121.3,
+    country: 'United States',
+    has_accessible_data: false,
+    known_site_only: true
+  };
+
+  assert.equal(hooks.knownSiteDataAvailabilityLabel(accessibleRow), 'accessible data');
+  assert.equal(hooks.knownSiteDataAvailabilityLabel(noPublicRow), 'no public data');
+  assert.deepEqual(
+    hooks.knownSiteMapMarkerStyle(accessibleRow),
+    {
+      radius: 4,
+      weight: 1.1,
+      color: '#9b6a08',
+      fillColor: '#f3d58a',
+      fillOpacity: 0.45
+    }
+  );
+  assert.deepEqual(
+    hooks.knownSiteMapMarkerStyle(noPublicRow),
+    {
+      radius: 4.5,
+      weight: 1.4,
+      color: '#6d8fb2',
+      fillColor: '#d8e6f4',
+      fillOpacity: 0.6
+    }
+  );
+  assert.equal(
+    hooks.buildKnownSitesExportCsv([accessibleRow, noPublicRow]),
+    [
+      'site_id,site_name,latitude,longitude,country,data_availability',
+      'US-Acc,Accessible Site,40.1,-120.2,United States,accessible data',
+      'US-Npd,No Public Data Site,41.2,-121.3,United States,no public data',
+      ''
+    ].join('\n')
+  );
 });
 
 test('Merge precedence is Shuttle > ICOS > AmeriFlux > FLUXNET2015 with no duplicates', () => {

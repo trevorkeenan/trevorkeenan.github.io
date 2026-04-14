@@ -4074,6 +4074,38 @@
     return rows;
   }
 
+  function knownSiteDataAvailabilityLabel(row) {
+    return row && row.known_site_only ? "no public data" : "accessible data";
+  }
+
+  function knownSiteMapMarkerStyle(row) {
+    var knownSiteOnly = !!(row && row.known_site_only);
+    return {
+      radius: knownSiteOnly ? 4.5 : 4,
+      weight: knownSiteOnly ? 1.4 : 1.1,
+      color: knownSiteOnly ? "#6d8fb2" : "#9b6a08",
+      fillColor: knownSiteOnly ? "#d8e6f4" : "#f3d58a",
+      fillOpacity: knownSiteOnly ? 0.6 : 0.45
+    };
+  }
+
+  function buildKnownSitesExportCsv(rows) {
+    var lines = [
+      ["site_id", "site_name", "latitude", "longitude", "country", "data_availability"].join(",")
+    ];
+    (rows || []).forEach(function (row) {
+      lines.push([
+        csvEscape(row && row.site_id || ""),
+        csvEscape(row && row.site_name || ""),
+        csvEscape(row && row.latitude),
+        csvEscape(row && row.longitude),
+        csvEscape(row && row.country || ""),
+        csvEscape(knownSiteDataAvailabilityLabel(row))
+      ].join(","));
+    });
+    return lines.join("\n") + "\n";
+  }
+
   function extractSnapshotMeta(payload) {
     if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
       return {};
@@ -4498,8 +4530,8 @@
     return [
       "<div class=\"shuttle-explorer__tiny shuttle-explorer__map-legend\" data-role=\"known-sites-legend\" aria-label=\"Map legend\">",
       "  <span class=\"shuttle-explorer__map-legend-item\"><span class=\"shuttle-explorer__map-legend-swatch shuttle-explorer__map-legend-swatch--selected\" aria-hidden=\"true\"></span><span>selected sites</span></span>",
-      "  <span class=\"shuttle-explorer__map-legend-item\"><span class=\"shuttle-explorer__map-legend-swatch shuttle-explorer__map-legend-swatch--accessible\" aria-hidden=\"true\"></span><span>additional sites with accessible data</span></span>",
-      "  <span class=\"shuttle-explorer__map-legend-item\"><span class=\"shuttle-explorer__map-legend-swatch shuttle-explorer__map-legend-swatch--unshared\" aria-hidden=\"true\"></span><span>additional sites without shared data</span></span>",
+      "  <span class=\"shuttle-explorer__map-legend-item\"><span class=\"shuttle-explorer__map-legend-swatch shuttle-explorer__map-legend-swatch--accessible\" aria-hidden=\"true\"></span><span>sites with accessible data</span></span>",
+      "  <span class=\"shuttle-explorer__map-legend-item\"><span class=\"shuttle-explorer__map-legend-swatch shuttle-explorer__map-legend-swatch--unshared\" aria-hidden=\"true\"></span><span>sites without shared data</span></span>",
       "</div>"
     ].join("");
   }
@@ -4810,13 +4842,14 @@
       ".shuttle-explorer__attribution li + li{margin-top:6px;}",
       ".shuttle-explorer__attribution-row{display:flex;justify-content:space-between;align-items:center;gap:10px;margin:8px 0 0;}",
       ".shuttle-explorer__tiny{font-size:.82em;color:#556779;}",
+      ".shuttle-explorer__map-actions{display:flex;flex-direction:column;align-items:flex-end;gap:8px;}",
       ".shuttle-explorer__map-legend{display:flex;flex-wrap:wrap;gap:8px 14px;margin:0;max-width:680px;}",
       ".shuttle-explorer__map-legend-item{display:inline-flex;align-items:center;gap:6px;line-height:1.3;}",
       ".shuttle-explorer__map-legend-swatch{display:inline-block;width:10px;height:10px;border-radius:999px;flex:0 0 auto;}",
       ".shuttle-explorer__map-legend-swatch--selected{border:1.5px solid #2f5374;background:#5f8bb3;}",
-      ".shuttle-explorer__map-legend-swatch--accessible{border:1.1px solid #7a8794;background:#d5dbe3;}",
-      ".shuttle-explorer__map-legend-swatch--unshared{border:1.4px solid #9b6a08;background:#f3d58a;}",
-      "@media (max-width: 860px){.shuttle-explorer__controls{grid-template-columns:1fr;}.shuttle-explorer__row{flex-direction:column;align-items:flex-start;}.shuttle-explorer__bulk-identity-grid{grid-template-columns:1fr;}}"
+      ".shuttle-explorer__map-legend-swatch--accessible{border:1.4px solid #9b6a08;background:#f3d58a;}",
+      ".shuttle-explorer__map-legend-swatch--unshared{border:1.4px solid #6d8fb2;background:#d8e6f4;}",
+      "@media (max-width: 860px){.shuttle-explorer__controls{grid-template-columns:1fr;}.shuttle-explorer__row{flex-direction:column;align-items:flex-start;}.shuttle-explorer__bulk-identity-grid{grid-template-columns:1fr;}.shuttle-explorer__map-header{flex-direction:column;align-items:flex-start;}.shuttle-explorer__map-actions{align-items:flex-start;}}"
     ].join("");
     document.head.appendChild(style);
   }
@@ -4976,7 +5009,10 @@
       "        " + buildKnownSitesLegendHtml(),
       "      </div>",
       "    </div>",
-      "    <button type=\"button\" class=\"shuttle-explorer__btn shuttle-explorer__btn--small shuttle-explorer__hidden\" data-role=\"reset-map-view\">Reset map view</button>",
+      "    <div class=\"shuttle-explorer__map-actions\">",
+      "      <button type=\"button\" class=\"shuttle-explorer__btn shuttle-explorer__btn--small shuttle-explorer__hidden\" data-role=\"reset-map-view\">Reset map view</button>",
+      "      <button type=\"button\" class=\"shuttle-explorer__btn shuttle-explorer__btn--small shuttle-explorer__hidden\" data-role=\"download-known-sites-csv\">Download site CSV</button>",
+      "    </div>",
       "  </div>",
       "  <div class=\"shuttle-explorer__map-shell\">",
       "    <div class=\"shuttle-explorer__map-canvas\" data-role=\"map-canvas\" aria-label=\"Map of known and selected FLUXNET sites\"></div>",
@@ -5175,6 +5211,7 @@
       mapCanvas: bySelector(this.root, "[data-role='map-canvas']"),
       mapEmpty: bySelector(this.root, "[data-role='map-empty']"),
       resetMapView: bySelector(this.root, "[data-role='reset-map-view']"),
+      downloadKnownSitesCsv: bySelector(this.root, "[data-role='download-known-sites-csv']"),
       tableWrap: bySelector(this.root, "[data-role='table-wrap']"),
       table: bySelector(this.root, "[data-role='table']"),
       theadRow: bySelector(this.root, "[data-role='thead-row']"),
@@ -5458,6 +5495,12 @@
     if (b.resetMapView) {
       b.resetMapView.addEventListener("click", function () {
         self.resetMapView();
+      });
+    }
+
+    if (b.downloadKnownSitesCsv) {
+      b.downloadKnownSitesCsv.addEventListener("click", function () {
+        self.handleDownloadKnownSitesCsv();
       });
     }
 
@@ -6031,14 +6074,7 @@
     L = window.L;
     this.mapKnownSiteLayer.clearLayers();
     (rows || []).forEach(function (row) {
-      var knownSiteOnly = !!row.known_site_only;
-      var marker = L.circleMarker([row.latitude, row.longitude], {
-        radius: knownSiteOnly ? 4.5 : 4,
-        weight: knownSiteOnly ? 1.4 : 1.1,
-        color: knownSiteOnly ? "#9b6a08" : "#7a8794",
-        fillColor: knownSiteOnly ? "#f3d58a" : "#d5dbe3",
-        fillOpacity: knownSiteOnly ? 0.45 : 0.55
-      });
+      var marker = L.circleMarker([row.latitude, row.longitude], knownSiteMapMarkerStyle(row));
       marker.bindPopup(self.buildMapPopupHtml(row, { showCategory: true }), {
         autoPan: true
       });
@@ -6114,6 +6150,12 @@
         }
       }
       b.mapSummary.textContent = summary;
+    }
+    if (b.downloadKnownSitesCsv) {
+      b.downloadKnownSitesCsv.classList.toggle(
+        "shuttle-explorer__hidden",
+        !(Array.isArray(this.state.knownSiteMapRows) && this.state.knownSiteMapRows.length)
+      );
     }
 
     if (!this.ensureMap()) {
@@ -6364,6 +6406,10 @@
       ].join(","));
     });
     return lines.join("\n") + "\n";
+  };
+
+  Explorer.prototype.buildKnownSitesExportCsv = function (rows) {
+    return buildKnownSitesExportCsv(rows);
   };
 
   Explorer.prototype.buildLinksText = function (rows) {
@@ -6928,6 +6974,18 @@
       return;
     }
     this.setBulkStatus("Downloaded shuttle_selected_sites.txt.");
+  };
+
+  Explorer.prototype.handleDownloadKnownSitesCsv = function () {
+    var rows = Array.isArray(this.state.knownSiteMapRows) ? this.state.knownSiteMapRows : [];
+    if (!rows.length) {
+      return;
+    }
+    this.downloadTextFile(
+      "all_known_flux_sites_map_export.csv",
+      this.buildKnownSitesExportCsv(rows),
+      "text/csv;charset=utf-8"
+    );
   };
 
   Explorer.prototype.handleDownloadAmeriFluxSitesFile = function () {
@@ -7995,6 +8053,9 @@
     deriveCountry: deriveCountry,
     normalizeRows: normalizeRows,
     normalizeKnownSiteMapRows: normalizeKnownSiteMapRows,
+    knownSiteDataAvailabilityLabel: knownSiteDataAvailabilityLabel,
+    knownSiteMapMarkerStyle: knownSiteMapMarkerStyle,
+    buildKnownSitesExportCsv: buildKnownSitesExportCsv,
     normalizeNetworkToken: normalizeNetworkToken,
     normalizeNetworkTokens: normalizeNetworkTokens,
     normalizeNetworkDisplayValue: normalizeNetworkDisplayValue,
