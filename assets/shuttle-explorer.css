@@ -507,6 +507,10 @@
   gap: 8px;
 }
 
+.shuttle-explorer__map-export-btn {
+  font-size: 0.71em;
+}
+
 .shuttle-explorer__map-legend {
   display: flex;
   flex-wrap: wrap;
