@@ -1349,6 +1349,17 @@
       .replace(/`/g, "\\`");
   }
 
+  function base64EncodeUtf8(value) {
+    var text = String(value == null ? "" : value);
+    if (typeof Buffer !== "undefined" && typeof Buffer.from === "function") {
+      return Buffer.from(text, "utf8").toString("base64");
+    }
+    if (typeof btoa === "function") {
+      return btoa(unescape(encodeURIComponent(text)));
+    }
+    throw new Error("Base64 encoding is unavailable in this runtime.");
+  }
+
   function rowNetworkTokens(row) {
     var seen = {};
     var tokens = [];
@@ -2154,7 +2165,7 @@
     var defaultUserId = shellDoubleQuote(String(opts.defaultUserId || AMERIFLUX_BULK_FALLBACK_USER_ID));
     var defaultUserEmail = shellDoubleQuote(String(opts.defaultUserEmail || AMERIFLUX_BULK_FALLBACK_USER_EMAIL));
     var v2DownloadUrl = shellDoubleQuote(String(opts.v2DownloadUrl || AMERIFLUX_V2_DOWNLOAD_URL));
-    var v1DownloadUrl = shellDoubleQuote(String(opts.v1DownloadUrl || AMERIFLUX_V1_DOWNLOAD_URL));
+    var fluxnet2015RequestUrlB64 = shellDoubleQuote(base64EncodeUtf8(String(opts.v1DownloadUrl || AMERIFLUX_V1_DOWNLOAD_URL)));
     var variant = shellDoubleQuote(String(opts.variant || AMERIFLUX_DEFAULT_VARIANT));
     var policy = shellDoubleQuote(String(opts.policy || AMERIFLUX_DEFAULT_POLICY));
     var v2IntendedUse = shellDoubleQuote(String(opts.v2IntendedUse || AMERIFLUX_V2_INTENDED_USE));
@@ -2170,11 +2181,46 @@
       "USER_ID=\"${AMERIFLUX_USER_ID:-" + defaultUserId + "}\"",
       "USER_EMAIL=\"${AMERIFLUX_USER_EMAIL:-" + defaultUserEmail + "}\"",
       "V2_DOWNLOAD_URL=\"${AMERIFLUX_V2_DOWNLOAD_URL:-" + v2DownloadUrl + "}\"",
-      "V1_DOWNLOAD_URL=\"${AMERIFLUX_V1_DOWNLOAD_URL:-" + v1DownloadUrl + "}\"",
+      "FLUXNET2015_REQUEST_URL_B64=\"${AMERIFLUX_FLUXNET2015_REQUEST_URL_B64:-" + fluxnet2015RequestUrlB64 + "}\"",
       "",
       "mkdir -p \"$OUTDIR\"",
       "cd \"$OUTDIR\"",
       ": > \"$LOGFILE\"",
+      "",
+      "decode_base64() {",
+      "  if command -v base64 >/dev/null 2>&1; then",
+      "    if printf '%s' 'WA==' | base64 --decode >/dev/null 2>&1; then",
+      "      printf '%s' \"$1\" | base64 --decode",
+      "      return",
+      "    fi",
+      "    if printf '%s' 'WA==' | base64 -D >/dev/null 2>&1; then",
+      "      printf '%s' \"$1\" | base64 -D",
+      "      return",
+      "    fi",
+      "  fi",
+      "",
+      "  if command -v python3 >/dev/null 2>&1; then",
+      "    python3 -c 'import base64, sys; sys.stdout.write(base64.b64decode(sys.argv[1]).decode(\"utf-8\"))' \"$1\"",
+      "    return",
+      "  fi",
+      "",
+      "  echo \"This script requires base64 or python3 to resolve the AmeriFlux request URL.\" >&2",
+      "  return 1",
+      "}",
+      "",
+      "resolve_request_url() {",
+      "  local data_product",
+      "  data_product=\"${1:-}\"",
+      "  if [ \"$data_product\" = \"" + FLUXNET2015_PRODUCT + "\" ]; then",
+      "    if [ -n \"${AMERIFLUX_V1_DOWNLOAD_URL:-}\" ]; then",
+      "      printf '%s' \"$AMERIFLUX_V1_DOWNLOAD_URL\"",
+      "      return",
+      "    fi",
+      "    decode_base64 \"$FLUXNET2015_REQUEST_URL_B64\"",
+      "    return",
+      "  fi",
+      "  printf '%s' \"$V2_DOWNLOAD_URL\"",
+      "}",
       "",
       "print_jq_install_guidance() {",
       "  local kernel distro",
@@ -2271,7 +2317,10 @@
       "    SOURCE_LABEL=\"" + AMERIFLUX_SOURCE_ONLY + "\"",
       "  fi",
       "  echo \"Requesting ${DATA_PRODUCT} URLs for ${SITE_ID} (${SOURCE_LABEL})...\" | tee -a \"$LOGFILE\"",
-      "  REQUEST_URL=\"$V2_DOWNLOAD_URL\"",
+      "  REQUEST_URL=\"$(resolve_request_url \"$DATA_PRODUCT\")\" || {",
+      "      echo \"Failed to resolve request URL for ${SITE_ID}; skipping.\" | tee -a \"$LOGFILE\"",
+      "      continue",
+      "    }",
       "  REQUEST_BODY=\"{",
       "      \\\"user_id\\\": \\\"${USER_ID}\\\",",
       "      \\\"user_email\\\": \\\"${USER_EMAIL}\\\",",
@@ -2283,7 +2332,6 @@
       "      \\\"description\\\": \\\"Request ${DATA_PRODUCT} download for ${SITE_ID} via the Q.E.D. Lab FLUXNET Data Explorer for Keenan Group research workflows.\\\"",
       "    }\"",
       "  if [ \"$DATA_PRODUCT\" = \"" + FLUXNET2015_PRODUCT + "\" ]; then",
-      "    REQUEST_URL=\"$V1_DOWNLOAD_URL\"",
       "    REQUEST_BODY=\"{",
       "      \\\"user_id\\\": \\\"${USER_ID}\\\",",
       "      \\\"user_email\\\": \\\"${USER_EMAIL}\\\",",
@@ -4971,7 +5019,7 @@
       "    <ul>",
       "      <li><strong>download_all_selected.sh</strong>: wrapper script that runs the direct-link and AmeriFlux API bulk scripts in sequence when the three generated scripts are kept in the same directory.</li>",
       "      <li><strong>Shuttle script</strong>: uses validated direct URLs plus retries/resume support for non-AmeriFlux rows that expose direct downloads.</li>",
-      "      <li><strong>AmeriFlux API script</strong>: requests URLs dynamically for the surfaced AmeriFlux API products selected in the table, using <code>/api/v2/data_download</code> for FLUXNET and BASE, and <code>/api/v1/data_download</code> for FLUXNET2015, then downloads each returned file.</li>",
+      "      <li><strong>AmeriFlux API script</strong>: requests URLs dynamically for the surfaced AmeriFlux API products selected in the table, resolves the appropriate request URL for each selected product, and then downloads each returned file.</li>",
       "      <li><strong>Show Shuttle CLI command</strong>: reveals a command template that uses <code>shuttle_selected_sites.txt</code> and your local snapshot file.</li>",
       "      <li><strong>Copy Shuttle CLI command</strong>: copies the Shuttle CLI helper command shown in the panel.</li>",
       "      <li><strong>shuttle_selected_sites.txt</strong>: one <code>site_id</code> per line for Shuttle CLI workflows.</li>",

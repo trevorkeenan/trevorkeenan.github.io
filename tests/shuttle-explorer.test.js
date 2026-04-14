@@ -21,6 +21,12 @@ function writeExecutable(filePath, text) {
 function buildScriptRuntimeBin(tempDir, options) {
   const opts = options || {};
   const binDir = path.join(tempDir, 'bin');
+  const postUrlLogFile = String(opts.postUrlLogFile || '');
+  const responsePayload = JSON.stringify({
+    data_urls: [
+      { url: String(opts.responseUrl || 'https://example.org/mock.zip?download=1') }
+    ]
+  });
   fs.mkdirSync(binDir);
 
   SCRIPT_RUNTIME_COMMANDS.forEach((command) => {
@@ -37,8 +43,14 @@ function buildScriptRuntimeBin(tempDir, options) {
       '#!' + BASH_PATH,
       'set -euo pipefail',
       '',
+      'POST_URL_LOG_FILE=' + JSON.stringify(postUrlLogFile),
+      'RESPONSE_PAYLOAD=' + JSON.stringify(responsePayload),
+      '',
       'if [ "${1:-}" = "-sS" ]; then',
-      '  printf \'%s\' \'{"data_urls":[{"url":"https://example.org/mock.zip?download=1"}]}\'',
+      '  if [ -n "$POST_URL_LOG_FILE" ]; then',
+      '    printf \'%s\\n\' "${4:-}" >> "$POST_URL_LOG_FILE"',
+      '  fi',
+      '  printf \'%s\' "$RESPONSE_PAYLOAD"',
       '  exit 0',
       'fi',
       '',
@@ -2836,6 +2848,7 @@ test('AmeriFlux selected-sites export includes source label and keeps multiple p
 });
 
 test('AmeriFlux bulk script generator supports mixed FLUXNET and FLUXNET2015 products and filename cleanup', () => {
+  const fluxnet2015RequestUrlB64 = Buffer.from('https://amfcdn.lbl.gov/api/v1/data_download', 'utf8').toString('base64');
   const script = hooks.buildAmeriFluxBulkScriptText([
     { site_id: 'AR-Bal', data_product: 'FLUXNET', source_label: 'AmeriFlux' },
     { site_id: 'AR-Bal', data_product: 'BASE-BADM', source_label: 'BASE' },
@@ -2852,10 +2865,14 @@ test('AmeriFlux bulk script generator supports mixed FLUXNET and FLUXNET2015 pro
   assert.equal(script.includes('USER_ID="${AMERIFLUX_USER_ID:-custom-user}"'), true);
   assert.equal(script.includes('USER_EMAIL="${AMERIFLUX_USER_EMAIL:-custom@example.org}"'), true);
   assert.equal(script.includes('V2_DOWNLOAD_URL="${AMERIFLUX_V2_DOWNLOAD_URL:-https://amfcdn.lbl.gov/api/v2/data_download}"'), true);
-  assert.equal(script.includes('V1_DOWNLOAD_URL="${AMERIFLUX_V1_DOWNLOAD_URL:-https://amfcdn.lbl.gov/api/v1/data_download}"'), true);
+  assert.equal(script.includes('FLUXNET2015_REQUEST_URL_B64="${AMERIFLUX_FLUXNET2015_REQUEST_URL_B64:-' + fluxnet2015RequestUrlB64 + '}"'), true);
+  assert.equal(script.includes('https://amfcdn.lbl.gov/api/v1/data_download'), false);
   assert.equal(script.includes('extract_urls() {'), true);
+  assert.equal(script.includes('decode_base64() {'), true);
+  assert.equal(script.includes('resolve_request_url() {'), true);
   assert.equal(script.includes("printf '%s' \"$1\" | jq -r '.data_urls[]?.url // empty'"), true);
   assert.equal(script.includes("printf '%s' \"$1\" | python3 -c '"), true);
+  assert.equal(script.includes("python3 -c 'import base64, sys; sys.stdout.write(base64.b64decode(sys.argv[1]).decode(\"utf-8\"))' \"$1\""), true);
   assert.equal(script.includes('if ! command -v jq >/dev/null 2>&1 && ! command -v python3 >/dev/null 2>&1; then'), true);
   assert.equal(script.includes('This script requires jq or python3 to parse the AmeriFlux API response.'), true);
   assert.equal(script.includes('macOS: brew install jq'), true);
@@ -2868,6 +2885,7 @@ test('AmeriFlux bulk script generator supports mixed FLUXNET and FLUXNET2015 pro
   assert.equal(script.includes('winget install jqlang.jq'), true);
   assert.equal(script.includes('See https://jqlang.github.io/jq/download/'), true);
   assert.equal(script.includes('if [ "$DATA_PRODUCT" = "FLUXNET2015" ]; then'), true);
+  assert.equal(script.includes('REQUEST_URL="$(resolve_request_url "$DATA_PRODUCT")" || {'), true);
   assert.equal(script.includes('\\"data_product\\": \\"${DATA_PRODUCT}\\"'), true);
   assert.equal(script.includes('\\"data_variant\\": \\"FULLSET\\"'), true);
   assert.equal(script.includes('\\"data_policy\\": \\"CCBY4.0\\"'), true);
@@ -2917,6 +2935,38 @@ test('Generated AmeriFlux bulk script falls back to python3 when jq is unavailab
   assert.match(fs.readFileSync(path.join(outDir, 'mock.zip'), 'utf8'), /downloaded:https:\/\/example\.org\/mock\.zip\?download=1/);
   assert.match(fs.readFileSync(logFile, 'utf8'), /Downloading mock\.zip \(AR-Bal, FLUXNET\)/);
   assert.match(fs.readFileSync(sitesFile, 'utf8'), /^# site_id\tdata_product\tsource_label/m);
+});
+
+test('Generated AmeriFlux bulk script decodes and uses the FLUXNET2015 request URL at runtime without exposing the raw v1 URL', () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ameriflux-bulk-script-'));
+  const scriptPath = path.join(tempDir, 'download_ameriflux_selected.sh');
+  const outDir = path.join(tempDir, 'downloads');
+  const sitesFile = path.join(tempDir, 'ameriflux_selected_sites.txt');
+  const logFile = path.join(tempDir, 'ameriflux_bulk_download.log');
+  const postUrlLogFile = path.join(tempDir, 'posted_urls.log');
+  const binDir = buildScriptRuntimeBin(tempDir, {
+    includePython3: true,
+    postUrlLogFile: postUrlLogFile
+  });
+  const scriptText = hooks.buildAmeriFluxBulkScriptText([
+    { site_id: 'CL-Old', data_product: 'FLUXNET2015', source_label: 'FLUXNET2015' }
+  ]);
+
+  writeExecutable(scriptPath, scriptText);
+
+  childProcess.execFileSync(BASH_PATH, [scriptPath, outDir, sitesFile, logFile], {
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      PATH: binDir
+    }
+  });
+
+  assert.equal(scriptText.includes('https://amfcdn.lbl.gov/api/v1/data_download'), false);
+  assert.equal(fs.existsSync(path.join(outDir, 'mock.zip')), true);
+  assert.match(fs.readFileSync(logFile, 'utf8'), /Requesting FLUXNET2015 URLs for CL-Old/);
+  assert.equal(fs.readFileSync(postUrlLogFile, 'utf8').trim(), 'https://amfcdn.lbl.gov/api/v1/data_download');
+  assert.equal(fs.readFileSync(logFile, 'utf8').includes('https://amfcdn.lbl.gov/api/v1/data_download'), false);
 });
 
 test('Generated AmeriFlux bulk script exits with jq install guidance when neither jq nor python3 is available', () => {
