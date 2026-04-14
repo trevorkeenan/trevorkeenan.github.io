@@ -123,7 +123,7 @@ AmeriFlux API bulk script behavior:
 
 - Iterates selected AmeriFlux API-backed site IDs.
 - Reads `ameriflux_selected_sites.txt` as tab-delimited `site_id`, `data_product`, `source_label`.
-- POSTs to `https://amfcdn.lbl.gov/api/v1/data_download` per site with `FULLSET` / `CCBY4.0`.
+- POSTs to `https://amfcdn.lbl.gov/api/v2/data_download` per site with `FULLSET` / `CCBY4.0`.
 - Uses `data_product: FLUXNET` for `AmeriFlux` rows and `data_product: FLUXNET2015` for `FLUXNET2015` rows.
 - Uses `intended_use: "QED Lab FLUXNET Data Explorer"`.
 - Parses `data_urls[].url` dynamically and downloads files.
