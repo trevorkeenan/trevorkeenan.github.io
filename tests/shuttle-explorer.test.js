@@ -37,6 +37,30 @@ function buildScriptRuntimeBin(tempDir, options) {
     fs.symlinkSync(resolveCommandPath('python3'), path.join(binDir, 'python3'));
   }
 
+  if (opts.includeJq) {
+    writeExecutable(
+      path.join(binDir, 'jq'),
+      [
+        '#!' + BASH_PATH,
+        'set -euo pipefail',
+        '',
+        'if [ "${1:-}" != "-r" ] || [ "${2:-}" != ".data_urls[].url" ]; then',
+        '  echo "unexpected jq args: $*" >&2',
+        '  exit 1',
+        'fi',
+        '',
+        'python3 -c \'import json, sys',
+        'payload = json.load(sys.stdin)',
+        'for item in payload.get("data_urls", []):',
+        '    url = item.get("url")',
+        '    if url:',
+        '        print(url)',
+        '\'',
+        ''
+      ].join('\n')
+    );
+  }
+
   writeExecutable(
     path.join(binDir, 'curl'),
     [
@@ -2784,8 +2808,9 @@ test('AmeriFlux row manual content uses custom effective identity override value
   }
 });
 
-test('AmeriFlux curl command generator uses product-specific endpoints and payloads', () => {
+test('AmeriFlux curl command generator keeps visible v2 endpoints for FLUXNET and BASE while obscuring the FLUXNET2015 request URL', () => {
   const fluxnetCommand = hooks.buildAmeriFluxCurlCommand('AR-Bal', 'FULLSET', 'CCBY4.0', undefined, 'FLUXNET');
+  const baseCommand = hooks.buildAmeriFluxCurlCommand('AR-Bal', 'FULLSET', 'CCBY4.0', undefined, 'BASE-BADM');
   const fluxnet2015Command = hooks.buildAmeriFluxCurlCommand('AR-Bal', 'FULLSET', 'CCBY4.0', undefined, 'FLUXNET2015');
 
   assert.match(fluxnetCommand, /https:\/\/amfcdn\.lbl\.gov\/api\/v2\/data_download/);
@@ -2795,7 +2820,15 @@ test('AmeriFlux curl command generator uses product-specific endpoints and paylo
   assert.equal(fluxnetCommand.includes('"agree_policy"'), false);
   assert.equal(fluxnetCommand.includes('"is_test"'), false);
 
-  assert.match(fluxnet2015Command, /https:\/\/amfcdn\.lbl\.gov\/api\/v1\/data_download/);
+  assert.match(baseCommand, /https:\/\/amfcdn\.lbl\.gov\/api\/v2\/data_download/);
+  assert.match(baseCommand, /"data_product": "BASE-BADM"/);
+  assert.match(baseCommand, /"intended_use": "other_research"/);
+
+  assert.equal(fluxnet2015Command.includes('https://amfcdn.lbl.gov/api/v1/data_download'), false);
+  assert.equal(fluxnet2015Command.includes('decode_base64() {'), true);
+  assert.match(fluxnet2015Command, /REQUEST_URL_B64="[A-Za-z0-9+/=]+"/);
+  assert.equal(fluxnet2015Command.includes('REQUEST_URL="$(decode_base64 "$REQUEST_URL_B64")" || exit 1'), true);
+  assert.equal(fluxnet2015Command.includes('curl -sS -X POST "$REQUEST_URL" \\'), true);
   assert.match(fluxnet2015Command, /"description": "Download FLUXNET2015 for AR-Bal"/);
   assert.match(fluxnet2015Command, /"data_product": "FLUXNET2015"/);
   assert.match(fluxnet2015Command, /"intended_use": "QED Lab FLUXNET Data Explorer"/);
@@ -2832,6 +2865,45 @@ test('AmeriFlux curl command generator uses effective identity override when pro
   assert.equal(customCommand.includes('YOUR_EMAIL'), false);
   assert.match(customCommand, /"user_id": "custom-user"/);
   assert.match(customCommand, /"user_email": "custom@example\.org"/);
+});
+
+test('AmeriFlux row-level FLUXNET2015 curl command decodes and uses the request URL at runtime without exposing the raw v1 URL', () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ameriflux-row-command-'));
+  const scriptPath = path.join(tempDir, 'run_row_command.sh');
+  const postUrlLogFile = path.join(tempDir, 'posted_urls.log');
+  const binDir = buildScriptRuntimeBin(tempDir, {
+    includePython3: true,
+    includeJq: true,
+    postUrlLogFile: postUrlLogFile
+  });
+  const commandText = hooks.buildAmeriFluxCurlCommand('CL-Old', 'FULLSET', 'CCBY4.0', undefined, 'FLUXNET2015');
+
+  writeExecutable(
+    scriptPath,
+    [
+      '#!' + BASH_PATH,
+      'set -euo pipefail',
+      '',
+      commandText
+    ].join('\n')
+  );
+
+  const result = childProcess.spawnSync(BASH_PATH, [scriptPath], {
+    cwd: tempDir,
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      PATH: binDir
+    }
+  });
+
+  assert.equal(result.status, 0);
+  assert.equal(commandText.includes('https://amfcdn.lbl.gov/api/v1/data_download'), false);
+  assert.equal(fs.readFileSync(postUrlLogFile, 'utf8').trim(), 'https://amfcdn.lbl.gov/api/v1/data_download');
+  assert.equal(fs.existsSync(path.join(tempDir, 'mock.zip')), true);
+  assert.match(fs.readFileSync(path.join(tempDir, 'mock.zip'), 'utf8'), /downloaded:https:\/\/example\.org\/mock\.zip\?download=1/);
+  assert.equal(String(result.stdout || '').includes('https://amfcdn.lbl.gov/api/v1/data_download'), false);
+  assert.equal(String(result.stderr || '').includes('https://amfcdn.lbl.gov/api/v1/data_download'), false);
 });
 
 test('AmeriFlux selected-sites export includes source label and keeps multiple products for one site', () => {

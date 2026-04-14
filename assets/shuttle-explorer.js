@@ -1360,6 +1360,31 @@
     throw new Error("Base64 encoding is unavailable in this runtime.");
   }
 
+  function buildBase64DecodeShellFunctionLines(errorMessage) {
+    return [
+      "decode_base64() {",
+      "  if command -v base64 >/dev/null 2>&1; then",
+      "    if printf '%s' 'WA==' | base64 --decode >/dev/null 2>&1; then",
+      "      printf '%s' \"$1\" | base64 --decode",
+      "      return",
+      "    fi",
+      "    if printf '%s' 'WA==' | base64 -D >/dev/null 2>&1; then",
+      "      printf '%s' \"$1\" | base64 -D",
+      "      return",
+      "    fi",
+      "  fi",
+      "",
+      "  if command -v python3 >/dev/null 2>&1; then",
+      "    python3 -c 'import base64, sys; sys.stdout.write(base64.b64decode(sys.argv[1]).decode(\"utf-8\"))' \"$1\"",
+      "    return",
+      "  fi",
+      "",
+      "  echo \"" + shellDoubleQuote(String(errorMessage || "This command requires base64 or python3 to resolve the request URL.")) + "\" >&2",
+      "  return 1",
+      "}"
+    ];
+  }
+
   function rowNetworkTokens(row) {
     var seen = {};
     var tokens = [];
@@ -1892,8 +1917,7 @@
     return AMERIFLUX_FLUXNET_PRODUCT;
   }
 
-  // AmeriFlux currently supports FLUXNET downloads through v2, while FLUXNET2015
-  // remains on the legacy v1 download API.
+  // AmeriFlux request routing varies by product.
   function getDownloadEndpointForProduct(dataProduct) {
     return normalizeDownloadProduct(dataProduct) === FLUXNET2015_PRODUCT
       ? AMERIFLUX_V1_DOWNLOAD_URL
@@ -1947,6 +1971,7 @@
   function buildAmeriFluxCurlCommand(siteId, variant, policy, endpointUrl, dataProduct, identityOverride) {
     var site = String(siteId || "").trim();
     var product = normalizeDownloadProduct(dataProduct);
+    var requestUrl = String(endpointUrl || getDownloadEndpointForProduct(product));
     var resolvedIdentity = resolveAmeriFluxIdentityOverride(identityOverride);
     var payload = buildDownloadPayloadForProduct(
       [site || "SITE_ID_HERE"],
@@ -1964,8 +1989,18 @@
       product
     );
     var payloadJson = JSON.stringify(payload, null, 2);
-    return [
-      "curl -sS -X POST \"" + String(endpointUrl || getDownloadEndpointForProduct(product)) + "\" \\",
+    var commandLines = [];
+    if (product === FLUXNET2015_PRODUCT) {
+      commandLines = commandLines.concat(buildBase64DecodeShellFunctionLines("This command requires base64 or python3 to resolve the AmeriFlux request URL."));
+      commandLines.push("");
+      commandLines.push("REQUEST_URL_B64=\"" + shellDoubleQuote(base64EncodeUtf8(requestUrl)) + "\"");
+      commandLines.push("REQUEST_URL=\"$(decode_base64 \"$REQUEST_URL_B64\")\" || exit 1");
+      commandLines.push("");
+      commandLines.push("curl -sS -X POST \"$REQUEST_URL\" \\");
+    } else {
+      commandLines.push("curl -sS -X POST \"" + requestUrl + "\" \\");
+    }
+    commandLines = commandLines.concat([
       "  -H \"Content-Type: application/json\" \\",
       "  -H \"accept: application/json\" \\",
       "  --data-binary '" + shellSingleQuote(payloadJson) + "' \\",
@@ -1975,7 +2010,8 @@
       "  filename=\"$(basename \"$clean_url\")\"",
       "  curl -L \"$url\" -o \"$filename\"",
       "done"
-    ].join("\n");
+    ]);
+    return commandLines.join("\n");
   }
 
   function uniqueSiteIdsFromRows(rows) {
