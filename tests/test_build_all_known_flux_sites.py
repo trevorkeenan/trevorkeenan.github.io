@@ -113,6 +113,30 @@ class BuildAllKnownFluxSitesTests(unittest.TestCase):
         self.assertAlmostEqual(record.longitude or 0.0, -120.9508)
         self.assertEqual(record.source_network, "AmeriFlux")
 
+    def test_lathuile_style_rows_normalize_to_flux_site_fields(self):
+        record = make_record(
+            {
+                "Site": "TW-Tar",
+                "Lat": "24.0312",
+                "Lon": "120.688",
+            },
+            make_spec(default_source_network="La Thuile"),
+        )
+
+        self.assertEqual(record.site_id, "TW-Tar")
+        self.assertEqual(record.site_code, "Tar")
+        self.assertEqual(record.country_code, "TW")
+        self.assertEqual(record.country, "Taiwan")
+        self.assertAlmostEqual(record.latitude or 0.0, 24.0312)
+        self.assertAlmostEqual(record.longitude or 0.0, 120.688)
+        self.assertEqual(record.source_network, "La Thuile")
+
+    def test_guess_external_network_recognizes_lathuile_workbook(self):
+        self.assertEqual(
+            module.guess_external_network(Path("/tmp/LaThuile_SiteLatLonClimate.xlsx")),
+            "La Thuile",
+        )
+
     def test_duplicate_merging_prefers_exact_site_id(self):
         accessible_spec = make_spec(
             source_system="explorer_accessible",

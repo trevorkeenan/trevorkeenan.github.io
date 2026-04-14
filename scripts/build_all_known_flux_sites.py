@@ -979,6 +979,8 @@ def discover_repo_sources(repo_root: Path, external_dir: Path) -> list[SourceSpe
 
 def guess_external_network(path: Path) -> str:
     name = path.name.lower()
+    if "lathuile" in name:
+        return "La Thuile"
     if "pingyu" in name or "allsites" in name:
         return "Pingyu"
     if "stoy" in name:
