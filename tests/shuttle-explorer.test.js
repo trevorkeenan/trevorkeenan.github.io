@@ -1430,8 +1430,8 @@ test('AmeriFlux bulk identity helper prefers explicit input values and otherwise
     {
       enteredUserId: '',
       enteredUserEmail: '',
-      user_id: 'trevorkeenan',
-      user_email: 'trevorkeenan@berkeley.edu'
+      user_id: 'FluxnetDataExplorer',
+      user_email: 'fluxnet@explorer.edu'
     }
   );
   assert.deepEqual(
@@ -2765,8 +2765,8 @@ test('AmeriFlux row download stays manual without trusted runtime even with fall
 
     assert.equal(result.mode, 'manual');
     assert.equal(result.manual_download_required, true);
-    assert.equal(result.payload_template.user_id, 'trevorkeenan');
-    assert.equal(result.payload_template.user_email, 'trevorkeenan@berkeley.edu');
+    assert.equal(result.payload_template.user_id, 'FluxnetDataExplorer');
+    assert.equal(result.payload_template.user_email, 'fluxnet@explorer.edu');
     assert.equal(String(result.curl_command || '').includes('YOUR_AMERIFLUX_USERNAME'), false);
     assert.equal(String(result.curl_command || '').includes('YOUR_EMAIL'), false);
     assert.equal(fetchCalled, false);
@@ -2815,12 +2815,16 @@ test('AmeriFlux curl command generator keeps visible v2 endpoints for FLUXNET an
 
   assert.match(fluxnetCommand, /https:\/\/amfcdn\.lbl\.gov\/api\/v2\/data_download/);
   assert.match(fluxnetCommand, /"site_ids": \[\s*"AR-Bal"\s*\]/);
+  assert.match(fluxnetCommand, /"user_id": "FluxnetDataExplorer"/);
+  assert.match(fluxnetCommand, /"user_email": "fluxnet@explorer\.edu"/);
   assert.match(fluxnetCommand, /"intended_use": "other_research"/);
   assert.match(fluxnetCommand, /Q\.E\.D\. Lab FLUXNET Data Explorer/);
   assert.equal(fluxnetCommand.includes('"agree_policy"'), false);
   assert.equal(fluxnetCommand.includes('"is_test"'), false);
 
   assert.match(baseCommand, /https:\/\/amfcdn\.lbl\.gov\/api\/v2\/data_download/);
+  assert.match(baseCommand, /"user_id": "FluxnetDataExplorer"/);
+  assert.match(baseCommand, /"user_email": "fluxnet@explorer\.edu"/);
   assert.match(baseCommand, /"data_product": "BASE-BADM"/);
   assert.match(baseCommand, /"intended_use": "other_research"/);
 
@@ -2829,6 +2833,8 @@ test('AmeriFlux curl command generator keeps visible v2 endpoints for FLUXNET an
   assert.match(fluxnet2015Command, /REQUEST_URL_B64="[A-Za-z0-9+/=]+"/);
   assert.equal(fluxnet2015Command.includes('REQUEST_URL="$(decode_base64 "$REQUEST_URL_B64")" || exit 1'), true);
   assert.equal(fluxnet2015Command.includes('curl -sS -X POST "$REQUEST_URL" \\'), true);
+  assert.match(fluxnet2015Command, /"user_id": "FluxnetDataExplorer"/);
+  assert.match(fluxnet2015Command, /"user_email": "fluxnet@explorer\.edu"/);
   assert.match(fluxnet2015Command, /"description": "Download FLUXNET2015 for AR-Bal"/);
   assert.match(fluxnet2015Command, /"data_product": "FLUXNET2015"/);
   assert.match(fluxnet2015Command, /"intended_use": "QED Lab FLUXNET Data Explorer"/);
@@ -2858,8 +2864,8 @@ test('AmeriFlux curl command generator uses effective identity override when pro
 
   assert.equal(fallbackCommand.includes('YOUR_AMERIFLUX_USERNAME'), false);
   assert.equal(fallbackCommand.includes('YOUR_EMAIL'), false);
-  assert.match(fallbackCommand, /"user_id": "trevorkeenan"/);
-  assert.match(fallbackCommand, /"user_email": "trevorkeenan@berkeley\.edu"/);
+  assert.match(fallbackCommand, /"user_id": "FluxnetDataExplorer"/);
+  assert.match(fallbackCommand, /"user_email": "fluxnet@explorer\.edu"/);
 
   assert.equal(customCommand.includes('YOUR_AMERIFLUX_USERNAME'), false);
   assert.equal(customCommand.includes('YOUR_EMAIL'), false);
@@ -2976,8 +2982,8 @@ test('AmeriFlux bulk script generator uses internal fallback contact values when
     { site_id: 'AR-Bal', data_product: 'FLUXNET', source_label: 'AmeriFlux' }
   ]);
 
-  assert.equal(script.includes('USER_ID="${AMERIFLUX_USER_ID:-trevorkeenan}"'), true);
-  assert.equal(script.includes('USER_EMAIL="${AMERIFLUX_USER_EMAIL:-trevorkeenan@berkeley.edu}"'), true);
+  assert.equal(script.includes('USER_ID="${AMERIFLUX_USER_ID:-FluxnetDataExplorer}"'), true);
+  assert.equal(script.includes('USER_EMAIL="${AMERIFLUX_USER_EMAIL:-fluxnet@explorer.edu}"'), true);
 });
 
 test('Generated AmeriFlux bulk script falls back to python3 when jq is unavailable', () => {
