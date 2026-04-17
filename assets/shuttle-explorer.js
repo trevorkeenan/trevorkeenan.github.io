@@ -28,12 +28,16 @@
   var FLUXNET2015_AVAILABILITY_URL = "https://amfcdn.lbl.gov/api/v2/data_availability/FLUXNET/FLUXNET2015/CCBY4.0";
   var AMERIFLUX_V2_DOWNLOAD_URL = "https://amfcdn.lbl.gov/api/v2/data_download";
   var AMERIFLUX_V1_DOWNLOAD_URL = "https://amfcdn.lbl.gov/api/v1/data_download";
+  var AMERIFLUX_DOWNLOAD_LOGGER_URL = "https://amfcdn.lbl.gov/api/v2/log_shuttle_data_request";
   var AMERIFLUX_DEFAULT_VARIANT = "FULLSET";
   var AMERIFLUX_DEFAULT_POLICY = "CCBY4.0";
   var AMERIFLUX_V2_INTENDED_USE = "other_research";
   var AMERIFLUX_V1_INTENDED_USE = "QED Lab FLUXNET Data Explorer";
   var AMERIFLUX_DEFAULT_USER_ID = "FluxnetDataExplorer";
   var AMERIFLUX_DEFAULT_USER_EMAIL = "fluxnet@explorer.edu";
+  var AMERIFLUX_LOGGER_USER_NAME = "Fluxnet Data Explorer";
+  var AMERIFLUX_LOGGER_DESCRIPTION = "Download requested through the FLUXNET Data Explorer";
+  var AMERIFLUX_LOGGER_INTENDED_USE = AMERIFLUX_V2_INTENDED_USE;
   var AMERIFLUX_TEMPLATE_USER_ID = AMERIFLUX_DEFAULT_USER_ID;
   var AMERIFLUX_TEMPLATE_USER_EMAIL = AMERIFLUX_DEFAULT_USER_EMAIL;
   var AMERIFLUX_BULK_FALLBACK_USER_ID = AMERIFLUX_DEFAULT_USER_ID;
@@ -1339,6 +1343,115 @@
     return cleanUrl.slice(idx + 1);
   }
 
+  function isValidAmeriFluxZipFilename(filename) {
+    var value = String(filename || "").trim();
+    return !!(value &&
+      /\.zip$/i.test(value) &&
+      value.indexOf("/") < 0 &&
+      value.indexOf("\\") < 0 &&
+      value.indexOf("?") < 0 &&
+      value.indexOf("#") < 0);
+  }
+
+  function amerifluxZipFilenameFromDownloadEntry(entry) {
+    var candidates = [];
+    var i;
+    var candidate;
+    var filename;
+    if (entry && typeof entry === "object") {
+      candidates.push(
+        entry.zip_filename,
+        entry.zipFilename,
+        entry.filename,
+        entry.file_name,
+        entry.url,
+        entry.download_url,
+        entry.downloadUrl,
+        entry.href
+      );
+    } else {
+      candidates.push(entry);
+    }
+    for (i = 0; i < candidates.length; i += 1) {
+      candidate = String(candidates[i] || "").trim();
+      if (!candidate) {
+        continue;
+      }
+      filename = filenameFromUrl(candidate);
+      if (isValidAmeriFluxZipFilename(filename)) {
+        return filename;
+      }
+    }
+    return "";
+  }
+
+  function amerifluxZipFilenamesFromDownloadEntries(entries) {
+    var seen = {};
+    var filenames = [];
+    (Array.isArray(entries) ? entries : [entries]).forEach(function (entry) {
+      var filename = amerifluxZipFilenameFromDownloadEntry(entry);
+      var key = filename.toLowerCase();
+      if (!filename || seen[key]) {
+        return;
+      }
+      seen[key] = true;
+      filenames.push(filename);
+    });
+    return filenames;
+  }
+
+  function normalizeAmeriFluxLoggerIntendedUse(value) {
+    var normalized = String(value == null ? "" : value).trim();
+    var allowed = {
+      synthesis: true,
+      model: true,
+      remote_sensing: true,
+      other_research: true,
+      education: true,
+      other: true
+    };
+    return allowed[normalized] ? normalized : null;
+  }
+
+  function buildAmeriFluxDownloadLogPayload(downloadEntries, options) {
+    var opts = options || {};
+    return {
+      user_id: AMERIFLUX_DEFAULT_USER_ID,
+      zip_filenames: amerifluxZipFilenamesFromDownloadEntries(downloadEntries),
+      user_email: AMERIFLUX_DEFAULT_USER_EMAIL,
+      user_name: String(opts.userName || AMERIFLUX_LOGGER_USER_NAME),
+      intended_use: normalizeAmeriFluxLoggerIntendedUse(opts.intendedUse || AMERIFLUX_LOGGER_INTENDED_USE),
+      description: String(opts.description || AMERIFLUX_LOGGER_DESCRIPTION)
+    };
+  }
+
+  function logAmeriFluxDownloadEntries(downloadEntries, options) {
+    var opts = options || {};
+    var payload = buildAmeriFluxDownloadLogPayload(downloadEntries, opts);
+    if (!payload.zip_filenames.length || typeof fetch !== "function") {
+      return Promise.resolve({ logged: false, skipped: true });
+    }
+    return fetchWithTimeout(AMERIFLUX_DOWNLOAD_LOGGER_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Accept": "application/json"
+      },
+      body: JSON.stringify(payload),
+      timeoutMs: opts.timeoutMs
+    }, opts.timeoutMs).then(function (response) {
+      if (response && response.ok) {
+        return { logged: true };
+      }
+      throw new Error("HTTP " + (response && response.status ? response.status : "error") + " for AmeriFlux download logger");
+    }).catch(function (error) {
+      if (typeof console !== "undefined" && console && console.warn) {
+        console.warn("AmeriFlux download logging failed; continuing without blocking download.", error);
+      }
+      return { logged: false, error: error };
+    });
+  }
+
   function shellSingleQuote(value) {
     return String(value == null ? "" : value).replace(/'/g, "'\"'\"'");
   }
@@ -1383,6 +1496,46 @@
       "",
       "  echo \"" + shellDoubleQuote(String(errorMessage || "This command requires base64 or python3 to resolve the request URL.")) + "\" >&2",
       "  return 1",
+      "}"
+    ];
+  }
+
+  function buildAmeriFluxLoggerShellFunctionLines(options) {
+    var opts = options || {};
+    var curlLine = "  curl -sS -X POST \"$AMERIFLUX_LOGGER_URL\" \\";
+    var failureLine = opts.logToFile
+      ? "    || echo \"Warning: AmeriFlux download logging failed for ${log_filename}.\" | tee -a \"$LOGFILE\" >&2"
+      : "    || echo \"Warning: AmeriFlux download logging failed for ${log_filename}.\" >&2";
+    return [
+      "AMERIFLUX_LOGGER_URL=\"" + shellDoubleQuote(String(opts.loggerUrl || AMERIFLUX_DOWNLOAD_LOGGER_URL)) + "\"",
+      "AMERIFLUX_LOGGER_USER_ID=\"" + shellDoubleQuote(AMERIFLUX_DEFAULT_USER_ID) + "\"",
+      "AMERIFLUX_LOGGER_USER_EMAIL=\"" + shellDoubleQuote(AMERIFLUX_DEFAULT_USER_EMAIL) + "\"",
+      "AMERIFLUX_LOGGER_USER_NAME=\"" + shellDoubleQuote(AMERIFLUX_LOGGER_USER_NAME) + "\"",
+      "AMERIFLUX_LOGGER_INTENDED_USE=\"" + shellDoubleQuote(AMERIFLUX_LOGGER_INTENDED_USE) + "\"",
+      "AMERIFLUX_LOGGER_DESCRIPTION=\"" + shellDoubleQuote(AMERIFLUX_LOGGER_DESCRIPTION) + "\"",
+      "",
+      "log_ameriflux_download() {",
+      "  log_filename=\"${1:-}\"",
+      "  [ -n \"$log_filename\" ] || return 0",
+      "  case \"$log_filename\" in",
+      "    *.zip|*.ZIP) ;;",
+      "    *) return 0 ;;",
+      "  esac",
+      "  case \"$log_filename\" in",
+      "    *\\\"*|*\\\\*|*/*) return 0 ;;",
+      "  esac",
+      curlLine,
+      "    -H \"Content-Type: application/json\" \\",
+      "    -H \"accept: application/json\" \\",
+      "    --data-binary \"{",
+      "      \\\"user_id\\\": \\\"${AMERIFLUX_LOGGER_USER_ID}\\\",",
+      "      \\\"user_email\\\": \\\"${AMERIFLUX_LOGGER_USER_EMAIL}\\\",",
+      "      \\\"user_name\\\": \\\"${AMERIFLUX_LOGGER_USER_NAME}\\\",",
+      "      \\\"zip_filenames\\\": [\\\"${log_filename}\\\"],",
+      "      \\\"intended_use\\\": \\\"${AMERIFLUX_LOGGER_INTENDED_USE}\\\",",
+      "      \\\"description\\\": \\\"${AMERIFLUX_LOGGER_DESCRIPTION}\\\"",
+      "    }\" >/dev/null 2>&1 \\",
+      failureLine,
       "}"
     ];
   }
@@ -1991,7 +2144,8 @@
       product
     );
     var payloadJson = JSON.stringify(payload, null, 2);
-    var commandLines = [];
+    var commandLines = buildAmeriFluxLoggerShellFunctionLines();
+    commandLines.push("");
     if (product === FLUXNET2015_PRODUCT) {
       commandLines = commandLines.concat(buildBase64DecodeShellFunctionLines("This command requires base64 or python3 to resolve the AmeriFlux request URL."));
       commandLines.push("");
@@ -2010,6 +2164,7 @@
       "| jq -r '.data_urls[].url' | while read -r url; do",
       "  clean_url=\"${url%%\\?*}\"",
       "  filename=\"$(basename \"$clean_url\")\"",
+      "  log_ameriflux_download \"$filename\"",
       "  curl -L \"$url\" -o \"$filename\"",
       "done"
     ]);
@@ -2220,6 +2375,8 @@
       "USER_EMAIL=\"${AMERIFLUX_USER_EMAIL:-" + defaultUserEmail + "}\"",
       "V2_DOWNLOAD_URL=\"${AMERIFLUX_V2_DOWNLOAD_URL:-" + v2DownloadUrl + "}\"",
       "FLUXNET2015_REQUEST_URL_B64=\"${AMERIFLUX_FLUXNET2015_REQUEST_URL_B64:-" + fluxnet2015RequestUrlB64 + "}\"",
+      ""
+    ].concat(buildAmeriFluxLoggerShellFunctionLines({ logToFile: true }), [
       "",
       "mkdir -p \"$OUTDIR\"",
       "cd \"$OUTDIR\"",
@@ -2401,13 +2558,14 @@
       "    [ -n \"$url\" ] || continue",
       "    clean_url=\"${url%%\\?*}\"",
       "    filename=\"$(basename \"$clean_url\")\"",
+      "    log_ameriflux_download \"$filename\"",
       "    echo \"Downloading ${filename} (${SITE_ID}, ${DATA_PRODUCT})\" | tee -a \"$LOGFILE\"",
       "    curl -L \"$url\" -o \"$filename\" || echo \"Download failed for ${SITE_ID} (${DATA_PRODUCT}): $url\" | tee -a \"$LOGFILE\"",
       "  done <<< \"$URLS\"",
       "done < \"$SITES_FILE\"",
       "",
       "echo \"AmeriFlux API bulk download complete.\" | tee -a \"$LOGFILE\""
-    ].join("\n");
+    ]).join("\n");
   }
 
   function buildDownloadAllSelectedScriptText(options) {
@@ -7179,6 +7337,8 @@
           throw new Error("AmeriFlux returned an empty data_urls list.");
         }
 
+        logAmeriFluxDownloadEntries(dataUrls, { timeoutMs: self.requestTimeoutMs });
+
         if (typeof window.open === "function") {
           window.open(urls[0], "_blank", "noopener,noreferrer");
         }
@@ -8167,10 +8327,16 @@
     getDownloadEndpointForProduct: getDownloadEndpointForProduct,
     buildV2DownloadPayload: buildV2DownloadPayload,
     buildV1DownloadPayload: buildV1DownloadPayload,
+    amerifluxDownloadLoggerUrl: AMERIFLUX_DOWNLOAD_LOGGER_URL,
     exactYearSetsMatch: exactYearSetsMatch,
     resolveProcessingLineage: resolveProcessingLineage,
     stripUrlQueryForFilename: stripUrlQueryForFilename,
     filenameFromUrl: filenameFromUrl,
+    isValidAmeriFluxZipFilename: isValidAmeriFluxZipFilename,
+    amerifluxZipFilenameFromDownloadEntry: amerifluxZipFilenameFromDownloadEntry,
+    amerifluxZipFilenamesFromDownloadEntries: amerifluxZipFilenamesFromDownloadEntries,
+    buildAmeriFluxDownloadLogPayload: buildAmeriFluxDownloadLogPayload,
+    logAmeriFluxDownloadEntries: logAmeriFluxDownloadEntries,
     buildAmeriFluxCurlCommand: buildAmeriFluxCurlCommand,
     buildAmeriFluxSelectedSitesText: buildAmeriFluxSelectedSitesText,
     buildAmeriFluxBulkScriptText: buildAmeriFluxBulkScriptText,
