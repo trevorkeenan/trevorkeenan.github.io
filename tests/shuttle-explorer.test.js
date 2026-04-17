@@ -8,7 +8,7 @@ const path = require('node:path');
 const hooks = require('../assets/shuttle-explorer.js');
 
 const BASH_PATH = childProcess.execFileSync('bash', ['-lc', 'command -v bash'], { encoding: 'utf8' }).trim();
-const SCRIPT_RUNTIME_COMMANDS = ['basename', 'cat', 'mkdir', 'tee', 'uname'];
+const SCRIPT_RUNTIME_COMMANDS = ['basename', 'cat', 'mkdir', 'mktemp', 'rm', 'tee', 'tr', 'uname'];
 
 function resolveCommandPath(command) {
   return childProcess.execFileSync('bash', ['-lc', 'command -v ' + command], { encoding: 'utf8' }).trim();
@@ -24,11 +24,15 @@ function buildScriptRuntimeBin(tempDir, options) {
   const postUrlLogFile = String(opts.postUrlLogFile || '');
   const postBodyLogFile = String(opts.postBodyLogFile || '');
   const failLogger = !!opts.failLogger;
-  const responsePayload = JSON.stringify({
-    data_urls: [
-      { url: String(opts.responseUrl || 'https://example.org/mock.zip?download=1') }
-    ]
-  });
+  const failDownloadRequest = !!opts.failDownloadRequest;
+  const apiStatus = String(opts.apiStatus || '200');
+  const responsePayload = opts.responsePayload == null
+    ? JSON.stringify({
+      data_urls: [
+        { url: String(opts.responseUrl || 'https://example.org/mock.zip?download=1') }
+      ]
+    })
+    : String(opts.responsePayload);
   fs.mkdirSync(binDir);
 
   SCRIPT_RUNTIME_COMMANDS.forEach((command) => {
@@ -46,10 +50,17 @@ function buildScriptRuntimeBin(tempDir, options) {
         '#!' + BASH_PATH,
         'set -euo pipefail',
         '',
-        'if [ "${1:-}" != "-r" ] || [ "${2:-}" != ".data_urls[].url" ]; then',
+        'if [ "${1:-}" != "-r" ]; then',
         '  echo "unexpected jq args: $*" >&2',
         '  exit 1',
         'fi',
+        'case "${2:-}" in',
+        '  ".data_urls[].url"|".data_urls[]?.url // empty") ;;',
+        '  *)',
+        '    echo "unexpected jq args: $*" >&2',
+        '    exit 1',
+        '    ;;',
+        'esac',
         '',
         'python3 -c \'import json, sys',
         'payload = json.load(sys.stdin)',
@@ -72,12 +83,16 @@ function buildScriptRuntimeBin(tempDir, options) {
       'POST_URL_LOG_FILE=' + JSON.stringify(postUrlLogFile),
       'POST_BODY_LOG_FILE=' + JSON.stringify(postBodyLogFile),
       'FAIL_LOGGER=' + JSON.stringify(failLogger ? '1' : ''),
+      'FAIL_DOWNLOAD_REQUEST=' + JSON.stringify(failDownloadRequest ? '1' : ''),
+      'API_STATUS=' + JSON.stringify(apiStatus),
       'RESPONSE_PAYLOAD=' + JSON.stringify(responsePayload),
       'LOGGER_URL="https://amfcdn.lbl.gov/api/v2/log_shuttle_data_request"',
       '',
       'if [ "${1:-}" = "-sS" ]; then',
       '  post_url=""',
       '  post_body=""',
+      '  post_output_file=""',
+      '  post_write_out=""',
       '  while [ "$#" -gt 0 ]; do',
       '    case "${1:-}" in',
       '      http://*|https://*)',
@@ -88,6 +103,14 @@ function buildScriptRuntimeBin(tempDir, options) {
       '      --data-binary)',
       '        shift',
       '        post_body="${1:-}"',
+      '        ;;',
+      '      -o)',
+      '        shift',
+      '        post_output_file="${1:-}"',
+      '        ;;',
+      '      -w)',
+      '        shift',
+      '        post_write_out="${1:-}"',
       '        ;;',
       '    esac',
       '    shift || true',
@@ -106,7 +129,18 @@ function buildScriptRuntimeBin(tempDir, options) {
       '    printf \'{}\'',
       '    exit 0',
       '  fi',
-      '  printf \'%s\' "$RESPONSE_PAYLOAD"',
+      '  if [ "$FAIL_DOWNLOAD_REQUEST" = "1" ]; then',
+      '    echo "download request unavailable" >&2',
+      '    exit 7',
+      '  fi',
+      '  if [ -n "$post_output_file" ]; then',
+      '    printf \'%s\' "$RESPONSE_PAYLOAD" > "$post_output_file"',
+      '    if [ -n "$post_write_out" ]; then',
+      '      printf \'%s\' "$API_STATUS"',
+      '    fi',
+      '  else',
+      '    printf \'%s\' "$RESPONSE_PAYLOAD"',
+      '  fi',
       '  exit 0',
       'fi',
       '',
@@ -2906,6 +2940,10 @@ test('AmeriFlux curl command generator keeps visible v2 endpoints for FLUXNET an
   assert.equal(fluxnetCommand.includes('"is_test"'), false);
   assert.equal(fluxnetCommand.includes('AMERIFLUX_LOGGER_URL="https://amfcdn.lbl.gov/api/v2/log_shuttle_data_request"'), true);
   assert.equal(fluxnetCommand.includes('AMERIFLUX_LOGGER_USER_ID="FluxnetDataExplorer"'), true);
+  assert.equal(fluxnetCommand.includes('extract_error_message() {'), true);
+  assert.equal(fluxnetCommand.includes('response_mentions_account_problem() {'), true);
+  assert.equal(fluxnetCommand.includes('print_download_request_error() {'), true);
+  assert.equal(fluxnetCommand.includes('HTTP_STATUS="$(curl -sS -w "%{http_code}" -o "$RESPONSE_FILE" -X POST "$REQUEST_URL" \\'), true);
   assert.equal(fluxnetCommand.includes('log_ameriflux_download "$filename"'), true);
 
   assert.match(baseCommand, /https:\/\/amfcdn\.lbl\.gov\/api\/v2\/data_download/);
@@ -2922,8 +2960,8 @@ test('AmeriFlux curl command generator keeps visible v2 endpoints for FLUXNET an
   assert.equal(fluxnet2015Command.includes('AMERIFLUX_LOGGER_USER_ID="FluxnetDataExplorer"'), true);
   assert.equal(fluxnet2015Command.includes('decode_base64() {'), true);
   assert.match(fluxnet2015Command, /REQUEST_URL_B64="[A-Za-z0-9+/=]+"/);
-  assert.equal(fluxnet2015Command.includes('REQUEST_URL="$(decode_base64 "$REQUEST_URL_B64")" || exit 1'), true);
-  assert.equal(fluxnet2015Command.includes('curl -sS -X POST "$REQUEST_URL" \\'), true);
+  assert.equal(fluxnet2015Command.includes('REQUEST_URL="$(decode_base64 "$REQUEST_URL_B64" 2>/dev/null || true)"'), true);
+  assert.equal(fluxnet2015Command.includes('HTTP_STATUS="$(curl -sS -w "%{http_code}" -o "$RESPONSE_FILE" -X POST "$REQUEST_URL" \\'), true);
   assert.match(fluxnet2015Command, /"user_id": "FluxnetDataExplorer"/);
   assert.match(fluxnet2015Command, /"user_email": "fluxnet@explorer\.edu"/);
   assert.match(fluxnet2015Command, /"description": "Download FLUXNET2015 for AR-Bal"/);
@@ -3054,6 +3092,54 @@ test('AmeriFlux row-level curl command still downloads when the logger request f
   assert.match(String(result.stderr || ''), /Warning: AmeriFlux download logging failed for mock\.zip\./);
 });
 
+test('AmeriFlux row-level curl command reports API account errors clearly without downloading', () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ameriflux-row-command-'));
+  const scriptPath = path.join(tempDir, 'run_row_command.sh');
+  const postUrlLogFile = path.join(tempDir, 'posted_urls.log');
+  const binDir = buildScriptRuntimeBin(tempDir, {
+    includePython3: true,
+    postUrlLogFile: postUrlLogFile,
+    apiStatus: '400',
+    responsePayload: JSON.stringify({ message: 'Invalid user_id bad-user is not registered with AmeriFlux' })
+  });
+  const commandText = hooks.buildAmeriFluxCurlCommand(
+    'AR-Bal',
+    'FULLSET',
+    'CCBY4.0',
+    undefined,
+    'FLUXNET',
+    hooks.resolveAmeriFluxBulkIdentity('bad-user', 'bad@example.org')
+  );
+
+  writeExecutable(
+    scriptPath,
+    [
+      '#!' + BASH_PATH,
+      'set -euo pipefail',
+      '',
+      commandText
+    ].join('\n')
+  );
+
+  const result = childProcess.spawnSync(BASH_PATH, [scriptPath], {
+    cwd: tempDir,
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      PATH: binDir
+    }
+  });
+
+  assert.equal(result.status, 0);
+  assert.equal(fs.readFileSync(postUrlLogFile, 'utf8').trim(), 'https://amfcdn.lbl.gov/api/v2/data_download');
+  assert.equal(fs.existsSync(path.join(tempDir, 'mock.zip')), false);
+  assert.match(String(result.stderr || ''), /AmeriFlux API request failed for AR-Bal \(FLUXNET\) with HTTP 400\./);
+  assert.match(String(result.stderr || ''), /AmeriFlux API message: Invalid user_id bad-user is not registered with AmeriFlux/);
+  assert.match(String(result.stderr || ''), /This looks like an AmeriFlux account, username, email, permission, or registration issue\./);
+  assert.match(String(result.stderr || ''), /Active AmeriFlux identity: USER_ID=bad-user USER_EMAIL=bad@example\.org/);
+  assert.match(String(result.stderr || ''), /unset them to use the Explorer defaults/);
+});
+
 test('AmeriFlux selected-sites export includes source label and keeps multiple products for one site', () => {
   const text = hooks.buildAmeriFluxSelectedSitesText([
     { site_id: 'AR-Bal', data_product: 'FLUXNET', source_label: 'AmeriFlux' },
@@ -3093,6 +3179,11 @@ test('AmeriFlux bulk script generator supports mixed FLUXNET and FLUXNET2015 pro
   assert.equal(script.includes('\\"zip_filenames\\": [\\"${log_filename}\\"],'), true);
   assert.equal(script.includes('log_ameriflux_download "$filename"'), true);
   assert.equal(script.includes('extract_urls() {'), true);
+  assert.equal(script.includes('extract_error_message() {'), true);
+  assert.equal(script.includes('response_mentions_account_problem() {'), true);
+  assert.equal(script.includes('print_download_request_error() {'), true);
+  assert.equal(script.includes('HTTP_STATUS=$(curl -sS -w "%{http_code}" -o "$RESPONSE_FILE" -X POST "$REQUEST_URL"'), true);
+  assert.equal(script.includes('No data_urls returned for ${SITE_ID} (${DATA_PRODUCT}); continuing.'), false);
   assert.equal(script.includes('decode_base64() {'), true);
   assert.equal(script.includes('resolve_request_url() {'), true);
   assert.equal(script.includes("printf '%s' \"$1\" | jq -r '.data_urls[]?.url // empty'"), true);
@@ -3200,6 +3291,118 @@ test('Generated AmeriFlux bulk script decodes and uses the FLUXNET2015 request U
   assert.equal(JSON.parse(postedBodies[1]).user_id, 'FluxnetDataExplorer');
   assert.deepEqual(JSON.parse(postedBodies[1]).zip_filenames, ['mock.zip']);
   assert.equal(fs.readFileSync(logFile, 'utf8').includes('https://amfcdn.lbl.gov/api/v1/data_download'), false);
+});
+
+test('Generated AmeriFlux bulk script reports API messages when no download URLs are returned', () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ameriflux-bulk-script-'));
+  const scriptPath = path.join(tempDir, 'download_ameriflux_selected.sh');
+  const outDir = path.join(tempDir, 'downloads');
+  const sitesFile = path.join(tempDir, 'ameriflux_selected_sites.txt');
+  const logFile = path.join(tempDir, 'ameriflux_bulk_download.log');
+  const binDir = buildScriptRuntimeBin(tempDir, {
+    includePython3: true,
+    responsePayload: JSON.stringify({ message: 'No files are currently available for this site and product' })
+  });
+
+  writeExecutable(
+    scriptPath,
+    hooks.buildAmeriFluxBulkScriptText([
+      { site_id: 'AR-Bal', data_product: 'FLUXNET', source_label: 'AmeriFlux' }
+    ])
+  );
+
+  const result = childProcess.spawnSync(BASH_PATH, [scriptPath, outDir, sitesFile, logFile], {
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      PATH: binDir
+    }
+  });
+
+  assert.equal(result.status, 0);
+  assert.equal(fs.existsSync(path.join(outDir, 'mock.zip')), false);
+  const logText = fs.readFileSync(logFile, 'utf8');
+  assert.match(logText, /No download URLs returned for AR-Bal \(FLUXNET\)\./);
+  assert.match(logText, /AmeriFlux API message: No files are currently available for this site and product/);
+  assert.equal(logText.includes('No data_urls returned for AR-Bal (FLUXNET); continuing.'), false);
+});
+
+test('Generated AmeriFlux bulk script fails fast with account diagnostics for invalid AmeriFlux identity', () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ameriflux-bulk-script-'));
+  const scriptPath = path.join(tempDir, 'download_ameriflux_selected.sh');
+  const outDir = path.join(tempDir, 'downloads');
+  const sitesFile = path.join(tempDir, 'ameriflux_selected_sites.txt');
+  const logFile = path.join(tempDir, 'ameriflux_bulk_download.log');
+  const postUrlLogFile = path.join(tempDir, 'posted_urls.log');
+  const binDir = buildScriptRuntimeBin(tempDir, {
+    includePython3: true,
+    postUrlLogFile: postUrlLogFile,
+    apiStatus: '400',
+    responsePayload: JSON.stringify({ message: 'Invalid user_id bad-user is not registered with AmeriFlux' })
+  });
+
+  writeExecutable(
+    scriptPath,
+    hooks.buildAmeriFluxBulkScriptText([
+      { site_id: 'AR-Bal', data_product: 'FLUXNET', source_label: 'AmeriFlux' },
+      { site_id: 'US-Next', data_product: 'BASE-BADM', source_label: 'BASE' }
+    ], {
+      defaultUserId: 'bad-user',
+      defaultUserEmail: 'bad@example.org'
+    })
+  );
+
+  const result = childProcess.spawnSync(BASH_PATH, [scriptPath, outDir, sitesFile, logFile], {
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      PATH: binDir
+    }
+  });
+
+  assert.equal(result.status, 1);
+  assert.deepEqual(fs.readFileSync(postUrlLogFile, 'utf8').trim().split('\n'), [
+    'https://amfcdn.lbl.gov/api/v2/data_download'
+  ]);
+  const logText = fs.readFileSync(logFile, 'utf8');
+  assert.match(logText, /AmeriFlux API request failed for AR-Bal \(FLUXNET\) with HTTP 400\./);
+  assert.match(logText, /AmeriFlux API message: Invalid user_id bad-user is not registered with AmeriFlux/);
+  assert.match(logText, /This looks like an AmeriFlux account, username, email, permission, or registration issue\./);
+  assert.match(logText, /Active AmeriFlux identity: USER_ID=bad-user USER_EMAIL=bad@example\.org/);
+  assert.match(logText, /Check AMERIFLUX_USER_ID and AMERIFLUX_USER_EMAIL, or unset them to use the Explorer defaults\./);
+  assert.equal(logText.includes('Requesting BASE-BADM URLs for US-Next'), false);
+  assert.equal(fs.existsSync(path.join(outDir, 'mock.zip')), false);
+});
+
+test('Generated AmeriFlux bulk script reports connectivity hints for curl request failures', () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ameriflux-bulk-script-'));
+  const scriptPath = path.join(tempDir, 'download_ameriflux_selected.sh');
+  const outDir = path.join(tempDir, 'downloads');
+  const sitesFile = path.join(tempDir, 'ameriflux_selected_sites.txt');
+  const logFile = path.join(tempDir, 'ameriflux_bulk_download.log');
+  const binDir = buildScriptRuntimeBin(tempDir, {
+    includePython3: true,
+    failDownloadRequest: true
+  });
+
+  writeExecutable(
+    scriptPath,
+    hooks.buildAmeriFluxBulkScriptText([
+      { site_id: 'AR-Bal', data_product: 'FLUXNET', source_label: 'AmeriFlux' }
+    ])
+  );
+
+  const result = childProcess.spawnSync(BASH_PATH, [scriptPath, outDir, sitesFile, logFile], {
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      PATH: binDir
+    }
+  });
+
+  assert.equal(result.status, 0);
+  assert.match(fs.readFileSync(logFile, 'utf8'), /Request failed for AR-Bal \(FLUXNET\); check connectivity and the AmeriFlux API endpoint\./);
+  assert.equal(fs.existsSync(path.join(outDir, 'mock.zip')), false);
 });
 
 test('Generated AmeriFlux bulk script continues downloads when logger requests fail', () => {
