@@ -447,6 +447,8 @@ test('Known-sites map copy uses the simplified popup text and visual legend labe
   assert.equal(explorerJs.includes('additional sites without shared data'), false);
   assert.equal(explorerJs.includes('selected sites'), true);
   assert.equal(explorerJs.includes('without shared data.'), true);
+  assert.equal(explorerJs.includes('Is your site missing? Email'), true);
+  assert.equal(explorerJs.includes('href=\\"mailto:trevorkeenan@berkeley.edu\\"'), true);
   assert.equal(explorerCss.includes('.shuttle-explorer__map-actions {'), true);
   assert.equal(explorerCss.includes('.shuttle-explorer__map-legend-swatch--selected {'), true);
   assert.equal(explorerCss.includes('.shuttle-explorer__map-legend-swatch--accessible {'), true);

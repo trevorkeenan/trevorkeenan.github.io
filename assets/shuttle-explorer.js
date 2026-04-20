@@ -6500,6 +6500,7 @@
     var mapChanged = false;
     var mapSignature;
     var summary;
+    var summaryHtml = "";
     var message = "";
     if (!b.mapPanel) {
       return;
@@ -6526,6 +6527,7 @@
           ", including " + knownAccessibleCount + " site" + (knownAccessibleCount === 1 ? "" : "s") +
           " with accessible data and " + knownSiteOnlyCount + " other " + (knownSiteOnlyCount === 1 ? "site" : "sites") +
           " without shared data.";
+        summaryHtml = escapeHtml(summary) + "<br><span class=\"shuttle-explorer__muted\">Is your site missing? Email <a href=\"mailto:trevorkeenan@berkeley.edu\">trevorkeenan@berkeley.edu</a> to be added</span>";
       } else if (!selectionState.selectedRows.length) {
         summary = "Select one or more accessible-data sites to highlight them on the map.";
       } else if (!selectionState.mappableRows.length) {
@@ -6542,7 +6544,11 @@
           summary += " " + selectionState.missingCoordinates + " selected " + (selectionState.missingCoordinates === 1 ? "site was" : "sites were") + " omitted because coordinates are unavailable.";
         }
       }
-      b.mapSummary.textContent = summary;
+      if (summaryHtml) {
+        b.mapSummary.innerHTML = summaryHtml;
+      } else {
+        b.mapSummary.textContent = summary;
+      }
     }
     if (b.downloadKnownSitesCsv) {
       b.downloadKnownSitesCsv.classList.toggle(
