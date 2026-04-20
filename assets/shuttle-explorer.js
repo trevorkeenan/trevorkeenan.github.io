@@ -6527,7 +6527,7 @@
           ", including " + knownAccessibleCount + " site" + (knownAccessibleCount === 1 ? "" : "s") +
           " with accessible data and " + knownSiteOnlyCount + " other " + (knownSiteOnlyCount === 1 ? "site" : "sites") +
           " without shared data.";
-        summaryHtml = escapeHtml(summary) + "<br><span class=\"shuttle-explorer__muted\">Is your site missing? Email <a href=\"mailto:trevorkeenan@berkeley.edu\">trevorkeenan@berkeley.edu</a> to be added</span>";
+        summaryHtml = escapeHtml(summary) + "<br><span class=\"shuttle-explorer__muted\">Is your site missing? Email <a href=\"mailto:trevorkeenan@berkeley.edu\">trevorkeenan@berkeley.edu</a> to be added.</span>";
       } else if (!selectionState.selectedRows.length) {
         summary = "Select one or more accessible-data sites to highlight them on the map.";
       } else if (!selectionState.mappableRows.length) {
