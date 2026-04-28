@@ -1531,6 +1531,31 @@ test('Snapshot updated date helper prefers committed metadata fields and falls b
   assert.equal(hooks.snapshotUpdatedDateDisplayText(''), 'unavailable');
 });
 
+test('Snapshot refreshed helper separates workflow refresh date from data freshness date', () => {
+  assert.equal(
+    hooks.extractSnapshotRefreshedDate({
+      snapshot_refreshed_date: '2026-04-28',
+      snapshot_refreshed_at: '2026-04-28T05:17:00Z',
+      snapshot_updated_date: '2026-04-21'
+    }),
+    '2026-04-28'
+  );
+  assert.equal(
+    hooks.extractSnapshotRefreshedDate({
+      snapshot_updated_date: '2026-04-21'
+    }),
+    '2026-04-21'
+  );
+  assert.equal(
+    hooks.latestSnapshotRefreshedDateFromResults([
+      { meta: { snapshot_refreshed_date: '2026-04-27' } },
+      { meta: { snapshot_refreshed_date: '2026-04-28' } },
+      { meta: { snapshot_updated_date: '2026-04-21' } }
+    ]),
+    '2026-04-28'
+  );
+});
+
 test('Snapshot source-status helper surfaces carried-forward Shuttle sources as a non-blocking warning', () => {
   assert.equal(
     hooks.buildSnapshotSourceStatusWarning({
@@ -1556,16 +1581,16 @@ test('Attribution text includes the contact sentence and uses the shared snapsho
 
   assert.equal(explorerJs.includes('href=\\"mailto:trevorkeenan@berkeley.edu\\"'), true);
   assert.match(
-    hooks.buildAttributionText('2026-03-11'),
+    hooks.buildAttributionText('2026-03-11', '2026-03-12'),
     /Contact TF Keenan \(trevorkeenan@berkeley\.edu\) with any questions/
   );
   assert.match(
-    hooks.buildAttributionText('2026-03-11'),
-    /Available data is updated as of: 2026-03-11\./
+    hooks.buildAttributionText('2026-03-11', '2026-03-12'),
+    /Explorer refreshed: 2026-03-12\. New data last added: 2026-03-11\./
   );
   assert.match(
-    hooks.buildAttributionText(''),
-    /Available data is updated as of: unavailable\./
+    hooks.buildAttributionText('', ''),
+    /Explorer refreshed: unavailable\. New data last added: unavailable\./
   );
 });
 
@@ -3619,6 +3644,8 @@ test('Explorer page and runtime do not hardcode stale last-updated dates', () =>
   assert.equal(/last updated:\s*202\d-\d{2}-\d{2}/.test(explorerJs), false);
   assert.equal(/last updated:\s*202\d-\d{2}-\d{2}/.test(explorerHtml), false);
   assert.equal(/Available data is updated as of:\s*202\d-\d{2}-\d{2}/.test(explorerJs), false);
+  assert.equal(/Explorer refreshed:\s*202\d-\d{2}-\d{2}/.test(explorerJs), false);
+  assert.equal(/New data last added:\s*202\d-\d{2}-\d{2}/.test(explorerJs), false);
 });
 
 test('Committed snapshot layers normalize without dropped rows under the current schema assumptions', () => {
@@ -3673,6 +3700,66 @@ test('Explorer can build a snapshot-only merged state from committed artifacts w
   assert.equal(merged.rows.some((row) => row.source_label === 'JapanFlux'), true);
   assert.equal(merged.rows.some((row) => Array.isArray(row.source_filter_tags) && row.source_filter_tags.includes('AmeriFlux-Shuttle')), true);
   assert.equal(merged.rows.some((row) => row.latitude != null && row.longitude != null), true);
+});
+
+test('Merged snapshot state keeps explorer refresh date separate from carried-forward source freshness', () => {
+  const shuttleResult = {
+    rows: [makeCatalogRow({
+      site_id: 'US-Carry',
+      data_hub: 'AmeriFlux',
+      source_label: 'AmeriFlux-Shuttle',
+      source_origin: 'shuttle'
+    })],
+    droppedRows: 0,
+    source: 'json',
+    sourceUrl: 'assets/shuttle_snapshot.json',
+    warning: hooks.buildSnapshotSourceStatusWarning({
+      source_statuses: {
+        AmeriFlux: {
+          status: 'carried_forward',
+          last_successful_refresh_date: '2026-04-21',
+          reason: 'AmeriFlux candidate refresh returned no rows.'
+        }
+      }
+    }),
+    meta: {
+      snapshot_refreshed_date: '2026-04-28',
+      snapshot_updated_date: '2026-04-21',
+      source_statuses: {
+        AmeriFlux: {
+          status: 'carried_forward',
+          last_successful_refresh_date: '2026-04-21'
+        }
+      }
+    }
+  };
+  const emptySnapshot = { rows: [], droppedRows: 0, warning: '', meta: {} };
+  const emptyAvailability = {
+    totalSites: 0,
+    sitesWithYears: 0,
+    sites: [],
+    warning: '',
+    downloadWarning: '',
+    freshnessKey: 'unavailable'
+  };
+  const merged = hooks.buildMergedSnapshotStateForRoot(
+    'assets/shuttle_snapshot.json',
+    shuttleResult,
+    emptySnapshot,
+    emptySnapshot,
+    emptySnapshot,
+    emptyAvailability,
+    emptyAvailability,
+    emptyAvailability,
+    emptyLookupResult(),
+    emptyLookupResult(),
+    emptyLookupResult(),
+    emptyLookupResult()
+  );
+
+  assert.equal(merged.snapshotRefreshedDate, '2026-04-28');
+  assert.equal(merged.snapshotUpdatedDate, '2026-04-21');
+  assert.match(merged.warning, /AmeriFlux \(2026-04-21\) Shuttle snapshot data is being carried forward/);
 });
 
 test('AmeriFlux availability failures degrade to snapshot-only mode for HTTP, network, and timeout failures', async () => {

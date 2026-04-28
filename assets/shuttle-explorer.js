@@ -454,9 +454,9 @@
     if (!(date instanceof Date) || !isFinite(date.getTime())) {
       return "";
     }
-    var y = date.getFullYear();
-    var m = String(date.getMonth() + 1).padStart(2, "0");
-    var d = String(date.getDate()).padStart(2, "0");
+    var y = date.getUTCFullYear();
+    var m = String(date.getUTCMonth() + 1).padStart(2, "0");
+    var d = String(date.getUTCDate()).padStart(2, "0");
     return y + "-" + m + "-" + d;
   }
 
@@ -477,6 +477,32 @@
     }
     return normalizeSnapshotUpdatedDate(meta.snapshot_updated_date) ||
       normalizeSnapshotUpdatedDate(meta.snapshot_updated_at);
+  }
+
+  function extractSnapshotRefreshedDate(meta) {
+    if (!meta || typeof meta !== "object" || Array.isArray(meta)) {
+      return "";
+    }
+    return normalizeSnapshotUpdatedDate(meta.snapshot_refreshed_date) ||
+      normalizeSnapshotUpdatedDate(meta.snapshot_refreshed_at) ||
+      extractSnapshotUpdatedDate(meta);
+  }
+
+  function latestSnapshotDate(dates) {
+    var latest = "";
+    (dates || []).forEach(function (dateValue) {
+      var normalized = normalizeSnapshotUpdatedDate(dateValue);
+      if (normalized && (!latest || normalized > latest)) {
+        latest = normalized;
+      }
+    });
+    return latest;
+  }
+
+  function latestSnapshotRefreshedDateFromResults(results) {
+    return latestSnapshotDate((results || []).map(function (result) {
+      return extractSnapshotRefreshedDate(result && result.meta ? result.meta : {});
+    }));
   }
 
   function extractSnapshotSourceStatuses(meta) {
@@ -686,6 +712,7 @@
       sourceUrl: entry.sourceUrl || "",
       warning: entry.warning || "",
       downloadWarning: entry.downloadWarning || "",
+      snapshotRefreshedDate: entry.snapshotRefreshedDate || "",
       snapshotUpdatedDate: entry.snapshotUpdatedDate || "",
       rows: entry.rows,
       droppedRows: entry.droppedRows || 0,
@@ -4514,6 +4541,8 @@
       return [
         "meta",
         String(result.meta.version),
+        String(result.meta.snapshot_refreshed_at || ""),
+        String(result.meta.snapshot_refreshed_date || ""),
         String(result.meta.snapshot_updated_at || ""),
         String(result.meta.snapshot_updated_date || "")
       ].join(":");
@@ -4910,12 +4939,12 @@
     return a._index - b._index;
   }
 
-  function buildAttributionText(snapshotUpdatedDate) {
-    return "We appreciate acknowledgement of the QED FLUXNET Data Explorer when convenient. Contact TF Keenan (trevorkeenan@berkeley.edu) with any questions or suggestions. Funding for the FLUXNET Data Explorer was generously provided by the NSF AccelNet program. Available data is updated as of: " + snapshotUpdatedDateDisplayText(snapshotUpdatedDate) + ".";
+  function buildAttributionText(snapshotUpdatedDate, snapshotRefreshedDate) {
+    return "We appreciate acknowledgement of the QED FLUXNET Data Explorer when convenient. Contact TF Keenan (trevorkeenan@berkeley.edu) with any questions or suggestions. Funding for the FLUXNET Data Explorer was generously provided by the NSF AccelNet program. Explorer refreshed: " + snapshotUpdatedDateDisplayText(snapshotRefreshedDate) + ". New data last added: " + snapshotUpdatedDateDisplayText(snapshotUpdatedDate) + ".";
   }
 
-  function buildAttributionHtml(snapshotUpdatedDate) {
-    return "We appreciate acknowledgement of the QED FLUXNET Data Explorer when convenient. Contact TF Keenan (<a href=\"mailto:trevorkeenan@berkeley.edu\">trevorkeenan@berkeley.edu</a>) with any questions or suggestions. Funding for the FLUXNET Data Explorer was generously provided by the NSF AccelNet program. Available data is updated as of: " + escapeHtml(snapshotUpdatedDateDisplayText(snapshotUpdatedDate)) + ".";
+  function buildAttributionHtml(snapshotUpdatedDate, snapshotRefreshedDate) {
+    return "We appreciate acknowledgement of the QED FLUXNET Data Explorer when convenient. Contact TF Keenan (<a href=\"mailto:trevorkeenan@berkeley.edu\">trevorkeenan@berkeley.edu</a>) with any questions or suggestions. Funding for the FLUXNET Data Explorer was generously provided by the NSF AccelNet program. Explorer refreshed: " + escapeHtml(snapshotUpdatedDateDisplayText(snapshotRefreshedDate)) + ". New data last added: " + escapeHtml(snapshotUpdatedDateDisplayText(snapshotUpdatedDate)) + ".";
   }
 
   function buildKnownSitesLegendHtml() {
@@ -5252,7 +5281,7 @@
     root.innerHTML = [
       "<div class=\"shuttle-explorer__header\">",
       "  <h2>FLUXNET Data Explorer</h2>",
-      "  <p class=\"shuttle-explorer__muted\">Explore and download a regularly refreshed snapshot of FLUXNET Shuttle coverage, selected direct FLUXNET archive supplements, JapanFlux2024 archive records, and AmeriFlux BASE (standardized observations) coverage (last updated: <span data-role=\"widget-last-updated-inline\">unavailable</span>). Search by site ID or site name, then open the download or landing-page links shown in the table. This explorer keeps source provenance explicit instead of folding every record into the FLUXNET Shuttle bucket.</p>",
+      "  <p class=\"shuttle-explorer__muted\">Explore and download a regularly refreshed snapshot of FLUXNET Shuttle coverage, selected direct FLUXNET archive supplements, JapanFlux2024 archive records, and AmeriFlux BASE (standardized observations) coverage (explorer refreshed: <span data-role=\"widget-refreshed-inline\">unavailable</span>). Search by site ID or site name, then open the download or landing-page links shown in the table. This explorer keeps source provenance explicit instead of folding every record into the FLUXNET Shuttle bucket.</p>",
       "  <p class=\"shuttle-explorer__muted\">Data are provided by site teams around the world. Shuttle-backed FLUXNET rows are served via the FLUXNET Shuttle (<a href=\"https://data.fluxnet.org/\" target=\"_blank\" rel=\"noopener\">https://data.fluxnet.org/</a>), additional FLUXNET rows may be surfaced through ICOS and AmeriFlux APIs, and JapanFlux2024 rows are surfaced separately from the ADS archive because they use FLUXNET-style conventions with dataset-specific adaptations.</p>",
       "</div>",
       "<p class=\"shuttle-explorer__status is-loading\" data-role=\"status\" role=\"status\" aria-live=\"polite\">Loading snapshot…</p>",
@@ -5508,6 +5537,7 @@
       sourceUrl: "",
       warning: "",
       downloadWarning: "",
+      snapshotRefreshedDate: "",
       snapshotUpdatedDate: "",
       droppedRows: 0,
       errorMessage: "",
@@ -5544,7 +5574,7 @@
     this.syncAmeriFluxBulkIdentityInputs();
     this.bindEvents();
     this.renderTableHeader();
-    this.setAttributionText(buildAttributionText(""), buildAttributionHtml(""));
+    this.setAttributionText(buildAttributionText("", ""), buildAttributionHtml("", ""));
     this.render();
   }
 
@@ -5564,6 +5594,7 @@
       vegetationInfoWrap: bySelector(this.root, "[data-role='vegetation-info-wrap']"),
       vegetationInfoToggle: bySelector(this.root, "[data-role='vegetation-info-toggle']"),
       hubFilters: bySelector(this.root, "[data-role='hub-filters']"),
+      widgetRefreshedInline: bySelector(this.root, "[data-role='widget-refreshed-inline']"),
       widgetLastUpdatedInline: bySelector(this.root, "[data-role='widget-last-updated-inline']"),
       summaryRow: bySelector(this.root, "[data-role='summary-row']"),
       summary: bySelector(this.root, "[data-role='summary']"),
@@ -6073,22 +6104,31 @@
     this._gaExplorerLoadedTracked = true;
     gaEvent("fx_explorer_loaded", {
       rows: this.state.rows.length,
-      snapshot_last_updated: this.state.snapshotUpdatedDate || ""
+      snapshot_last_updated: this.state.snapshotUpdatedDate || "",
+      snapshot_refreshed: this.state.snapshotRefreshedDate || ""
     });
   };
 
   Explorer.prototype.renderSnapshotUpdatedText = function () {
-    var label = snapshotUpdatedDateDisplayText(this.state.snapshotUpdatedDate);
+    var refreshedLabel = snapshotUpdatedDateDisplayText(this.state.snapshotRefreshedDate);
+    var updatedLabel = snapshotUpdatedDateDisplayText(this.state.snapshotUpdatedDate);
+    if (this.bindings.widgetRefreshedInline) {
+      this.bindings.widgetRefreshedInline.textContent = refreshedLabel;
+    }
     if (this.bindings.widgetLastUpdatedInline) {
-      this.bindings.widgetLastUpdatedInline.textContent = label;
+      this.bindings.widgetLastUpdatedInline.textContent = updatedLabel;
+    }
+    var pageRefreshedSpan = document.getElementById("shuttle-snapshot-refreshed");
+    if (pageRefreshedSpan) {
+      pageRefreshedSpan.textContent = refreshedLabel;
     }
     var pageIntroSpan = document.getElementById("shuttle-snapshot-last-updated");
     if (pageIntroSpan) {
-      pageIntroSpan.textContent = label;
+      pageIntroSpan.textContent = updatedLabel;
     }
     this.setAttributionText(
-      buildAttributionText(this.state.snapshotUpdatedDate),
-      buildAttributionHtml(this.state.snapshotUpdatedDate)
+      buildAttributionText(this.state.snapshotUpdatedDate, this.state.snapshotRefreshedDate),
+      buildAttributionHtml(this.state.snapshotUpdatedDate, this.state.snapshotRefreshedDate)
     );
   };
 
@@ -8127,6 +8167,7 @@
     this.state.sourceUrl = snapshot && snapshot.sourceUrl ? snapshot.sourceUrl : "";
     this.state.warning = snapshot && snapshot.warning ? snapshot.warning : "";
     this.state.downloadWarning = snapshot && snapshot.downloadWarning ? snapshot.downloadWarning : "";
+    this.state.snapshotRefreshedDate = snapshot && snapshot.snapshotRefreshedDate ? snapshot.snapshotRefreshedDate : "";
     this.state.snapshotUpdatedDate = snapshot && snapshot.snapshotUpdatedDate ? snapshot.snapshotUpdatedDate : "";
     this.state.amerifluxTotalSites = snapshot && snapshot.amerifluxTotalSites ? snapshot.amerifluxTotalSites : 0;
     this.state.amerifluxSitesWithYears = snapshot && snapshot.amerifluxSitesWithYears ? snapshot.amerifluxSitesWithYears : 0;
@@ -8197,6 +8238,12 @@
         ameriBaseResult && ameriBaseResult.downloadWarning ? ameriBaseResult.downloadWarning : "",
         fluxnet2015Result && fluxnet2015Result.downloadWarning ? fluxnet2015Result.downloadWarning : ""
       ),
+      snapshotRefreshedDate: latestSnapshotRefreshedDateFromResults([
+        shuttleResult,
+        icosDirectResult,
+        japanFluxResult,
+        efdResult
+      ]),
       snapshotUpdatedDate: extractSnapshotUpdatedDate(shuttleResult && shuttleResult.meta ? shuttleResult.meta : {}),
       amerifluxTotalSites: ameriResult && ameriResult.totalSites ? ameriResult.totalSites : 0,
       amerifluxSitesWithYears: ameriResult && ameriResult.sitesWithYears ? ameriResult.sitesWithYears : 0,
@@ -8263,6 +8310,7 @@
         sourceUrl: cached.sourceUrl || this.jsonUrl,
         warning: cached.warning || "",
         downloadWarning: cached.downloadWarning || "",
+        snapshotRefreshedDate: cached.snapshotRefreshedDate || "",
         snapshotUpdatedDate: cached.snapshotUpdatedDate || "",
         amerifluxTotalSites: cached.amerifluxTotalSites || 0,
         amerifluxSitesWithYears: cached.amerifluxSitesWithYears || 0,
@@ -8377,6 +8425,7 @@
           sourceUrl: snapshotState.sourceUrl,
           warning: snapshotState.warning,
           downloadWarning: snapshotState.downloadWarning,
+          snapshotRefreshedDate: snapshotState.snapshotRefreshedDate,
           snapshotUpdatedDate: snapshotState.snapshotUpdatedDate,
           amerifluxTotalSites: snapshotState.amerifluxTotalSites,
           amerifluxSitesWithYears: snapshotState.amerifluxSitesWithYears,
@@ -8474,6 +8523,9 @@
     resolveAmeriFluxBulkIdentity: resolveAmeriFluxBulkIdentity,
     normalizeSnapshotUpdatedDate: normalizeSnapshotUpdatedDate,
     extractSnapshotUpdatedDate: extractSnapshotUpdatedDate,
+    extractSnapshotRefreshedDate: extractSnapshotRefreshedDate,
+    latestSnapshotDate: latestSnapshotDate,
+    latestSnapshotRefreshedDateFromResults: latestSnapshotRefreshedDateFromResults,
     extractSnapshotSourceStatuses: extractSnapshotSourceStatuses,
     buildSnapshotSourceStatusWarning: buildSnapshotSourceStatusWarning,
     snapshotUpdatedDateDisplayText: snapshotUpdatedDateDisplayText,

@@ -702,6 +702,8 @@ def write_json(
     records: Sequence[Dict[str, Any]],
     snapshot_updated_at: str,
     snapshot_updated_date: str,
+    snapshot_refreshed_at: str,
+    snapshot_refreshed_date: str,
     version_value: str,
 ) -> None:
     columns = list(OUTPUT_COLUMNS)
@@ -709,6 +711,8 @@ def write_json(
         "meta": {
             "schema_version": 1,
             "version": version_value,
+            "snapshot_refreshed_at": snapshot_refreshed_at,
+            "snapshot_refreshed_date": snapshot_refreshed_date,
             "snapshot_updated_at": snapshot_updated_at,
             "snapshot_updated_date": snapshot_updated_date,
         },
@@ -763,7 +767,17 @@ def main() -> None:
 
     finalized_records = [dict(record, last_updated=snapshot_updated_at) for record in curated_rows]
     write_csv(output_csv, finalized_records)
-    write_json(output_json, finalized_records, snapshot_updated_at, snapshot_updated_date, version_value)
+    snapshot_refreshed_at = normalize_snapshot_updated_at(args.snapshot_updated_at) or snapshot_updated_at
+    snapshot_refreshed_date = normalize_snapshot_updated_date(args.snapshot_updated_date, args.snapshot_updated_at) or snapshot_updated_date
+    write_json(
+        output_json,
+        finalized_records,
+        snapshot_updated_at,
+        snapshot_updated_date,
+        snapshot_refreshed_at,
+        snapshot_refreshed_date,
+        version_value,
+    )
 
     print(f"Loaded {len(public_rows)} public EFD catalog rows")
     print(f"Wrote {len(finalized_records)} curated EFD rows with known data records")

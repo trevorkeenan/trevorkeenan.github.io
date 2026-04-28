@@ -590,6 +590,8 @@ def write_json(
         "meta": {
             "schema_version": 1,
             "version": version_value,
+            "snapshot_refreshed_at": normalize_snapshot_updated_at(snapshot_updated_at) or updated_at,
+            "snapshot_refreshed_date": normalize_snapshot_updated_date(snapshot_updated_date, snapshot_updated_at) or updated_date,
             "snapshot_updated_at": updated_at,
             "snapshot_updated_date": updated_date,
             **meta_extra,

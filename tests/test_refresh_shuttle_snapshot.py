@@ -196,6 +196,39 @@ class RefreshShuttleSnapshotTests(unittest.TestCase):
         self.assertEqual(source_statuses["AmeriFlux"]["status"], "fresh")
         self.assertEqual(source_statuses["AmeriFlux"]["last_successful_refresh_date"], "2026-04-12")
 
+    def test_successful_same_content_refresh_updates_source_freshness_metadata(self):
+        existing_rows = [
+            make_row("AmeriFlux", "US-A"),
+            make_row("AmeriFlux", "US-B"),
+        ]
+        existing_meta = {
+            "snapshot_updated_at": "2026-04-21T05:17:00Z",
+            "snapshot_updated_date": "2026-04-21",
+            "source_statuses": {
+                "AmeriFlux": {
+                    "status": "fresh",
+                    "last_successful_refresh_at": "2026-04-21T05:17:00Z",
+                    "last_successful_refresh_date": "2026-04-21",
+                    "published_site_count": 2,
+                    "published_row_count": 2,
+                }
+            },
+        }
+
+        published_rows, source_statuses = module.stabilize_snapshot(
+            list(existing_rows),
+            existing_rows,
+            existing_meta,
+            snapshot_updated_at="2026-04-28T05:17:00Z",
+            snapshot_updated_date="2026-04-28",
+            min_site_retention_ratio=0.8,
+            min_guarded_site_count=1,
+        )
+
+        self.assertEqual(published_rows, existing_rows)
+        self.assertEqual(source_statuses["AmeriFlux"]["status"], "fresh")
+        self.assertEqual(source_statuses["AmeriFlux"]["last_successful_refresh_date"], "2026-04-28")
+
     def test_global_candidate_failure_preserves_existing_rows(self):
         existing_rows = [
             make_row("AmeriFlux", "US-A"),

@@ -240,6 +240,8 @@ def main() -> None:
     meta: Dict[str, object] = {
         "schema_version": 1,
         "version": version_value,
+        "snapshot_refreshed_at": normalize_snapshot_updated_at(args.snapshot_updated_at) or snapshot_updated_at,
+        "snapshot_refreshed_date": normalize_snapshot_updated_date(args.snapshot_updated_date, args.snapshot_updated_at) or snapshot_updated_date,
         "snapshot_updated_at": snapshot_updated_at,
         "snapshot_updated_date": snapshot_updated_date,
     }

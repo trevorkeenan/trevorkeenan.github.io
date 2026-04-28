@@ -391,34 +391,13 @@ def stabilize_snapshot(
             if not candidate_hub_rows:
                 continue
             published_rows.extend(candidate_hub_rows)
-            existing_status_kind = str(existing_status.get("status") or "").strip().lower() if existing_status else ""
-            if rows_same_as_existing and existing_status_kind == "carried_forward":
-                source_statuses[hub] = build_fresh_status(
-                    hub,
-                    candidate_hub_rows,
-                    last_successful_refresh_at=snapshot_updated_at,
-                    last_successful_refresh_date=snapshot_updated_date,
-                    previous_site_count=existing_site_count,
-                )
-            elif rows_same_as_existing and existing_status:
-                source_statuses[hub] = keep_existing_status(existing_status, candidate_hub_rows)
-            elif rows_same_as_existing:
-                fallback_at, fallback_date = fallback_last_success(existing_meta, existing_status)
-                source_statuses[hub] = build_fresh_status(
-                    hub,
-                    candidate_hub_rows,
-                    last_successful_refresh_at=fallback_at or snapshot_updated_at,
-                    last_successful_refresh_date=fallback_date or snapshot_updated_date,
-                    previous_site_count=existing_site_count,
-                )
-            else:
-                source_statuses[hub] = build_fresh_status(
-                    hub,
-                    candidate_hub_rows,
-                    last_successful_refresh_at=snapshot_updated_at,
-                    last_successful_refresh_date=snapshot_updated_date,
-                    previous_site_count=existing_site_count,
-                )
+            source_statuses[hub] = build_fresh_status(
+                hub,
+                candidate_hub_rows,
+                last_successful_refresh_at=snapshot_updated_at,
+                last_successful_refresh_date=snapshot_updated_date,
+                previous_site_count=existing_site_count,
+            )
             continue
 
         if existing_hub_rows:
