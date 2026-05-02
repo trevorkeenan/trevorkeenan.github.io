@@ -18,6 +18,8 @@
   var LEAFLET_WORLD_TILE_SIZE = 256;
   var DEFAULT_PAGE_SIZE = 10;
   var DEFAULT_MINIMUM_YEARS_FILTER = 1;
+  var MIN_PLAUSIBLE_DATA_YEAR = 1900;
+  var MAX_FUTURE_DATA_YEAR_BUFFER = 5;
   var MAX_PAGE_BUTTONS = 7;
   var SEARCH_DEBOUNCE_MS = 180;
   var STYLE_ID = "shuttle-explorer-inline-styles";
@@ -2068,6 +2070,232 @@
     );
   }
 
+  function maxPlausibleDataYear() {
+    var currentYear = new Date().getFullYear();
+    return currentYear + MAX_FUTURE_DATA_YEAR_BUFFER;
+  }
+
+  function normalizeCoverageYear(value) {
+    var year = parseIntOrNull(value);
+    if (year == null || year < MIN_PLAUSIBLE_DATA_YEAR || year > maxPlausibleDataYear()) {
+      return null;
+    }
+    return year;
+  }
+
+  function normalizeCoverageYears(values) {
+    var seen = {};
+    var years = [];
+    normalizePublishYears(values).forEach(function (year) {
+      var normalized = normalizeCoverageYear(year);
+      if (normalized == null || seen[normalized]) {
+        return;
+      }
+      seen[normalized] = true;
+      years.push(normalized);
+    });
+    years.sort(function (a, b) {
+      return a - b;
+    });
+    return years;
+  }
+
+  function normalizeYearInterval(startValue, endValue) {
+    var start = normalizeCoverageYear(startValue);
+    var end = normalizeCoverageYear(endValue);
+    if (start == null || end == null || end < start) {
+      return null;
+    }
+    return { start: start, end: end };
+  }
+
+  function contiguousYearIntervals(years) {
+    var normalizedYears = normalizeCoverageYears(years);
+    var intervals = [];
+    var rangeStart;
+    var previousYear;
+    if (!normalizedYears.length) {
+      return intervals;
+    }
+    rangeStart = normalizedYears[0];
+    previousYear = normalizedYears[0];
+    normalizedYears.slice(1).forEach(function (year) {
+      if (year === previousYear + 1) {
+        previousYear = year;
+        return;
+      }
+      intervals.push({ start: rangeStart, end: previousYear });
+      rangeStart = year;
+      previousYear = year;
+    });
+    intervals.push({ start: rangeStart, end: previousYear });
+    return intervals;
+  }
+
+  function yearLabelIntervals(value) {
+    var text = String(value == null ? "" : value);
+    var intervals = [];
+    var rangeRe = /\b((?:19|20)\d{2})\b\s*(?:-|–|—|\bto\b)\s*\b((?:19|20)\d{2})\b/g;
+    var match;
+    var exactYears;
+    var interval;
+    while ((match = rangeRe.exec(text))) {
+      interval = normalizeYearInterval(match[1], match[2]);
+      if (interval) {
+        intervals.push(interval);
+      }
+    }
+    if (intervals.length) {
+      return intervals;
+    }
+    exactYears = normalizeCoverageYears(text);
+    return exactYears.length ? contiguousYearIntervals(exactYears) : [];
+  }
+
+  function firstNonEmptyYearSource() {
+    var i;
+    var years;
+    for (i = 0; i < arguments.length; i += 1) {
+      years = normalizeCoverageYears(arguments[i]);
+      if (years.length) {
+        return years;
+      }
+    }
+    return [];
+  }
+
+  function productAvailableYearIntervals(product) {
+    var exactYears = firstNonEmptyYearSource(
+      product && (product.exactYears || product.exact_years),
+      product && product.publish_years
+    );
+    var interval;
+    var labelIntervals;
+    if (exactYears.length) {
+      return contiguousYearIntervals(exactYears);
+    }
+    interval = normalizeYearInterval(
+      product && (product.firstYear || product.first_year),
+      product && (product.lastYear || product.last_year)
+    );
+    if (interval) {
+      return [interval];
+    }
+    labelIntervals = yearLabelIntervals(product && (product.coverageLabel || product.coverage_label || product.years));
+    return labelIntervals.length ? labelIntervals : [];
+  }
+
+  function siteAvailableYearIntervals(row) {
+    var products;
+    var intervals = [];
+    var exactYears;
+    var interval;
+    if (!row || typeof row !== "object") {
+      return intervals;
+    }
+    products = Array.isArray(row.surfacedProducts) && row.surfacedProducts.length
+      ? row.surfacedProducts
+      : getSurfacedProductsForRow(row);
+    if (products.length) {
+      products.forEach(function (product) {
+        intervals = intervals.concat(productAvailableYearIntervals(product));
+      });
+      if (intervals.length) {
+        return intervals;
+      }
+    }
+    exactYears = firstNonEmptyYearSource(row.available_years, row.publish_years, row.efd_policy_years);
+    if (exactYears.length) {
+      return contiguousYearIntervals(exactYears);
+    }
+    intervals = yearLabelIntervals(row.years);
+    if (intervals.length) {
+      return intervals;
+    }
+    interval = normalizeYearInterval(row.first_year, row.last_year);
+    return interval ? [interval] : [];
+  }
+
+  function availableYearRangeBounds(rows) {
+    var minYear = null;
+    var maxYear = null;
+    (Array.isArray(rows) ? rows : []).forEach(function (row) {
+      siteAvailableYearIntervals(row).forEach(function (interval) {
+        if (minYear == null || interval.start < minYear) {
+          minYear = interval.start;
+        }
+        if (maxYear == null || interval.end > maxYear) {
+          maxYear = interval.end;
+        }
+      });
+    });
+    return {
+      start: minYear,
+      end: maxYear,
+      hasBounds: minYear != null && maxYear != null && maxYear >= minYear
+    };
+  }
+
+  function normalizeYearRangeFilter(yearRange, bounds) {
+    var boundsStart = normalizeCoverageYear(bounds && bounds.start);
+    var boundsEnd = normalizeCoverageYear(bounds && bounds.end);
+    var normalizedBounds = boundsStart != null && boundsEnd != null && boundsEnd >= boundsStart
+      ? { start: boundsStart, end: boundsEnd, hasBounds: true }
+      : availableYearRangeBounds([]);
+    var start;
+    var end;
+    if (!normalizedBounds.hasBounds) {
+      return {
+        start: null,
+        end: null,
+        bounds: normalizedBounds,
+        hasBounds: false,
+        isDefault: true
+      };
+    }
+    start = normalizeCoverageYear(yearRange && yearRange.start);
+    end = normalizeCoverageYear(yearRange && yearRange.end);
+    if (start == null) {
+      start = normalizedBounds.start;
+    }
+    if (end == null) {
+      end = normalizedBounds.end;
+    }
+    start = Math.max(normalizedBounds.start, Math.min(start, normalizedBounds.end));
+    end = Math.max(normalizedBounds.start, Math.min(end, normalizedBounds.end));
+    if (start > end) {
+      var swapped = start;
+      start = end;
+      end = swapped;
+    }
+    return {
+      start: start,
+      end: end,
+      bounds: normalizedBounds,
+      hasBounds: true,
+      isDefault: start === normalizedBounds.start && end === normalizedBounds.end
+    };
+  }
+
+  function yearIntervalsOverlap(interval, range) {
+    return !!interval && !!range && interval.start <= range.end && interval.end >= range.start;
+  }
+
+  function yearRangeFilterMatches(row, yearRange, bounds) {
+    var normalized = normalizeYearRangeFilter(yearRange, bounds);
+    var intervals;
+    if (!normalized.hasBounds || normalized.isDefault) {
+      return true;
+    }
+    intervals = siteAvailableYearIntervals(row);
+    if (!intervals.length) {
+      return false;
+    }
+    return intervals.some(function (interval) {
+      return yearIntervalsOverlap(interval, normalized);
+    });
+  }
+
   function minimumYearsFilterMatches(row, minimumYears) {
     var threshold = normalizeMinimumYearsValue(minimumYears);
     var availableYears = siteAvailableYearCount(row);
@@ -2086,6 +2314,8 @@
     var selectedCountry = String(opts.selectedCountry || "");
     var selectedVegetation = String(opts.selectedVegetation || "");
     var minimumYears = opts.minimumYears;
+    var yearRange = opts.yearRange || { start: opts.yearRangeStart, end: opts.yearRangeEnd };
+    var yearRangeBounds = opts.yearRangeBounds;
     var selectedHubs = opts.selectedHubs && typeof opts.selectedHubs === "object" ? opts.selectedHubs : {};
 
     if (search && String(row && row.search_text || "").indexOf(search) === -1) {
@@ -2110,6 +2340,9 @@
       return false;
     }
     if (!minimumYearsFilterMatches(row, minimumYears)) {
+      return false;
+    }
+    if (!yearRangeFilterMatches(row, yearRange, yearRangeBounds)) {
       return false;
     }
     return true;
@@ -5184,6 +5417,10 @@
       ".shuttle-explorer__range-header{display:flex;justify-content:space-between;align-items:baseline;gap:12px;}",
       ".shuttle-explorer__range-value{color:inherit;font-size:inherit;font-weight:inherit;line-height:inherit;}",
       ".shuttle-explorer__range-meta{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;}",
+      ".shuttle-explorer__dual-range{position:relative;flex:1 1 auto;min-width:140px;height:22px;}",
+      ".shuttle-explorer__dual-range .shuttle-explorer__range-input{position:absolute;left:0;right:0;top:50%;width:100%;transform:translateY(-50%);pointer-events:none;}",
+      ".shuttle-explorer__dual-range .shuttle-explorer__range-input::-webkit-slider-thumb{pointer-events:auto;}",
+      ".shuttle-explorer__dual-range .shuttle-explorer__range-input::-moz-range-thumb{pointer-events:auto;}",
       ".shuttle-explorer__label-row{display:inline-flex;align-items:center;gap:6px;}",
       ".shuttle-explorer__tooltip-wrap{position:relative;display:inline-flex;align-items:center;}",
       ".shuttle-explorer__tooltip-toggle{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;padding:0;border:1px solid #b7c1ce;border-radius:999px;background:#fff;color:#2f5374;font-size:.74em;font-weight:700;line-height:1;cursor:help;}",
@@ -5319,6 +5556,13 @@
       "  <div class=\"shuttle-explorer__field shuttle-explorer__field--full shuttle-explorer__years-filter\">",
       "    <label for=\"shuttle-minimum-years\">Minimum years available: <span class=\"shuttle-explorer__range-value\" data-role=\"minimum-years-value\">1</span></label>",
       "    <input id=\"shuttle-minimum-years\" class=\"shuttle-explorer__range-input\" type=\"range\" min=\"1\" max=\"1\" step=\"1\" value=\"1\" data-role=\"minimum-years-filter\" />",
+      "  </div>",
+      "  <div class=\"shuttle-explorer__field shuttle-explorer__field--full shuttle-explorer__years-filter\">",
+      "    <label for=\"shuttle-year-range-start\">Year range: <span class=\"shuttle-explorer__range-value\" data-role=\"year-range-value\">All years</span></label>",
+      "    <div class=\"shuttle-explorer__dual-range\" data-role=\"year-range-control\">",
+      "      <input id=\"shuttle-year-range-start\" class=\"shuttle-explorer__range-input\" type=\"range\" min=\"1900\" max=\"1900\" step=\"1\" value=\"1900\" data-role=\"year-range-start-filter\" aria-label=\"Start year\" />",
+      "      <input id=\"shuttle-year-range-end\" class=\"shuttle-explorer__range-input\" type=\"range\" min=\"1900\" max=\"1900\" step=\"1\" value=\"1900\" data-role=\"year-range-end-filter\" aria-label=\"End year\" />",
+      "    </div>",
       "  </div>",
       "</div>",
       "<div class=\"shuttle-explorer__hub-filters shuttle-explorer__hidden\" data-role=\"hub-filters\" aria-label=\"Hub filters\"></div>",
@@ -5549,6 +5793,9 @@
       selectedVegetation: "",
       minimumYears: DEFAULT_MINIMUM_YEARS_FILTER,
       maxAvailableYears: DEFAULT_MINIMUM_YEARS_FILTER,
+      yearRangeStart: null,
+      yearRangeEnd: null,
+      yearRangeBounds: availableYearRangeBounds([]),
       selectedHubs: {},
       selectedKeys: {},
       cliPanelVisible: false,
@@ -5591,6 +5838,9 @@
       minimumYearsFilter: bySelector(this.root, "[data-role='minimum-years-filter']"),
       minimumYearsValue: bySelector(this.root, "[data-role='minimum-years-value']"),
       minimumYearsRange: bySelector(this.root, "[data-role='minimum-years-range']"),
+      yearRangeStartFilter: bySelector(this.root, "[data-role='year-range-start-filter']"),
+      yearRangeEndFilter: bySelector(this.root, "[data-role='year-range-end-filter']"),
+      yearRangeValue: bySelector(this.root, "[data-role='year-range-value']"),
       vegetationInfoWrap: bySelector(this.root, "[data-role='vegetation-info-wrap']"),
       vegetationInfoToggle: bySelector(this.root, "[data-role='vegetation-info-toggle']"),
       hubFilters: bySelector(this.root, "[data-role='hub-filters']"),
@@ -5754,6 +6004,46 @@
       });
       b.minimumYearsFilter.addEventListener("change", function () {
         applyMinimumYears(true);
+      });
+    }
+
+    if (b.yearRangeStartFilter && b.yearRangeEndFilter) {
+      var applyYearRange = function (changedHandle, shouldTrack) {
+        var start = normalizeCoverageYear(b.yearRangeStartFilter.value);
+        var end = normalizeCoverageYear(b.yearRangeEndFilter.value);
+        if (start != null && end != null && start > end) {
+          if (changedHandle === "start") {
+            end = start;
+          } else {
+            start = end;
+          }
+        }
+        var normalized = normalizeYearRangeFilter(
+          { start: start, end: end },
+          self.state.yearRangeBounds
+        );
+        self.state.yearRangeStart = normalized.start;
+        self.state.yearRangeEnd = normalized.end;
+        self.state.page = 1;
+        self.syncYearRangeFilterControl(true);
+        self.updateDerivedState();
+        self.render();
+        if (shouldTrack) {
+          self.trackFilterChange("year_range", normalized.hasBounds ? (normalized.start + "-" + normalized.end) : "");
+        }
+      };
+
+      b.yearRangeStartFilter.addEventListener("input", function () {
+        applyYearRange("start", false);
+      });
+      b.yearRangeStartFilter.addEventListener("change", function () {
+        applyYearRange("start", true);
+      });
+      b.yearRangeEndFilter.addEventListener("input", function () {
+        applyYearRange("end", false);
+      });
+      b.yearRangeEndFilter.addEventListener("change", function () {
+        applyYearRange("end", true);
       });
     }
 
@@ -6089,6 +6379,47 @@
     }
   };
 
+  Explorer.prototype.syncYearRangeFilterControl = function (preserveSelection) {
+    var previousBounds = this.state.yearRangeBounds || availableYearRangeBounds([]);
+    var previousSelection = normalizeYearRangeFilter({
+      start: this.state.yearRangeStart,
+      end: this.state.yearRangeEnd
+    }, previousBounds);
+    var bounds = availableYearRangeBounds(this.state.rows);
+    var shouldUseFullRange = !preserveSelection || !previousSelection.hasBounds || previousSelection.isDefault;
+    var selected = shouldUseFullRange
+      ? normalizeYearRangeFilter({ start: null, end: null }, bounds)
+      : normalizeYearRangeFilter({
+        start: this.state.yearRangeStart,
+        end: this.state.yearRangeEnd
+      }, bounds);
+
+    this.state.yearRangeBounds = bounds;
+    this.state.yearRangeStart = selected.start;
+    this.state.yearRangeEnd = selected.end;
+
+    [this.bindings.yearRangeStartFilter, this.bindings.yearRangeEndFilter].forEach(function (input) {
+      if (!input) {
+        return;
+      }
+      input.disabled = !selected.hasBounds;
+      input.min = String(selected.hasBounds ? bounds.start : MIN_PLAUSIBLE_DATA_YEAR);
+      input.max = String(selected.hasBounds ? bounds.end : MIN_PLAUSIBLE_DATA_YEAR);
+      input.step = "1";
+    });
+    if (this.bindings.yearRangeStartFilter) {
+      this.bindings.yearRangeStartFilter.value = String(selected.hasBounds ? selected.start : MIN_PLAUSIBLE_DATA_YEAR);
+    }
+    if (this.bindings.yearRangeEndFilter) {
+      this.bindings.yearRangeEndFilter.value = String(selected.hasBounds ? selected.end : MIN_PLAUSIBLE_DATA_YEAR);
+    }
+    if (this.bindings.yearRangeValue) {
+      this.bindings.yearRangeValue.textContent = selected.hasBounds
+        ? (selected.start + "\u2013" + selected.end)
+        : "Unavailable";
+    }
+  };
+
   Explorer.prototype.trackFilterChange = function (filterName, value) {
     gaEvent("fx_filter_change", {
       filter: String(filterName || ""),
@@ -6223,6 +6554,8 @@
     this.state.selectedCountry = "";
     this.state.selectedVegetation = "";
     this.state.minimumYears = DEFAULT_MINIMUM_YEARS_FILTER;
+    this.state.yearRangeStart = null;
+    this.state.yearRangeEnd = null;
     Object.keys(this.state.selectedHubs).forEach(function (hub) {
       self.state.selectedHubs[hub] = true;
     });
@@ -6249,6 +6582,7 @@
       this.bindings.vegetationFilter.value = "";
     }
     this.syncMinimumYearsFilterControl();
+    this.syncYearRangeFilterControl(false);
     qsa(this.bindings.hubFilters, "input[type='checkbox']").forEach(function (input) {
       input.checked = true;
     });
@@ -7895,6 +8229,7 @@
     }
 
     this.syncMinimumYearsFilterControl();
+    this.syncYearRangeFilterControl(true);
 
   };
 
@@ -7907,6 +8242,11 @@
     var selectedCountry = this.state.selectedCountry;
     var selectedVegetation = this.state.selectedVegetation;
     var minimumYears = this.state.minimumYears;
+    var yearRange = {
+      start: this.state.yearRangeStart,
+      end: this.state.yearRangeEnd
+    };
+    var yearRangeBounds = this.state.yearRangeBounds;
     var selectedHubs = this.state.selectedHubs;
 
     this.state.filteredRows = this.state.rows.filter(function (row) {
@@ -7918,6 +8258,8 @@
         selectedCountry: selectedCountry,
         selectedVegetation: selectedVegetation,
         minimumYears: minimumYears,
+        yearRange: yearRange,
+        yearRangeBounds: yearRangeBounds,
         selectedHubs: selectedHubs
       });
     }).slice().sort(function (a, b) {
@@ -8517,6 +8859,12 @@
     siteAvailableYears: siteAvailableYears,
     siteAvailableYearCount: siteAvailableYearCount,
     maxSiteAvailableYearCount: maxSiteAvailableYearCount,
+    normalizeCoverageYear: normalizeCoverageYear,
+    normalizeCoverageYears: normalizeCoverageYears,
+    siteAvailableYearIntervals: siteAvailableYearIntervals,
+    availableYearRangeBounds: availableYearRangeBounds,
+    normalizeYearRangeFilter: normalizeYearRangeFilter,
+    yearRangeFilterMatches: yearRangeFilterMatches,
     minimumYearsFilterMatches: minimumYearsFilterMatches,
     shouldEnableBulkToolsActions: shouldEnableBulkToolsActions,
     formatSelectedSiteCount: formatSelectedSiteCount,

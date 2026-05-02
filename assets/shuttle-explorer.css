@@ -142,6 +142,31 @@
   flex-wrap: wrap;
 }
 
+.shuttle-explorer__dual-range {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 140px;
+  height: 22px;
+}
+
+.shuttle-explorer__dual-range .shuttle-explorer__range-input {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  width: 100%;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+.shuttle-explorer__dual-range .shuttle-explorer__range-input::-webkit-slider-thumb {
+  pointer-events: auto;
+}
+
+.shuttle-explorer__dual-range .shuttle-explorer__range-input::-moz-range-thumb {
+  pointer-events: auto;
+}
+
 .shuttle-explorer__label-row {
   display: inline-flex;
   align-items: center;

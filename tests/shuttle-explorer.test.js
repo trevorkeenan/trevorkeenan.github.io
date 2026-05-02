@@ -1492,6 +1492,134 @@ test('Minimum years filter excludes sites below the threshold and keeps sites at
   assert.equal(hooks.rowMatchesExplorerFilters(longRow, { minimumYears: 3 }), true);
 });
 
+test('Year range filter defaults to full inferred bounds and does not exclude sites', () => {
+  const rows = [
+    makeCatalogRow({ site_id: 'US-Early', first_year: 1997, last_year: 1999, years: '1997-1999' }),
+    makeCatalogRow({ site_id: 'US-Late', first_year: 2022, last_year: 2024, years: '2022-2024' }),
+    makeCatalogRow({ site_id: 'US-Unknown', first_year: null, last_year: null, years: '', publish_years: [], available_years: [], surfacedProducts: [] })
+  ];
+  const bounds = hooks.availableYearRangeBounds(rows);
+  const defaultRange = hooks.normalizeYearRangeFilter({}, bounds);
+
+  assert.deepEqual(bounds, { start: 1997, end: 2024, hasBounds: true });
+  assert.equal(defaultRange.isDefault, true);
+  assert.deepEqual(rows.map((row) => hooks.rowMatchesExplorerFilters(row, {
+    yearRange: defaultRange,
+    yearRangeBounds: bounds
+  })), [true, true, true]);
+});
+
+test('Year range filter uses overlap logic for intervals', () => {
+  const row = makeCatalogRow({
+    site_id: 'US-Span',
+    first_year: 2005,
+    last_year: 2012,
+    years: '2005-2012'
+  });
+  const bounds = { start: 2000, end: 2024, hasBounds: true };
+
+  assert.equal(hooks.yearRangeFilterMatches(row, { start: 2010, end: 2020 }, bounds), true);
+  assert.equal(hooks.yearRangeFilterMatches(row, { start: 2015, end: 2020 }, bounds), false);
+});
+
+test('Year range filter passes rows when any surfaced product interval overlaps', () => {
+  const row = makeCatalogRow({
+    site_id: 'US-Multi',
+    first_year: 2005,
+    last_year: 2020,
+    years: 'FLUXNET: 2005-2012 · BASE: 2018-2020',
+    surfacedProducts: [
+      { firstYear: 2005, lastYear: 2012, exactYears: [] },
+      { coverageLabel: '2018–2020', exactYears: [] }
+    ]
+  });
+  const bounds = { start: 2005, end: 2020, hasBounds: true };
+
+  assert.equal(hooks.yearRangeFilterMatches(row, { start: 2016, end: 2017 }, bounds), false);
+  assert.equal(hooks.yearRangeFilterMatches(row, { start: 2017, end: 2018 }, bounds), true);
+});
+
+test('Year range filter honors explicit year arrays instead of filling gaps', () => {
+  const row = makeCatalogRow({
+    site_id: 'US-Gap',
+    first_year: 2001,
+    last_year: 2005,
+    years: '2001, 2003, 2005',
+    publish_years: [2001, 2003, 2005],
+    available_years: [2001, 2003, 2005]
+  });
+  const bounds = { start: 2001, end: 2005, hasBounds: true };
+
+  assert.deepEqual(hooks.siteAvailableYearIntervals(row), [
+    { start: 2001, end: 2001 },
+    { start: 2003, end: 2003 },
+    { start: 2005, end: 2005 }
+  ]);
+  assert.equal(hooks.yearRangeFilterMatches(row, { start: 2002, end: 2002 }, bounds), false);
+  assert.equal(hooks.yearRangeFilterMatches(row, { start: 2003, end: 2003 }, bounds), true);
+});
+
+test('Year range filter excludes missing-year rows only after the range is narrowed', () => {
+  const missing = makeCatalogRow({
+    site_id: 'US-MissingYears',
+    first_year: null,
+    last_year: null,
+    years: '',
+    publish_years: [],
+    available_years: [],
+    surfacedProducts: []
+  });
+  const bounds = { start: 2000, end: 2020, hasBounds: true };
+
+  assert.equal(hooks.yearRangeFilterMatches(missing, { start: 2000, end: 2020 }, bounds), true);
+  assert.equal(hooks.yearRangeFilterMatches(missing, { start: 2010, end: 2020 }, bounds), false);
+});
+
+test('Year range reset normalization restores the full inferred range', () => {
+  const rows = [
+    makeCatalogRow({ site_id: 'US-Old', first_year: 1999, last_year: 2001, years: '1999-2001' }),
+    makeCatalogRow({ site_id: 'US-New', first_year: 2021, last_year: 2024, years: '2021-2024' })
+  ];
+  const bounds = hooks.availableYearRangeBounds(rows);
+  const narrowed = hooks.normalizeYearRangeFilter({ start: 2010, end: 2020 }, bounds);
+  const reset = hooks.normalizeYearRangeFilter({ start: null, end: null }, bounds);
+
+  assert.equal(narrowed.isDefault, false);
+  assert.deepEqual(reset, {
+    start: 1999,
+    end: 2024,
+    bounds,
+    hasBounds: true,
+    isDefault: true
+  });
+});
+
+test('Year range filter composes with minimum years using AND logic', () => {
+  const row = makeCatalogRow({
+    site_id: 'US-And',
+    first_year: 2001,
+    last_year: 2005,
+    years: '2001-2005'
+  });
+  const bounds = { start: 2001, end: 2024, hasBounds: true };
+
+  assert.equal(hooks.rowMatchesExplorerFilters(row, {
+    minimumYears: 5,
+    yearRange: { start: 2004, end: 2010 },
+    yearRangeBounds: bounds
+  }), true);
+  assert.equal(hooks.rowMatchesExplorerFilters(row, {
+    minimumYears: 6,
+    yearRange: { start: 2004, end: 2010 },
+    yearRangeBounds: bounds
+  }), false);
+  assert.equal(hooks.rowMatchesExplorerFilters(row, {
+    minimumYears: 5,
+    yearRange: { start: 2010, end: 2020 },
+    yearRangeBounds: bounds
+  }), false);
+});
+
 test('AmeriFlux bulk identity helper prefers explicit input values and otherwise falls back to defaults', () => {
   assert.deepEqual(
     hooks.resolveAmeriFluxBulkIdentity('', ''),
@@ -2149,12 +2277,13 @@ test('FLUXNET2015 supplemental rows infer regional networks from country while r
   assert.equal(hooks.rowMatchesExplorerFilters(bySite['XX-Leg'], { selectedSource: 'FLUXNET-2015' }), true);
 });
 
-test('Source, Availability, and minimum-years controls all exist in the explorer markup', () => {
+test('Source, Availability, minimum-years, and year-range controls all exist in the explorer markup', () => {
   const explorerJs = fs.readFileSync(path.join(__dirname, '..', 'assets', 'shuttle-explorer.js'), 'utf8');
   const sourceIndex = explorerJs.indexOf('label for=\\"shuttle-source\\">Source</label>');
   const availabilityIndex = explorerJs.indexOf('label for=\\"shuttle-availability\\">Availability</label>');
   const vegetationIndex = explorerJs.indexOf('label for=\\"shuttle-vegetation\\">Veg. type</label>');
   const minimumYearsIndex = explorerJs.indexOf('label for=\\"shuttle-minimum-years\\">Minimum years available:');
+  const yearRangeIndex = explorerJs.indexOf('label for=\\"shuttle-year-range-start\\">Year range:');
 
   assert.equal(explorerJs.includes('label for=\\"shuttle-source\\">Source</label>'), true);
   assert.equal(explorerJs.includes('data-role=\\"source-filter\\"><option value=\\"\\">All sources</option>'), true);
@@ -2162,8 +2291,12 @@ test('Source, Availability, and minimum-years controls all exist in the explorer
   assert.equal(explorerJs.includes('data-role=\\"availability-filter\\"><option value=\\"\\">All sites</option>'), true);
   assert.equal(explorerJs.includes('label for=\\"shuttle-minimum-years\\">Minimum years available:'), true);
   assert.equal(explorerJs.includes('type=\\"range\\" min=\\"1\\" max=\\"1\\" step=\\"1\\" value=\\"1\\" data-role=\\"minimum-years-filter\\"'), true);
+  assert.equal(explorerJs.includes('label for=\\"shuttle-year-range-start\\">Year range:'), true);
+  assert.equal(explorerJs.includes('data-role=\\"year-range-start-filter\\" aria-label=\\"Start year\\"'), true);
+  assert.equal(explorerJs.includes('data-role=\\"year-range-end-filter\\" aria-label=\\"End year\\"'), true);
   assert.equal(availabilityIndex < sourceIndex, true);
   assert.equal(minimumYearsIndex > vegetationIndex, true);
+  assert.equal(yearRangeIndex > minimumYearsIndex, true);
 });
 
 test('Explorer summary copy refers to sites rather than records', () => {
