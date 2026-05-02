@@ -5417,8 +5417,13 @@
       ".shuttle-explorer__range-header{display:flex;justify-content:space-between;align-items:baseline;gap:12px;}",
       ".shuttle-explorer__range-value{color:inherit;font-size:inherit;font-weight:inherit;line-height:inherit;}",
       ".shuttle-explorer__range-meta{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;}",
-      ".shuttle-explorer__dual-range{position:relative;flex:1 1 auto;min-width:140px;height:22px;}",
-      ".shuttle-explorer__dual-range .shuttle-explorer__range-input{position:absolute;left:0;right:0;top:50%;width:100%;transform:translateY(-50%);pointer-events:none;}",
+      ".shuttle-explorer__dual-range{position:relative;flex:1 1 auto;min-width:140px;height:22px;--year-range-start-pct:0%;--year-range-end-pct:100%;}",
+      ".shuttle-explorer__dual-range::before,.shuttle-explorer__dual-range::after{content:\"\";position:absolute;left:0;right:0;top:50%;height:4px;border-radius:999px;transform:translateY(-50%);pointer-events:none;}",
+      ".shuttle-explorer__dual-range::before{background:#d5dbe3;}",
+      ".shuttle-explorer__dual-range::after{left:var(--year-range-start-pct);right:calc(100% - var(--year-range-end-pct));background:#2f5374;}",
+      ".shuttle-explorer__dual-range .shuttle-explorer__range-input{position:absolute;left:0;right:0;top:50%;width:100%;transform:translateY(-50%);pointer-events:none;appearance:none;-webkit-appearance:none;background:transparent;z-index:1;}",
+      ".shuttle-explorer__dual-range .shuttle-explorer__range-input::-webkit-slider-runnable-track{height:4px;border:0;background:transparent;}",
+      ".shuttle-explorer__dual-range .shuttle-explorer__range-input::-moz-range-track,.shuttle-explorer__dual-range .shuttle-explorer__range-input::-moz-range-progress{height:4px;border:0;background:transparent;}",
       ".shuttle-explorer__dual-range .shuttle-explorer__range-input::-webkit-slider-thumb{pointer-events:auto;}",
       ".shuttle-explorer__dual-range .shuttle-explorer__range-input::-moz-range-thumb{pointer-events:auto;}",
       ".shuttle-explorer__label-row{display:inline-flex;align-items:center;gap:6px;}",
@@ -6393,10 +6398,18 @@
         start: this.state.yearRangeStart,
         end: this.state.yearRangeEnd
       }, bounds);
+    var denominator = selected.hasBounds ? Math.max(1, bounds.end - bounds.start) : 1;
+    var startPct = selected.hasBounds ? ((selected.start - bounds.start) / denominator) * 100 : 0;
+    var endPct = selected.hasBounds ? ((selected.end - bounds.start) / denominator) * 100 : 100;
 
     this.state.yearRangeBounds = bounds;
     this.state.yearRangeStart = selected.start;
     this.state.yearRangeEnd = selected.end;
+
+    if (this.bindings.yearRangeStartFilter && this.bindings.yearRangeStartFilter.parentNode) {
+      this.bindings.yearRangeStartFilter.parentNode.style.setProperty("--year-range-start-pct", startPct + "%");
+      this.bindings.yearRangeStartFilter.parentNode.style.setProperty("--year-range-end-pct", endPct + "%");
+    }
 
     [this.bindings.yearRangeStartFilter, this.bindings.yearRangeEndFilter].forEach(function (input) {
       if (!input) {
