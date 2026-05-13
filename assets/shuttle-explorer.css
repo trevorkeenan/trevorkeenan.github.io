@@ -768,6 +768,17 @@
   background: #f8fafc;
 }
 
+.shuttle-explorer__table tbody tr.shuttle-explorer__row--map-linked > td {
+  background: #f3f7fb;
+  box-shadow: inset 4px 0 0 #9b6a08;
+}
+
+.shuttle-explorer__table tbody tr.shuttle-explorer__row--map-active > td {
+  background: #eef6ff;
+  box-shadow: inset 4px 0 0 #2f5374;
+  transition: background 0.18s ease, box-shadow 0.18s ease;
+}
+
 .shuttle-explorer__table th.shuttle-explorer__coord-col,
 .shuttle-explorer__table td.shuttle-explorer__coord-col {
   width: 72px;

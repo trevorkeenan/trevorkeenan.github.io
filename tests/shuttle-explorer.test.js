@@ -447,6 +447,8 @@ test('Known-sites map copy uses the simplified popup text and visual legend labe
   assert.equal(explorerJs.includes('additional sites without shared data'), false);
   assert.equal(explorerJs.includes('shuttle-explorer__map-legend-swatch--selected'), false);
   assert.equal(explorerJs.includes('filtered accessible-data sites'), true);
+  assert.equal(explorerJs.includes('data-site-key'), true);
+  assert.equal(explorerJs.includes('handleMapMarkerLinkClick'), true);
   assert.equal(explorerJs.includes('without shared data.'), true);
   assert.equal(explorerJs.includes('Is your site missing? Email'), true);
   assert.equal(explorerJs.includes('href=\\"mailto:trevorkeenan@berkeley.edu\\"'), true);
@@ -455,6 +457,8 @@ test('Known-sites map copy uses the simplified popup text and visual legend labe
   assert.equal(explorerCss.includes('.shuttle-explorer__map-legend-swatch--filtered {'), false);
   assert.equal(explorerCss.includes('.shuttle-explorer__map-legend-swatch--accessible {'), false);
   assert.equal(explorerCss.includes('.shuttle-explorer__map-legend-swatch--unshared {'), false);
+  assert.equal(explorerCss.includes('.shuttle-explorer__table tbody tr.shuttle-explorer__row--map-linked > td'), true);
+  assert.equal(explorerCss.includes('.shuttle-explorer__table tbody tr.shuttle-explorer__row--map-active > td'), true);
 });
 
 test('Map marker and legend colors use the shared swapped category mapping', () => {
@@ -489,6 +493,64 @@ test('Map marker and legend colors use the shared swapped category mapping', () 
     fillColor: '#f3d58a',
     fillOpacity: 0.45
   });
+});
+
+test('Map/table linking uses canonical site keys and duplicate-row lookup entries', () => {
+  const fluxnetRow = makeCatalogRow({
+    site_id: 'US-Dup',
+    source_label: 'AmeriFlux-FLUXNET',
+    latitude: '38.1',
+    longitude: '-120.2',
+    _selection_key: 'US-Dup::FLUXNET'
+  });
+  const baseRow = makeCatalogRow({
+    site_id: 'US-Dup',
+    source_label: 'AmeriFlux-BASE',
+    latitude: '38.1',
+    longitude: '-120.2',
+    _selection_key: 'US-Dup::BASE'
+  });
+  const lookup = {};
+  const siteKey = hooks.mapSiteKey(fluxnetRow);
+
+  assert.equal(siteKey, 'site:US-DUP');
+  assert.equal(hooks.mapSiteKey(baseRow), siteKey);
+  hooks.addToSiteKeyLookup(lookup, siteKey, { id: 'fluxnet-row' });
+  hooks.addToSiteKeyLookup(lookup, hooks.mapSiteKey(baseRow), { id: 'base-row' });
+  assert.deepEqual(
+    hooks.siteKeyLookupEntries(lookup, siteKey).map((entry) => entry.id),
+    ['fluxnet-row', 'base-row']
+  );
+  assert.deepEqual(hooks.siteKeyLookupEntries(lookup, 'site:US-Missing'), []);
+});
+
+test('Map/table linking falls back to coordinates and handles missing known-site-only rows safely', () => {
+  const coordinateKey = hooks.mapSiteKey({
+    site_id: '',
+    latitude: '40.123',
+    longitude: '-121.456'
+  });
+  const knownOnlyKey = hooks.mapSiteKey({
+    site_id: 'US-KnownOnly',
+    latitude: 41.2,
+    longitude: -121.3,
+    known_site_only: true
+  });
+
+  assert.equal(coordinateKey, 'coord:40.123:-121.456');
+  assert.equal(knownOnlyKey, 'site:US-KNOWNONLY');
+  assert.deepEqual(hooks.siteKeyLookupEntries({}, knownOnlyKey), []);
+});
+
+test('Linked marker highlight preserves semantic colors while increasing emphasis', () => {
+  const base = hooks.filteredAccessibleMapMarkerStyle();
+  const highlighted = hooks.linkedMarkerHighlightStyle(base);
+
+  assert.equal(highlighted.color, base.color);
+  assert.equal(highlighted.fillColor, base.fillColor);
+  assert.equal(highlighted.radius > base.radius, true);
+  assert.equal(highlighted.weight > base.weight, true);
+  assert.equal(highlighted.fillOpacity > base.fillOpacity, true);
 });
 
 test('Known-sites helpers export availability labels and marker colors', () => {

@@ -18,6 +18,7 @@
   var LEAFLET_WORLD_TILE_SIZE = 256;
   var DEFAULT_PAGE_SIZE = 10;
   var DEFAULT_MINIMUM_YEARS_FILTER = 1;
+  var MAP_LINKED_ROW_ACTIVE_MS = 3200;
   var MIN_PLAUSIBLE_DATA_YEAR = 1900;
   var MAX_FUTURE_DATA_YEAR_BUFFER = 5;
   var MAX_PAGE_BUTTONS = 7;
@@ -4768,6 +4769,20 @@
     };
   }
 
+  function linkedMarkerHighlightStyle(baseStyle) {
+    var base = baseStyle || {};
+    var radius = parseFloat(base.radius);
+    var weight = parseFloat(base.weight);
+    var fillOpacity = parseFloat(base.fillOpacity);
+    return {
+      radius: (Number.isFinite(radius) ? radius : 4.5) + 2,
+      weight: Math.max(Number.isFinite(weight) ? weight + 1.8 : 3, 3),
+      color: base.color,
+      fillColor: base.fillColor,
+      fillOpacity: Math.min((Number.isFinite(fillOpacity) ? fillOpacity : 0.45) + 0.22, 0.82)
+    };
+  }
+
   function knownSiteMapMarkerStyle(row) {
     var knownSiteOnly = !!(row && row.known_site_only);
     var colors = mapCategoryColors(knownSiteOnly ? "withoutSharedData" : "accessibleData");
@@ -4793,6 +4808,21 @@
       return "coord:" + latitude + ":" + longitude;
     }
     return "row:" + String(row && row._selection_key || row && row._index || index || "");
+  }
+
+  function addToSiteKeyLookup(lookup, siteKey, value) {
+    if (!lookup || !siteKey || value == null) {
+      return [];
+    }
+    if (!lookup[siteKey]) {
+      lookup[siteKey] = [];
+    }
+    lookup[siteKey].push(value);
+    return lookup[siteKey];
+  }
+
+  function siteKeyLookupEntries(lookup, siteKey) {
+    return lookup && siteKey && Array.isArray(lookup[siteKey]) ? lookup[siteKey] : [];
   }
 
   function mapRowWithCoordinates(row) {
@@ -5640,6 +5670,8 @@
       ".shuttle-explorer__table{width:100%;border-collapse:collapse;min-width:880px;font-size:.9em;}",
       ".shuttle-explorer__table th,.shuttle-explorer__table td{padding:8px 10px;border-bottom:1px solid #edf1f5;vertical-align:top;text-align:left;}",
       ".shuttle-explorer__table thead th{position:sticky;top:0;background:#f8fafc;z-index:1;}",
+      ".shuttle-explorer__table tbody tr.shuttle-explorer__row--map-linked>td{background:#f3f7fb;box-shadow:inset 4px 0 0 #9b6a08;}",
+      ".shuttle-explorer__table tbody tr.shuttle-explorer__row--map-active>td{background:#eef6ff;box-shadow:inset 4px 0 0 #2f5374;transition:background .18s ease,box-shadow .18s ease;}",
       ".shuttle-explorer__table th.shuttle-explorer__coord-col,.shuttle-explorer__table td.shuttle-explorer__coord-col{width:72px;min-width:72px;white-space:nowrap;}",
       ".shuttle-explorer__table td.shuttle-explorer__coord-col{font-variant-numeric:tabular-nums;}",
       ".shuttle-explorer__coord-col .shuttle-explorer__sort{white-space:nowrap;}",
@@ -5993,6 +6025,14 @@
       knownSiteOverlayEnabled: true,
       knownSiteMapWarning: ""
     };
+    this.tableRowsBySiteKey = {};
+    this.mapMarkerBySiteKey = {};
+    this.tableHoveredSiteKey = "";
+    this.mapHoveredSiteKey = "";
+    this.highlightedMapMarkerSiteKey = "";
+    this.highlightedMapMarker = null;
+    this.activeLinkedRowSiteKey = "";
+    this._linkedRowActiveTimer = null;
 
     createLayout(root);
     this.bindings = this.getBindings();
@@ -6086,6 +6126,160 @@
     }
     this.bindings.vegetationInfoWrap.classList.toggle("is-open", !!isOpen);
     this.bindings.vegetationInfoToggle.setAttribute("aria-expanded", isOpen ? "true" : "false");
+  };
+
+  Explorer.prototype.findLinkedTableRow = function (target) {
+    var tbody = this.bindings.tbody;
+    while (target && target !== tbody) {
+      if (target.tagName === "TR" && target.getAttribute("data-site-key")) {
+        return target;
+      }
+      target = target.parentNode;
+    }
+    return null;
+  };
+
+  Explorer.prototype.registerLinkedTableRow = function (row, tr) {
+    var siteKey = mapSiteKey(row);
+    if (!siteKey || !tr) {
+      return "";
+    }
+    tr.setAttribute("data-site-key", siteKey);
+    addToSiteKeyLookup(this.tableRowsBySiteKey, siteKey, tr);
+    this.applyLinkedRowStateToElement(tr, siteKey);
+    return siteKey;
+  };
+
+  Explorer.prototype.applyLinkedRowStateToElement = function (rowEl, siteKey) {
+    if (!rowEl || !rowEl.classList) {
+      return;
+    }
+    rowEl.classList.toggle("shuttle-explorer__row--map-linked", !!siteKey && this.mapHoveredSiteKey === siteKey);
+    rowEl.classList.toggle("shuttle-explorer__row--map-active", !!siteKey && this.activeLinkedRowSiteKey === siteKey);
+  };
+
+  Explorer.prototype.setLinkedRowsClass = function (siteKey, className, enabled) {
+    siteKeyLookupEntries(this.tableRowsBySiteKey, siteKey).forEach(function (rowEl) {
+      if (rowEl && rowEl.classList) {
+        rowEl.classList.toggle(className, !!enabled);
+      }
+    });
+  };
+
+  Explorer.prototype.clearMapMarkerHighlight = function () {
+    var marker = this.highlightedMapMarker;
+    if (marker && marker.setStyle && marker._shuttleExplorerBaseStyle) {
+      marker.setStyle(marker._shuttleExplorerBaseStyle);
+    }
+    this.highlightedMapMarker = null;
+    this.highlightedMapMarkerSiteKey = "";
+  };
+
+  Explorer.prototype.setMapMarkerHighlight = function (siteKey) {
+    var marker;
+    if (siteKey === this.highlightedMapMarkerSiteKey) {
+      return;
+    }
+    this.clearMapMarkerHighlight();
+    marker = this.mapMarkerBySiteKey && siteKey ? this.mapMarkerBySiteKey[siteKey] : null;
+    if (!marker || !marker.setStyle) {
+      return;
+    }
+    marker.setStyle(linkedMarkerHighlightStyle(marker._shuttleExplorerBaseStyle || marker.options || {}));
+    if (marker.bringToFront) {
+      marker.bringToFront();
+    }
+    this.highlightedMapMarker = marker;
+    this.highlightedMapMarkerSiteKey = siteKey;
+  };
+
+  Explorer.prototype.updateMapMarkerHighlight = function () {
+    this.setMapMarkerHighlight(this.mapHoveredSiteKey || this.tableHoveredSiteKey || "");
+  };
+
+  Explorer.prototype.handleTableRowMapLinkEnter = function (rowEl) {
+    var siteKey = rowEl ? String(rowEl.getAttribute("data-site-key") || "") : "";
+    if (!siteKey) {
+      return;
+    }
+    this.tableHoveredSiteKey = siteKey;
+    this.updateMapMarkerHighlight();
+  };
+
+  Explorer.prototype.handleTableRowMapLinkLeave = function (rowEl) {
+    var siteKey = rowEl ? String(rowEl.getAttribute("data-site-key") || "") : "";
+    if (siteKey && this.tableHoveredSiteKey === siteKey) {
+      this.tableHoveredSiteKey = "";
+      this.updateMapMarkerHighlight();
+    }
+  };
+
+  Explorer.prototype.handleMapMarkerLinkEnter = function (siteKey) {
+    if (!siteKey) {
+      return;
+    }
+    if (this.mapHoveredSiteKey && this.mapHoveredSiteKey !== siteKey) {
+      this.setLinkedRowsClass(this.mapHoveredSiteKey, "shuttle-explorer__row--map-linked", false);
+    }
+    this.mapHoveredSiteKey = siteKey;
+    this.setLinkedRowsClass(siteKey, "shuttle-explorer__row--map-linked", true);
+    this.updateMapMarkerHighlight();
+  };
+
+  Explorer.prototype.handleMapMarkerLinkLeave = function (siteKey) {
+    if (!siteKey || this.mapHoveredSiteKey !== siteKey) {
+      return;
+    }
+    this.setLinkedRowsClass(siteKey, "shuttle-explorer__row--map-linked", false);
+    this.mapHoveredSiteKey = "";
+    this.updateMapMarkerHighlight();
+  };
+
+  Explorer.prototype.activateLinkedTableRows = function (siteKey, shouldScroll) {
+    var rows = siteKeyLookupEntries(this.tableRowsBySiteKey, siteKey);
+    var timer = typeof window !== "undefined" && window.setTimeout ? window : globalThis;
+    if (!rows.length) {
+      return false;
+    }
+    if (this.activeLinkedRowSiteKey && this.activeLinkedRowSiteKey !== siteKey) {
+      this.setLinkedRowsClass(this.activeLinkedRowSiteKey, "shuttle-explorer__row--map-active", false);
+    }
+    this.activeLinkedRowSiteKey = siteKey;
+    this.setLinkedRowsClass(siteKey, "shuttle-explorer__row--map-active", true);
+    if (shouldScroll && rows[0] && rows[0].scrollIntoView) {
+      rows[0].scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+    if (this._linkedRowActiveTimer) {
+      timer.clearTimeout(this._linkedRowActiveTimer);
+    }
+    this._linkedRowActiveTimer = timer.setTimeout(function () {
+      this.setLinkedRowsClass(siteKey, "shuttle-explorer__row--map-active", false);
+      if (this.activeLinkedRowSiteKey === siteKey) {
+        this.activeLinkedRowSiteKey = "";
+      }
+      this._linkedRowActiveTimer = null;
+    }.bind(this), MAP_LINKED_ROW_ACTIVE_MS);
+    return true;
+  };
+
+  Explorer.prototype.handleMapMarkerLinkClick = function (siteKey) {
+    this.activateLinkedTableRows(siteKey, true);
+  };
+
+  Explorer.prototype.bindLinkedMapMarker = function (marker, siteKey) {
+    var self = this;
+    if (!marker || !siteKey || !marker.on) {
+      return;
+    }
+    marker.on("mouseover", function () {
+      self.handleMapMarkerLinkEnter(siteKey);
+    });
+    marker.on("mouseout", function () {
+      self.handleMapMarkerLinkLeave(siteKey);
+    });
+    marker.on("click", function () {
+      self.handleMapMarkerLinkClick(siteKey);
+    });
   };
 
   Explorer.prototype.bindEvents = function () {
@@ -6467,6 +6661,22 @@
     }
 
     if (b.tbody) {
+      b.tbody.addEventListener("mouseover", function (event) {
+        var row = self.findLinkedTableRow(event.target);
+        if (!row || row.contains(event.relatedTarget)) {
+          return;
+        }
+        self.handleTableRowMapLinkEnter(row);
+      });
+
+      b.tbody.addEventListener("mouseout", function (event) {
+        var row = self.findLinkedTableRow(event.target);
+        if (!row || row.contains(event.relatedTarget)) {
+          return;
+        }
+        self.handleTableRowMapLinkLeave(row);
+      });
+
       b.tbody.addEventListener("change", function (event) {
         var target = event.target;
         if (!target || target.tagName !== "INPUT" || target.type !== "checkbox" || target.getAttribute("data-role") !== "row-select") {
@@ -7003,12 +7213,24 @@
       return;
     }
     L = window.L;
+    this.clearMapMarkerHighlight();
+    this.mapMarkerBySiteKey = {};
+    this.tableHoveredSiteKey = "";
+    this.mapHoveredSiteKey = "";
     this.mapMarkerLayer.clearLayers();
     (rows || []).forEach(function (row) {
-      var marker = L.circleMarker([row.latitude, row.longitude], filteredAccessibleMapMarkerStyle());
+      var siteKey = mapSiteKey(row);
+      var baseStyle = filteredAccessibleMapMarkerStyle();
+      var marker = L.circleMarker([row.latitude, row.longitude], baseStyle);
+      marker._shuttleExplorerBaseStyle = Object.assign({}, baseStyle);
+      marker._shuttleExplorerSiteKey = siteKey;
+      if (siteKey) {
+        self.mapMarkerBySiteKey[siteKey] = marker;
+      }
       marker.bindPopup(self.buildMapPopupHtml(row, { showCategory: false }), {
         autoPan: true
       });
+      self.bindLinkedMapMarker(marker, siteKey);
       marker.on("click", function () {
         if (self.map) {
           self.map.panTo(marker.getLatLng(), {
@@ -7029,10 +7251,15 @@
     L = window.L;
     this.mapKnownSiteLayer.clearLayers();
     buildKnownSiteMapDisplayState(rows).rows.forEach(function (row) {
-      var marker = L.circleMarker([row.latitude, row.longitude], knownSiteMapMarkerStyle(row));
+      var siteKey = mapSiteKey(row);
+      var baseStyle = knownSiteMapMarkerStyle(row);
+      var marker = L.circleMarker([row.latitude, row.longitude], baseStyle);
+      marker._shuttleExplorerBaseStyle = Object.assign({}, baseStyle);
+      marker._shuttleExplorerSiteKey = siteKey;
       marker.bindPopup(self.buildMapPopupHtml(row, { showCategory: true }), {
         autoPan: true
       });
+      self.bindLinkedMapMarker(marker, siteKey);
       marker.on("click", function () {
         if (self.map) {
           self.map.panTo(marker.getLatLng(), {
@@ -8515,6 +8742,7 @@
     var canAmeriFluxDownload = this.ameriFluxSource.canDownload();
 
     tbody.innerHTML = "";
+    this.tableRowsBySiteKey = {};
 
     pageRows.forEach(function (row) {
       var tr = document.createElement("tr");
@@ -8534,6 +8762,7 @@
           " aria-label=\"Select " + escapeHtml(row.site_id) + "\" /></td>",
         cellsHtml
       ].join("");
+      this.registerLinkedTableRow(row, tr);
 
       var downloadTd = document.createElement("td");
       downloadTd.className = "shuttle-explorer__download-cell";
@@ -8593,7 +8822,7 @@
       tr.appendChild(downloadTd);
 
       tbody.appendChild(tr);
-    });
+    }, this);
   };
 
   Explorer.prototype.renderPagination = function () {
@@ -8708,6 +8937,7 @@
       this.renderRows();
     } else if (b.tbody) {
       b.tbody.innerHTML = "";
+      this.tableRowsBySiteKey = {};
     }
     this.renderPagination();
     this.renderEmptyState();
@@ -9074,7 +9304,11 @@
     mapCategoryColors: mapCategoryColors,
     mapLegendSwatchStyle: mapLegendSwatchStyle,
     filteredAccessibleMapMarkerStyle: filteredAccessibleMapMarkerStyle,
+    linkedMarkerHighlightStyle: linkedMarkerHighlightStyle,
     knownSiteMapMarkerStyle: knownSiteMapMarkerStyle,
+    mapSiteKey: mapSiteKey,
+    addToSiteKeyLookup: addToSiteKeyLookup,
+    siteKeyLookupEntries: siteKeyLookupEntries,
     buildKnownSitesExportCsv: buildKnownSitesExportCsv,
     buildKnownSiteMapDisplayState: buildKnownSiteMapDisplayState,
     buildMapDisplayState: buildMapDisplayState,
