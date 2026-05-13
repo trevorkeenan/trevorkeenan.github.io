@@ -3716,9 +3716,13 @@ test('Data Notes box appears between the map and attribution sections with share
   const explorerJs = fs.readFileSync(path.join(__dirname, '..', 'assets', 'shuttle-explorer.js'), 'utf8');
   const explorerCss = fs.readFileSync(path.join(__dirname, '..', 'assets', 'shuttle-explorer.css'), 'utf8');
   const mapIndex = explorerJs.indexOf('data-role=\\"map-panel\\"');
+  const selectionActionsIndex = explorerJs.indexOf('data-role=\\"selection-actions\\"');
+  const tableIndex = explorerJs.indexOf('data-role=\\"table-wrap\\"');
   const notesIndex = explorerJs.indexOf('<h3>Data Notes</h3>');
   const attributionIndex = explorerJs.indexOf('<h3>Data Use and Attribution</h3>');
 
+  assert.equal(mapIndex < selectionActionsIndex, true);
+  assert.equal(selectionActionsIndex < tableIndex, true);
   assert.equal(notesIndex > mapIndex, true);
   assert.equal(attributionIndex > notesIndex, true);
   assert.equal(explorerJs.includes('These notes highlight how the explorer labels datasets and how the bulk tools behave.'), true);
