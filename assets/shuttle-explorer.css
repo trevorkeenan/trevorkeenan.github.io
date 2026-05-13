@@ -651,21 +651,6 @@
   flex: 0 0 auto;
 }
 
-.shuttle-explorer__map-legend-swatch--filtered {
-  border: 1.4px solid #2f5374;
-  background: #5f8bb3;
-}
-
-.shuttle-explorer__map-legend-swatch--accessible {
-  border: 1.4px solid #9b6a08;
-  background: #f3d58a;
-}
-
-.shuttle-explorer__map-legend-swatch--unshared {
-  border: 1.4px solid #6d8fb2;
-  background: #d8e6f4;
-}
-
 .shuttle-explorer__map-shell {
   position: relative;
   min-height: 340px;

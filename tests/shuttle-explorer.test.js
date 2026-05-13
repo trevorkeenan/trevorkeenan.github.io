@@ -452,12 +452,46 @@ test('Known-sites map copy uses the simplified popup text and visual legend labe
   assert.equal(explorerJs.includes('href=\\"mailto:trevorkeenan@berkeley.edu\\"'), true);
   assert.equal(explorerCss.includes('.shuttle-explorer__map-actions {'), true);
   assert.equal(explorerCss.includes('.shuttle-explorer__map-legend-swatch--selected {'), false);
-  assert.equal(explorerCss.includes('.shuttle-explorer__map-legend-swatch--filtered {'), true);
-  assert.equal(explorerCss.includes('.shuttle-explorer__map-legend-swatch--accessible {'), true);
-  assert.equal(explorerCss.includes('.shuttle-explorer__map-legend-swatch--unshared {'), true);
+  assert.equal(explorerCss.includes('.shuttle-explorer__map-legend-swatch--filtered {'), false);
+  assert.equal(explorerCss.includes('.shuttle-explorer__map-legend-swatch--accessible {'), false);
+  assert.equal(explorerCss.includes('.shuttle-explorer__map-legend-swatch--unshared {'), false);
 });
 
-test('Known-sites helpers export availability labels and swapped marker colors', () => {
+test('Map marker and legend colors use the shared swapped category mapping', () => {
+  assert.deepEqual(hooks.mapCategoryColors('filteredAccessible'), {
+    color: '#9b6a08',
+    fillColor: '#f3d58a'
+  });
+  assert.deepEqual(hooks.mapCategoryColors('accessibleData'), {
+    color: '#2f5374',
+    fillColor: '#5f8bb3'
+  });
+  assert.deepEqual(hooks.mapCategoryColors('withoutSharedData'), {
+    color: '#6d8fb2',
+    fillColor: '#d8e6f4'
+  });
+  assert.equal(
+    hooks.mapLegendSwatchStyle('filteredAccessible'),
+    'border:1.4px solid #9b6a08;background:#f3d58a;'
+  );
+  assert.equal(
+    hooks.mapLegendSwatchStyle('accessibleData'),
+    'border:1.4px solid #2f5374;background:#5f8bb3;'
+  );
+  assert.equal(
+    hooks.mapLegendSwatchStyle('withoutSharedData'),
+    'border:1.4px solid #6d8fb2;background:#d8e6f4;'
+  );
+  assert.deepEqual(hooks.filteredAccessibleMapMarkerStyle(), {
+    radius: 4.5,
+    weight: 1.1,
+    color: '#9b6a08',
+    fillColor: '#f3d58a',
+    fillOpacity: 0.45
+  });
+});
+
+test('Known-sites helpers export availability labels and marker colors', () => {
   const accessibleRow = {
     site_id: 'US-Acc',
     site_name: 'Accessible Site',
@@ -484,8 +518,8 @@ test('Known-sites helpers export availability labels and swapped marker colors',
     {
       radius: 4,
       weight: 1.1,
-      color: '#9b6a08',
-      fillColor: '#f3d58a',
+      color: '#2f5374',
+      fillColor: '#5f8bb3',
       fillOpacity: 0.45
     }
   );

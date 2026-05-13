@@ -25,6 +25,20 @@
   var STYLE_ID = "shuttle-explorer-inline-styles";
   var SNAPSHOT_CACHE_SCHEMA_VERSION = 9;
   var SNAPSHOT_CACHE_STORAGE_PREFIX = "shuttle-explorer:snapshot-cache:v9";
+  var MAP_CATEGORY_COLORS = {
+    filteredAccessible: {
+      color: "#9b6a08",
+      fillColor: "#f3d58a"
+    },
+    accessibleData: {
+      color: "#2f5374",
+      fillColor: "#5f8bb3"
+    },
+    withoutSharedData: {
+      color: "#6d8fb2",
+      fillColor: "#d8e6f4"
+    }
+  };
   var AMERIFLUX_FLUXNET_AVAILABILITY_URL = "https://amfcdn.lbl.gov/api/v2/data_availability/AmeriFlux/FLUXNET/CCBY4.0";
   var AMERIFLUX_BASE_AVAILABILITY_URL = "https://amfcdn.lbl.gov/api/v2/data_availability/AmeriFlux/BASE-BADM/CCBY4.0";
   var FLUXNET2015_AVAILABILITY_URL = "https://amfcdn.lbl.gov/api/v2/data_availability/FLUXNET/FLUXNET2015/CCBY4.0";
@@ -4730,13 +4744,38 @@
     return row && row.known_site_only ? "no public data" : "accessible data";
   }
 
+  function mapCategoryColors(category) {
+    var colors = MAP_CATEGORY_COLORS[category] || MAP_CATEGORY_COLORS.withoutSharedData;
+    return {
+      color: colors.color,
+      fillColor: colors.fillColor
+    };
+  }
+
+  function mapLegendSwatchStyle(category) {
+    var colors = mapCategoryColors(category);
+    return "border:1.4px solid " + colors.color + ";background:" + colors.fillColor + ";";
+  }
+
+  function filteredAccessibleMapMarkerStyle() {
+    var colors = mapCategoryColors("filteredAccessible");
+    return {
+      radius: 4.5,
+      weight: 1.1,
+      color: colors.color,
+      fillColor: colors.fillColor,
+      fillOpacity: 0.45
+    };
+  }
+
   function knownSiteMapMarkerStyle(row) {
     var knownSiteOnly = !!(row && row.known_site_only);
+    var colors = mapCategoryColors(knownSiteOnly ? "withoutSharedData" : "accessibleData");
     return {
       radius: knownSiteOnly ? 4.5 : 4,
       weight: knownSiteOnly ? 1.4 : 1.1,
-      color: knownSiteOnly ? "#6d8fb2" : "#9b6a08",
-      fillColor: knownSiteOnly ? "#d8e6f4" : "#f3d58a",
+      color: colors.color,
+      fillColor: colors.fillColor,
       fillOpacity: knownSiteOnly ? 0.6 : 0.45
     };
   }
@@ -5314,9 +5353,9 @@
   function buildKnownSitesLegendHtml() {
     return [
       "<div class=\"shuttle-explorer__tiny shuttle-explorer__map-legend\" data-role=\"known-sites-legend\" aria-label=\"Map legend\">",
-      "  <span class=\"shuttle-explorer__map-legend-item\"><span class=\"shuttle-explorer__map-legend-swatch shuttle-explorer__map-legend-swatch--filtered\" aria-hidden=\"true\"></span><span>filtered accessible-data sites</span></span>",
-      "  <span class=\"shuttle-explorer__map-legend-item\"><span class=\"shuttle-explorer__map-legend-swatch shuttle-explorer__map-legend-swatch--accessible\" aria-hidden=\"true\"></span><span>sites with accessible data</span></span>",
-      "  <span class=\"shuttle-explorer__map-legend-item\"><span class=\"shuttle-explorer__map-legend-swatch shuttle-explorer__map-legend-swatch--unshared\" aria-hidden=\"true\"></span><span>sites without shared data</span></span>",
+      "  <span class=\"shuttle-explorer__map-legend-item\"><span class=\"shuttle-explorer__map-legend-swatch shuttle-explorer__map-legend-swatch--filtered\" style=\"" + mapLegendSwatchStyle("filteredAccessible") + "\" aria-hidden=\"true\"></span><span>filtered accessible-data sites</span></span>",
+      "  <span class=\"shuttle-explorer__map-legend-item\"><span class=\"shuttle-explorer__map-legend-swatch shuttle-explorer__map-legend-swatch--accessible\" style=\"" + mapLegendSwatchStyle("accessibleData") + "\" aria-hidden=\"true\"></span><span>sites with accessible data</span></span>",
+      "  <span class=\"shuttle-explorer__map-legend-item\"><span class=\"shuttle-explorer__map-legend-swatch shuttle-explorer__map-legend-swatch--unshared\" style=\"" + mapLegendSwatchStyle("withoutSharedData") + "\" aria-hidden=\"true\"></span><span>sites without shared data</span></span>",
       "</div>"
     ].join("");
   }
@@ -5646,9 +5685,6 @@
       ".shuttle-explorer__map-legend{display:flex;flex-wrap:wrap;gap:8px 14px;margin:0;max-width:680px;}",
       ".shuttle-explorer__map-legend-item{display:inline-flex;align-items:center;gap:6px;line-height:1.3;}",
       ".shuttle-explorer__map-legend-swatch{display:inline-block;width:10px;height:10px;border-radius:999px;flex:0 0 auto;}",
-      ".shuttle-explorer__map-legend-swatch--filtered{border:1.4px solid #2f5374;background:#5f8bb3;}",
-      ".shuttle-explorer__map-legend-swatch--accessible{border:1.4px solid #9b6a08;background:#f3d58a;}",
-      ".shuttle-explorer__map-legend-swatch--unshared{border:1.4px solid #6d8fb2;background:#d8e6f4;}",
       "@media (max-width: 860px){.shuttle-explorer__controls{grid-template-columns:1fr;}.shuttle-explorer__row{flex-direction:column;align-items:flex-start;}.shuttle-explorer__bulk-identity-grid{grid-template-columns:1fr;}.shuttle-explorer__map-header{flex-direction:column;align-items:flex-start;}.shuttle-explorer__map-actions{align-items:flex-start;}}"
     ].join("");
     document.head.appendChild(style);
@@ -6969,13 +7005,7 @@
     L = window.L;
     this.mapMarkerLayer.clearLayers();
     (rows || []).forEach(function (row) {
-      var marker = L.circleMarker([row.latitude, row.longitude], {
-        radius: 4.5,
-        weight: 1.1,
-        color: "#2f5374",
-        fillColor: "#5f8bb3",
-        fillOpacity: 0.45
-      });
+      var marker = L.circleMarker([row.latitude, row.longitude], filteredAccessibleMapMarkerStyle());
       marker.bindPopup(self.buildMapPopupHtml(row, { showCategory: false }), {
         autoPan: true
       });
@@ -9041,6 +9071,9 @@
     normalizeRows: normalizeRows,
     normalizeKnownSiteMapRows: normalizeKnownSiteMapRows,
     knownSiteDataAvailabilityLabel: knownSiteDataAvailabilityLabel,
+    mapCategoryColors: mapCategoryColors,
+    mapLegendSwatchStyle: mapLegendSwatchStyle,
+    filteredAccessibleMapMarkerStyle: filteredAccessibleMapMarkerStyle,
     knownSiteMapMarkerStyle: knownSiteMapMarkerStyle,
     buildKnownSitesExportCsv: buildKnownSitesExportCsv,
     buildKnownSiteMapDisplayState: buildKnownSiteMapDisplayState,
