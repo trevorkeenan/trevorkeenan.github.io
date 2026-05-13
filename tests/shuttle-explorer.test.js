@@ -508,6 +508,67 @@ test('Known-sites helpers export availability labels and swapped marker colors',
   );
 });
 
+test('Map display state is driven by filtered rows, not by selected rows', () => {
+  const filteredRows = [
+    makeCatalogRow({
+      site_id: 'US-MapA',
+      latitude: '38.1',
+      longitude: '-120.2',
+      _selection_key: 'US-MapA::ICOS'
+    }),
+    makeCatalogRow({
+      site_id: 'US-MapB',
+      latitude: '39.2',
+      longitude: '-121.3',
+      _selection_key: 'US-MapB::ICOS'
+    })
+  ];
+
+  const unselectedState = hooks.buildMapDisplayState(filteredRows, {});
+  const selectedState = hooks.buildMapDisplayState(filteredRows, {
+    'US-MapB::ICOS': true,
+    'US-Outside::ICOS': true
+  });
+
+  assert.equal(unselectedState.filteredRows.length, 2);
+  assert.equal(unselectedState.mappableRows.length, 2);
+  assert.equal(unselectedState.selectedRows.length, 0);
+  assert.equal(unselectedState.mappableRows.some((row) => row.site_id === 'US-MapA'), true);
+  assert.equal(selectedState.filteredRows.length, 2);
+  assert.equal(selectedState.mappableRows.length, 2);
+  assert.deepEqual(selectedState.selectedRows.map((row) => row.site_id), ['US-MapB']);
+  assert.equal(selectedState.mappableRows.find((row) => row.site_id === 'US-MapB').is_map_selected, true);
+  assert.equal(selectedState.mappableRows.find((row) => row.site_id === 'US-MapA').is_map_selected, false);
+  assert.notEqual(selectedState.signature, unselectedState.signature);
+});
+
+test('Map display state follows filtered-result changes before selection buttons are used', () => {
+  const rows = [
+    makeCatalogRow({
+      site_id: 'US-MapA',
+      site_name: 'Alpha Site',
+      latitude: '38.1',
+      longitude: '-120.2',
+      _selection_key: 'US-MapA::ICOS',
+      search_text: 'us-mapa alpha site'
+    }),
+    makeCatalogRow({
+      site_id: 'US-MapB',
+      site_name: 'Beta Site',
+      latitude: '39.2',
+      longitude: '-121.3',
+      _selection_key: 'US-MapB::ICOS',
+      search_text: 'us-mapb beta site'
+    })
+  ];
+  const filteredRows = rows.filter((row) => hooks.rowMatchesExplorerFilters(row, { search: 'beta' }));
+  const mapState = hooks.buildMapDisplayState(filteredRows, {});
+
+  assert.deepEqual(filteredRows.map((row) => row.site_id), ['US-MapB']);
+  assert.deepEqual(mapState.mappableRows.map((row) => row.site_id), ['US-MapB']);
+  assert.equal(mapState.selectedRows.length, 0);
+});
+
 test('Merge precedence is Shuttle > ICOS > AmeriFlux > FLUXNET2015 with no duplicates', () => {
   const shuttleRows = [
     {

@@ -6643,13 +6643,17 @@
     this.render();
   };
 
-  Explorer.prototype.getMapSelectionState = function () {
-    var selectedRows = this.getSelectedRows();
+  function buildMapDisplayState(filteredRows, selectedKeys) {
+    var rows = Array.isArray(filteredRows) ? filteredRows : [];
+    var selected = selectedKeys && typeof selectedKeys === "object" ? selectedKeys : {};
+    var selectedRows = rows.filter(function (row) {
+      return !!(row && selected[row._selection_key]);
+    });
     var mappableRows = [];
     var missingCoordinates = 0;
     var signatureParts = [];
 
-    selectedRows.forEach(function (row) {
+    rows.forEach(function (row) {
       var latitude = parseCoordinate(row && row.latitude, -90, 90);
       var longitude = parseCoordinate(row && row.longitude, -180, 180);
       if (latitude == null || longitude == null) {
@@ -6659,22 +6663,29 @@
       row.latitude = latitude;
       row.longitude = longitude;
       row.has_coordinates = true;
+      row.is_map_selected = !!selected[row._selection_key];
       mappableRows.push(row);
-      signatureParts.push(String(row._selection_key || "") + ":" + latitude + ":" + longitude);
+      signatureParts.push(String(row._selection_key || "") + ":" + latitude + ":" + longitude + ":" + (row.is_map_selected ? "1" : "0"));
     });
 
     signatureParts.sort();
 
     return {
+      filteredRows: rows,
       selectedRows: selectedRows,
       mappableRows: mappableRows,
       missingCoordinates: missingCoordinates,
       signature: [
-        String(selectedRows.length),
+        String(rows.length),
         String(missingCoordinates),
+        String(selectedRows.length),
         signatureParts.join("|")
       ].join("::")
     };
+  }
+
+  Explorer.prototype.getMapDisplayState = function () {
+    return buildMapDisplayState(this.state.filteredRows, this.state.selectedKeys);
   };
 
   Explorer.prototype.ensureMap = function () {
@@ -6820,7 +6831,7 @@
     return lines.join("");
   };
 
-  Explorer.prototype.renderSelectedMapMarkers = function (rows) {
+  Explorer.prototype.renderFilteredMapMarkers = function (rows) {
     var self = this;
     var L;
     if (!this.ensureMap() || !this.mapMarkerLayer) {
@@ -6829,12 +6840,13 @@
     L = window.L;
     this.mapMarkerLayer.clearLayers();
     (rows || []).forEach(function (row) {
+      var isSelected = !!(row && row.is_map_selected);
       var marker = L.circleMarker([row.latitude, row.longitude], {
-        radius: 6,
-        weight: 1.5,
+        radius: isSelected ? 6 : 4.5,
+        weight: isSelected ? 1.5 : 1.1,
         color: "#2f5374",
         fillColor: "#5f8bb3",
-        fillOpacity: 0.9
+        fillOpacity: isSelected ? 0.9 : 0.45
       });
       marker.bindPopup(self.buildMapPopupHtml(row, { showCategory: false }), {
         autoPan: true
@@ -6888,17 +6900,18 @@
     var knownSiteRows;
     var knownSiteOnlyCount = 0;
     var knownAccessibleCount = 0;
-    var selectionState;
+    var displayState;
     var mapChanged = false;
     var mapSignature;
     var summary;
+    var backgroundSummary = "";
     var summaryHtml = "";
     var message = "";
     if (!b.mapPanel) {
       return;
     }
 
-    selectionState = this.getMapSelectionState();
+    displayState = this.getMapDisplayState();
     knownSiteRows = this.state.knownSiteOverlayEnabled
       ? (Array.isArray(this.state.knownSiteMapRows) ? this.state.knownSiteMapRows : [])
       : [];
@@ -6913,27 +6926,36 @@
     if (b.knownSitesToggle) {
       b.knownSitesToggle.checked = !!this.state.knownSiteOverlayEnabled;
     }
+    if (this.state.knownSiteOverlayEnabled && knownSiteRows.length) {
+      backgroundSummary = "Background layer: " + knownSiteRows.length + " known flux " + (knownSiteRows.length === 1 ? "site" : "sites") +
+        ", including " + knownAccessibleCount + " site" + (knownAccessibleCount === 1 ? "" : "s") +
+        " with accessible data and " + knownSiteOnlyCount + " other " + (knownSiteOnlyCount === 1 ? "site" : "sites") +
+        " without shared data.";
+    }
     if (b.mapSummary) {
-      if (this.state.knownSiteOverlayEnabled && knownSiteRows.length && !selectionState.selectedRows.length) {
-        summary = "Showing " + knownSiteRows.length + " known flux " + (knownSiteRows.length === 1 ? "site" : "sites") +
-          ", including " + knownAccessibleCount + " site" + (knownAccessibleCount === 1 ? "" : "s") +
-          " with accessible data and " + knownSiteOnlyCount + " other " + (knownSiteOnlyCount === 1 ? "site" : "sites") +
-          " without shared data.";
-        summaryHtml = escapeHtml(summary) + "<br><span class=\"shuttle-explorer__muted\">Is your site missing? Email <a href=\"mailto:trevorkeenan@berkeley.edu\">trevorkeenan@berkeley.edu</a> to be added.</span>";
-      } else if (!selectionState.selectedRows.length) {
-        summary = "Select one or more accessible-data sites to highlight them on the map.";
-      } else if (!selectionState.mappableRows.length) {
-        summary = selectionState.selectedRows.length + " selected " + (selectionState.selectedRows.length === 1 ? "site" : "sites") + ", but coordinates are unavailable in the current snapshot.";
-        if (this.state.knownSiteOverlayEnabled && knownSiteRows.length) {
-          summary += " The known-sites background layer remains available.";
+      if (!displayState.filteredRows.length) {
+        summary = "No filtered accessible-data sites to show on the map.";
+        if (backgroundSummary) {
+          summary += " " + backgroundSummary;
+        }
+      } else if (!displayState.mappableRows.length) {
+        summary = displayState.filteredRows.length + " filtered " + (displayState.filteredRows.length === 1 ? "site is" : "sites are") + " missing map coordinates.";
+        if (backgroundSummary) {
+          summary += " " + backgroundSummary;
         }
       } else {
-        summary = "Showing " + selectionState.mappableRows.length + " selected accessible-data " + (selectionState.mappableRows.length === 1 ? "site" : "sites") + " on the map.";
-        if (this.state.knownSiteOverlayEnabled && knownSiteRows.length) {
-          summary += " Background layer: " + knownSiteRows.length + " known sites.";
+        summary = "Showing " + displayState.mappableRows.length + " filtered accessible-data " + (displayState.mappableRows.length === 1 ? "site" : "sites") + " on the map.";
+        if (displayState.selectedRows.length) {
+          summary += " " + displayState.selectedRows.length + " " + (displayState.selectedRows.length === 1 ? "site is" : "sites are") + " selected.";
         }
-        if (selectionState.missingCoordinates) {
-          summary += " " + selectionState.missingCoordinates + " selected " + (selectionState.missingCoordinates === 1 ? "site was" : "sites were") + " omitted because coordinates are unavailable.";
+        if (backgroundSummary) {
+          summary += " " + backgroundSummary;
+        }
+        if (displayState.missingCoordinates) {
+          summary += " " + displayState.missingCoordinates + " filtered " + (displayState.missingCoordinates === 1 ? "site was" : "sites were") + " omitted because coordinates are unavailable.";
+        }
+        if (backgroundSummary && !displayState.selectedRows.length) {
+          summaryHtml = escapeHtml(summary) + "<br><span class=\"shuttle-explorer__muted\">Is your site missing? Email <a href=\"mailto:trevorkeenan@berkeley.edu\">trevorkeenan@berkeley.edu</a> to be added.</span>";
         }
       }
       if (summaryHtml) {
@@ -6957,25 +6979,25 @@
       return;
     }
 
-    mapSignature = selectionState.signature + "::known:" + String(this.state.knownSiteOverlayEnabled) + ":" + String(knownSiteRows.length);
-    if (mapSignature !== this._mapSelectionSignature) {
-      this._mapSelectionSignature = mapSignature;
+    mapSignature = displayState.signature + "::known:" + String(this.state.knownSiteOverlayEnabled) + ":" + String(knownSiteRows.length);
+    if (mapSignature !== this._mapDisplaySignature) {
+      this._mapDisplaySignature = mapSignature;
       mapChanged = true;
       this.renderKnownSiteMapMarkers(knownSiteRows);
-      this.renderSelectedMapMarkers(selectionState.mappableRows);
+      this.renderFilteredMapMarkers(displayState.mappableRows);
     }
 
     if (b.resetMapView) {
-      b.resetMapView.classList.toggle("shuttle-explorer__hidden", !(selectionState.mappableRows.length || knownSiteRows.length));
+      b.resetMapView.classList.toggle("shuttle-explorer__hidden", !(displayState.mappableRows.length || knownSiteRows.length));
     }
 
-    if (!selectionState.selectedRows.length && !knownSiteRows.length) {
+    if (!displayState.filteredRows.length && !knownSiteRows.length) {
       message = this.state.knownSiteOverlayEnabled
         ? (this.state.knownSiteMapWarning || "Known-sites map layer is unavailable.")
-        : "Select one or more accessible-data sites to highlight them on the map.";
-    } else if (!selectionState.mappableRows.length) {
-      if (selectionState.selectedRows.length) {
-        message = "The selected sites do not include map coordinates in the current metadata snapshot.";
+        : "No filtered accessible-data sites to show on the map.";
+    } else if (!displayState.mappableRows.length) {
+      if (displayState.filteredRows.length) {
+        message = "The filtered sites do not include map coordinates in the current metadata snapshot.";
       }
     }
     this.setMapEmptyState(message);
@@ -8866,6 +8888,7 @@
     knownSiteDataAvailabilityLabel: knownSiteDataAvailabilityLabel,
     knownSiteMapMarkerStyle: knownSiteMapMarkerStyle,
     buildKnownSitesExportCsv: buildKnownSitesExportCsv,
+    buildMapDisplayState: buildMapDisplayState,
     normalizeNetworkToken: normalizeNetworkToken,
     normalizeNetworkTokens: normalizeNetworkTokens,
     normalizeNetworkDisplayValue: normalizeNetworkDisplayValue,
