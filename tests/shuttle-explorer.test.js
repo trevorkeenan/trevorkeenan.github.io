@@ -446,11 +446,13 @@ test('Known-sites map copy uses the simplified popup text and visual legend labe
   assert.equal(explorerJs.includes('additional sites with accessible data'), false);
   assert.equal(explorerJs.includes('additional sites without shared data'), false);
   assert.equal(explorerJs.includes('shuttle-explorer__map-legend-swatch--selected'), false);
+  assert.equal(explorerJs.includes('filtered accessible-data sites'), true);
   assert.equal(explorerJs.includes('without shared data.'), true);
   assert.equal(explorerJs.includes('Is your site missing? Email'), true);
   assert.equal(explorerJs.includes('href=\\"mailto:trevorkeenan@berkeley.edu\\"'), true);
   assert.equal(explorerCss.includes('.shuttle-explorer__map-actions {'), true);
   assert.equal(explorerCss.includes('.shuttle-explorer__map-legend-swatch--selected {'), false);
+  assert.equal(explorerCss.includes('.shuttle-explorer__map-legend-swatch--filtered {'), true);
   assert.equal(explorerCss.includes('.shuttle-explorer__map-legend-swatch--accessible {'), true);
   assert.equal(explorerCss.includes('.shuttle-explorer__map-legend-swatch--unshared {'), true);
 });
@@ -585,6 +587,188 @@ test('Selection state is kept separate from marker category styling', () => {
   assert.deepEqual(selectedState.selectedRows.map((row) => row.site_id), ['US-StyleA']);
   assert.equal(Object.prototype.hasOwnProperty.call(selectedState.mappableRows[0], 'is_map_selected'), false);
   assert.equal(selectedState.signature, hooks.buildMapDisplayState(filteredRows, {}).signature);
+});
+
+test('Map display state counts unique map sites rather than duplicate product rows', () => {
+  const duplicateRows = [
+    makeCatalogRow({
+      site_id: 'US-Dup',
+      source_label: 'AmeriFlux-FLUXNET',
+      latitude: '38.1',
+      longitude: '-120.2',
+      _selection_key: 'US-Dup::FLUXNET'
+    }),
+    makeCatalogRow({
+      site_id: 'US-Dup',
+      source_label: 'AmeriFlux-BASE',
+      latitude: '38.1',
+      longitude: '-120.2',
+      _selection_key: 'US-Dup::BASE'
+    }),
+    makeCatalogRow({
+      site_id: 'US-Other',
+      latitude: '39.2',
+      longitude: '-121.3',
+      _selection_key: 'US-Other::ICOS'
+    })
+  ];
+  const state = hooks.buildMapDisplayState(duplicateRows, {
+    'US-Dup::BASE': true
+  });
+
+  assert.equal(state.filteredRows.length, 2);
+  assert.equal(state.mappableRows.length, 2);
+  assert.deepEqual(state.selectedRows.map((row) => row.site_id), ['US-Dup']);
+});
+
+test('Known-site map display state dedupes sites and lets accessible rows win over known-only duplicates', () => {
+  const knownRows = [
+    {
+      site_id: 'US-Dup',
+      latitude: 38.1,
+      longitude: -120.2,
+      known_site_only: true
+    },
+    {
+      site_id: 'US-Dup',
+      latitude: 38.1,
+      longitude: -120.2,
+      known_site_only: false
+    },
+    {
+      site_id: 'US-Other',
+      latitude: 39.2,
+      longitude: -121.3,
+      known_site_only: true
+    }
+  ];
+  const state = hooks.buildKnownSiteMapDisplayState(knownRows);
+
+  assert.equal(state.totalCount, 2);
+  assert.equal(state.accessibleCount, 1);
+  assert.equal(state.knownSiteOnlyCount, 1);
+  assert.equal(state.rows.find((row) => row.site_id === 'US-Dup').known_site_only, false);
+});
+
+test('Known-site map display state includes accessible explorer sites missing from the known-sites asset', () => {
+  const knownRows = [
+    {
+      site_id: 'US-Known',
+      latitude: 38.1,
+      longitude: -120.2,
+      known_site_only: true
+    },
+    {
+      site_id: 'US-Overlap',
+      latitude: 39.2,
+      longitude: -121.3,
+      known_site_only: true
+    }
+  ];
+  const accessibleRows = [
+    makeCatalogRow({
+      site_id: 'US-Overlap',
+      latitude: '39.2',
+      longitude: '-121.3'
+    }),
+    makeCatalogRow({
+      site_id: 'US-NewAccessible',
+      latitude: '40.3',
+      longitude: '-122.4'
+    })
+  ];
+  const state = hooks.buildKnownSiteMapDisplayState(knownRows, accessibleRows);
+
+  assert.equal(state.totalCount, 3);
+  assert.equal(state.accessibleCount, 2);
+  assert.equal(state.knownSiteOnlyCount, 1);
+  assert.equal(state.rows.find((row) => row.site_id === 'US-Overlap').known_site_only, false);
+  assert.equal(state.rows.find((row) => row.site_id === 'US-NewAccessible').known_site_only, false);
+});
+
+test('Known-site map display state uses canonical accessible rows instead of stale known-site accessibility flags', () => {
+  const knownRows = [
+    {
+      site_id: 'US-StaleAccessible',
+      latitude: 38.1,
+      longitude: -120.2,
+      known_site_only: false
+    },
+    {
+      site_id: 'US-CurrentAccessible',
+      latitude: 39.2,
+      longitude: -121.3,
+      known_site_only: false
+    }
+  ];
+  const accessibleRows = [
+    makeCatalogRow({
+      site_id: 'US-CurrentAccessible',
+      latitude: '39.2',
+      longitude: '-121.3'
+    })
+  ];
+  const state = hooks.buildKnownSiteMapDisplayState(knownRows, accessibleRows);
+
+  assert.equal(state.totalCount, 2);
+  assert.equal(state.accessibleCount, 1);
+  assert.equal(state.knownSiteOnlyCount, 1);
+  assert.equal(state.rows.find((row) => row.site_id === 'US-StaleAccessible').known_site_only, true);
+  assert.equal(state.rows.find((row) => row.site_id === 'US-CurrentAccessible').known_site_only, false);
+});
+
+test('Map summary is stable across selection changes and always includes the missing-site contact', () => {
+  const knownState = {
+    totalCount: 2,
+    accessibleCount: 1,
+    knownSiteOnlyCount: 1
+  };
+  const unselected = hooks.buildMapDisplayState([
+    makeCatalogRow({
+      site_id: 'US-Sum',
+      latitude: '38.1',
+      longitude: '-120.2',
+      _selection_key: 'US-Sum::ICOS'
+    })
+  ], {});
+  const selected = hooks.buildMapDisplayState([
+    makeCatalogRow({
+      site_id: 'US-Sum',
+      latitude: '38.1',
+      longitude: '-120.2',
+      _selection_key: 'US-Sum::ICOS'
+    })
+  ], {
+    'US-Sum::ICOS': true
+  });
+  const unselectedHtml = hooks.buildMapSummaryHtml(unselected, knownState, true);
+  const selectedHtml = hooks.buildMapSummaryHtml(selected, knownState, true);
+
+  assert.equal(unselectedHtml, selectedHtml);
+  assert.equal(unselectedHtml.includes('Showing 1 accessible-data site on the map.'), true);
+  assert.equal(unselectedHtml.includes('Background layer: 2 known flux sites, including 1 site with accessible data and 1 other known site without shared data.'), true);
+  assert.equal(unselectedHtml.includes('Is your site missing? Email'), true);
+});
+
+test('Map summary labels narrowed foreground counts separately from stable background totals', () => {
+  const knownState = {
+    totalCount: 4,
+    accessibleCount: 3,
+    knownSiteOnlyCount: 1
+  };
+  const narrowed = hooks.buildMapDisplayState([
+    makeCatalogRow({
+      site_id: 'US-Narrow',
+      latitude: '38.1',
+      longitude: '-120.2',
+      _selection_key: 'US-Narrow::ICOS'
+    })
+  ], {});
+  const html = hooks.buildMapSummaryHtml(narrowed, knownState, true);
+
+  assert.equal(html.includes('Showing 1 filtered accessible-data site on the map.'), true);
+  assert.equal(html.includes('Background layer: 4 known flux sites, including 3 sites with accessible data and 1 other known site without shared data.'), true);
+  assert.equal(html.includes('Is your site missing? Email'), true);
 });
 
 test('Merge precedence is Shuttle > ICOS > AmeriFlux > FLUXNET2015 with no duplicates', () => {
