@@ -2032,6 +2032,81 @@
     return availabilityFilterLabels(row).indexOf(selected) !== -1;
   }
 
+  function normalizeFilterSelection(value) {
+    var seen = {};
+    var values = [];
+    var addValue = function (item) {
+      var normalized = String(item == null ? "" : item).trim();
+      if (!normalized || seen[normalized]) {
+        return;
+      }
+      seen[normalized] = true;
+      values.push(normalized);
+    };
+    if (Array.isArray(value)) {
+      value.forEach(addValue);
+      return values;
+    }
+    if (value && typeof value === "object") {
+      Object.keys(value).forEach(function (key) {
+        if (value[key]) {
+          addValue(key);
+        }
+      });
+      return values;
+    }
+    addValue(value);
+    return values;
+  }
+
+  function filterSelectionHasValues(value) {
+    return normalizeFilterSelection(value).length > 0;
+  }
+
+  function filterSelectionMatches(value, matcher) {
+    var selected = normalizeFilterSelection(value);
+    if (!selected.length) {
+      return true;
+    }
+    return selected.some(matcher);
+  }
+
+  function pruneFilterSelection(value, allowedValues) {
+    var allowed = {};
+    (allowedValues || []).forEach(function (allowedValue) {
+      allowed[String(allowedValue)] = true;
+    });
+    return normalizeFilterSelection(value).filter(function (selectedValue) {
+      return !!allowed[selectedValue];
+    });
+  }
+
+  function filterSelectionLabel(value, options, allLabel, pluralLabel) {
+    var selected = normalizeFilterSelection(value);
+    var labelsByValue = {};
+    var labels;
+    (options || []).forEach(function (option) {
+      if (!option) {
+        return;
+      }
+      if (typeof option === "object") {
+        labelsByValue[String(option.value)] = String(option.label || option.value || "");
+      } else {
+        labelsByValue[String(option)] = String(option);
+      }
+    });
+    if (!selected.length) {
+      return allLabel;
+    }
+    labels = selected.map(function (selectedValue) {
+      return labelsByValue[selectedValue] || selectedValue;
+    });
+    if (labels.length <= 2) {
+      return labels.join(", ");
+    }
+    return labels.length + " " + pluralLabel;
+  }
+
   function normalizeMinimumYearsValue(value, maxValue) {
     var maximum = parseIntOrNull(maxValue);
     var normalized = parseIntOrNull(value);
@@ -2323,35 +2398,41 @@
   function rowMatchesExplorerFilters(row, filters) {
     var opts = filters || {};
     var search = String(opts.search || "").trim().toLowerCase();
-    var selectedNetwork = String(opts.selectedNetwork || "");
-    var selectedSource = String(opts.selectedSource || "");
-    var selectedAvailability = String(opts.selectedAvailability || "");
-    var selectedCountry = String(opts.selectedCountry || "");
-    var selectedVegetation = String(opts.selectedVegetation || "");
+    var selectedNetwork = opts.selectedNetworks != null ? opts.selectedNetworks : opts.selectedNetwork;
+    var selectedSource = opts.selectedSources != null ? opts.selectedSources : opts.selectedSource;
+    var selectedAvailability = opts.selectedAvailabilities != null ? opts.selectedAvailabilities : opts.selectedAvailability;
+    var selectedCountry = opts.selectedCountries != null ? opts.selectedCountries : opts.selectedCountry;
+    var selectedVegetation = opts.selectedVegetations != null ? opts.selectedVegetations : opts.selectedVegetation;
     var minimumYears = opts.minimumYears;
     var yearRange = opts.yearRange || { start: opts.yearRangeStart, end: opts.yearRangeEnd };
     var yearRangeBounds = opts.yearRangeBounds;
-    var selectedHubs = opts.selectedHubs && typeof opts.selectedHubs === "object" ? opts.selectedHubs : {};
 
     if (search && String(row && row.search_text || "").indexOf(search) === -1) {
       return false;
     }
-    if (selectedNetwork && (!row || row.network_tokens.indexOf(selectedNetwork) === -1)) {
+    if (!filterSelectionMatches(selectedNetwork, function (network) {
+      return !!row && row.network_tokens.indexOf(network) !== -1;
+    })) {
       return false;
     }
-    if (selectedSource && sourceFilterTags(row).indexOf(selectedSource) === -1) {
+    if (!filterSelectionMatches(selectedSource, function (source) {
+      return sourceFilterTags(row).indexOf(source) !== -1;
+    })) {
       return false;
     }
-    if (!availabilityFilterMatches(row, selectedAvailability)) {
+    if (!filterSelectionMatches(selectedAvailability, function (availability) {
+      return availabilityFilterMatches(row, availability);
+    })) {
       return false;
     }
-    if (selectedCountry && String(row && row.country || "") !== selectedCountry) {
+    if (!filterSelectionMatches(selectedCountry, function (country) {
+      return String(row && row.country || "") === country;
+    })) {
       return false;
     }
-    if (selectedVegetation && String(row && row.vegetation_type || "") !== selectedVegetation) {
-      return false;
-    }
-    if (Object.keys(selectedHubs).length && !selectedHubs[row.data_hub]) {
+    if (!filterSelectionMatches(selectedVegetation, function (vegetation) {
+      return String(row && row.vegetation_type || "") === vegetation;
+    })) {
       return false;
     }
     if (!minimumYearsFilterMatches(row, minimumYears)) {
@@ -5390,6 +5471,23 @@
     ].join("");
   }
 
+  function buildMultiSelectFilterHtml(config) {
+    var id = config.id;
+    var labelId = id + "-label";
+    var summaryId = id + "-summary";
+    var labelHtml = config.labelHtml || ("<label id=\"" + escapeHtml(labelId) + "\">" + escapeHtml(config.label || "") + "</label>");
+    return [
+      "<div class=\"shuttle-explorer__field shuttle-explorer__multi-field\" data-role=\"" + escapeHtml(config.role) + "\" data-filter-key=\"" + escapeHtml(config.filterKey) + "\" data-all-label=\"" + escapeHtml(config.allLabel) + "\" data-plural-label=\"" + escapeHtml(config.pluralLabel) + "\" data-track-label=\"" + escapeHtml(config.trackLabel) + "\">",
+      "  " + labelHtml,
+      "  <button id=\"" + escapeHtml(id) + "\" type=\"button\" class=\"shuttle-explorer__multi-toggle\" data-role=\"multi-toggle\" aria-haspopup=\"true\" aria-expanded=\"false\" aria-labelledby=\"" + escapeHtml(labelId) + " " + escapeHtml(summaryId) + "\"><span id=\"" + escapeHtml(summaryId) + "\" data-role=\"multi-summary\">" + escapeHtml(config.allLabel) + "</span></button>",
+      "  <div class=\"shuttle-explorer__multi-menu shuttle-explorer__hidden\" data-role=\"multi-menu\" role=\"group\" aria-labelledby=\"" + escapeHtml(labelId) + "\">",
+      "    <label class=\"shuttle-explorer__multi-option shuttle-explorer__multi-option--all\"><input type=\"checkbox\" data-role=\"multi-all\" checked /><span class=\"shuttle-explorer__multi-option-label\" title=\"" + escapeHtml(config.allLabel) + "\">" + escapeHtml(config.allLabel) + "</span></label>",
+      "    <div class=\"shuttle-explorer__multi-options\" data-role=\"multi-options\"></div>",
+      "  </div>",
+      "</div>"
+    ].join("");
+  }
+
   function csvEscape(value) {
     var s = String(value == null ? "" : value);
     if (/[",\r\n]/.test(s)) {
@@ -5608,13 +5706,22 @@
       ".shuttle-explorer__status.is-error{background:#fff3f3;color:#8b1e1e;border:1px solid #f2c7c7;}",
       ".shuttle-explorer__status.is-loading{background:#f2f7ff;color:#234d7b;border:1px solid #d6e5fb;}",
       ".shuttle-explorer__status.is-ok{background:#f3fbf4;color:#225e2b;border:1px solid #cfe8d4;}",
-      ".shuttle-explorer__controls{display:grid;grid-template-columns:2fr 1fr 1fr 1fr 1fr 1fr;gap:10px;margin:0 0 10px;}",
-      ".shuttle-explorer__field{display:flex;flex-direction:column;gap:4px;}",
-      ".shuttle-explorer__field--full{grid-column:1 / -1;}",
-      ".shuttle-explorer__field label{font-size:.82em;color:#4d5b6a;}",
-      ".shuttle-explorer__years-filter{flex-direction:row;align-items:center;padding:10px 12px;border:1px solid #d5dbe3;border-radius:8px;background:#ffffff;gap:12px;}",
-      ".shuttle-explorer__years-filter label{flex:0 0 auto;white-space:nowrap;}",
-      ".shuttle-explorer__range-header{display:flex;justify-content:space-between;align-items:baseline;gap:12px;}",
+	      ".shuttle-explorer__controls{display:grid;grid-template-columns:2fr 1fr 1fr 1fr 1fr 1fr;gap:10px;margin:0 0 10px;}",
+	      ".shuttle-explorer__field{display:flex;flex-direction:column;gap:4px;}",
+	      ".shuttle-explorer__field--full{grid-column:1 / -1;}",
+	      ".shuttle-explorer__field label{font-size:.82em;color:#4d5b6a;}",
+	      ".shuttle-explorer__multi-field{position:relative;}",
+	      ".shuttle-explorer__multi-toggle{width:100%;min-width:0;padding:7px 26px 7px 8px;border:1px solid #b7c1ce;border-radius:6px;background:#fff;color:#23364a;font:inherit;font-size:.9em;line-height:1.2;text-align:left;cursor:pointer;position:relative;}",
+	      ".shuttle-explorer__multi-toggle::after{content:\"\";position:absolute;right:9px;top:50%;width:0;height:0;border-left:4px solid transparent;border-right:4px solid transparent;border-top:5px solid #607184;transform:translateY(-40%);}",
+	      ".shuttle-explorer__multi-menu{position:absolute;z-index:20;top:calc(100% + 4px);left:0;right:auto;width:max(100%,240px);max-width:calc(100vw - 32px);max-height:240px;overflow-y:auto;overflow-x:hidden;padding:6px;border:1px solid #b7c1ce;border-radius:8px;background:#fff;box-shadow:0 10px 24px rgba(35,54,74,.16);}",
+	      ".shuttle-explorer__multi-option{display:flex;align-items:center;justify-content:flex-start;gap:.4rem;width:100%;box-sizing:border-box;text-align:left;padding:5px 4px;border-radius:5px;color:#23364a;font-size:.86em;line-height:1.25;cursor:pointer;}",
+	      ".shuttle-explorer__multi-option:hover,.shuttle-explorer__multi-option:focus-within{background:#eef3f9;}",
+	      ".shuttle-explorer__field .shuttle-explorer__multi-option input[type=\"checkbox\"]{appearance:auto;-webkit-appearance:checkbox;flex:0 0 auto;width:13px;min-width:13px;height:13px;padding:0;border:0;border-radius:0;background:transparent;margin:0;accent-color:#2f5374;}",
+	      ".shuttle-explorer__multi-option-label{flex:1 1 auto;min-width:0;white-space:normal;overflow-wrap:anywhere;word-break:normal;}",
+	      ".shuttle-explorer__years-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);align-items:center;gap:10px;padding:8px 10px;border:1px solid #d5dbe3;border-radius:8px;background:#fff;}",
+	      ".shuttle-explorer__years-control{display:flex;align-items:center;gap:10px;min-width:0;}",
+	      ".shuttle-explorer__years-control label{flex:0 0 auto;white-space:nowrap;}",
+	      ".shuttle-explorer__range-header{display:flex;justify-content:space-between;align-items:baseline;gap:12px;}",
       ".shuttle-explorer__range-value{color:inherit;font-size:inherit;font-weight:inherit;line-height:inherit;}",
       ".shuttle-explorer__range-meta{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;}",
       ".shuttle-explorer__dual-range{position:relative;flex:1 1 auto;min-width:140px;height:22px;--shuttle-slider-track-height:4px;--shuttle-slider-track-color:#d5dbe3;--shuttle-slider-selection-color:rgba(47,83,116,.22);--year-range-start-pct:0%;--year-range-end-pct:100%;}",
@@ -5635,16 +5742,14 @@
       ".shuttle-explorer__tooltip-wrap.is-open .shuttle-explorer__tooltip,.shuttle-explorer__tooltip-wrap:hover .shuttle-explorer__tooltip,.shuttle-explorer__tooltip-wrap:focus-within .shuttle-explorer__tooltip{opacity:1;visibility:visible;pointer-events:auto;transform:translateY(0);}",
       ".shuttle-explorer__tooltip a{color:#2f5374;}",
       ".shuttle-explorer__tooltip a:hover,.shuttle-explorer__tooltip a:focus{text-decoration:underline;}",
-      ".shuttle-explorer__field input,.shuttle-explorer__field select{width:100%;padding:7px 8px;border:1px solid #b7c1ce;border-radius:6px;background:#fff;font:inherit;}",
+	      ".shuttle-explorer__field input,.shuttle-explorer__field select{width:100%;padding:7px 8px;border:1px solid #b7c1ce;border-radius:6px;background:#fff;font:inherit;}",
       ".shuttle-explorer__field input.shuttle-explorer__range-input{--shuttle-slider-track-height:4px;--shuttle-slider-thumb-size:14px;--shuttle-slider-track-color:#d5dbe3;--shuttle-slider-thumb-color:#2f5374;--shuttle-slider-selection-color:rgba(47,83,116,.22);flex:1 1 auto;min-width:0;height:22px;padding:0;border:0;border-radius:0;background:transparent;accent-color:#2f5374;appearance:none;-webkit-appearance:none;}",
       ".shuttle-explorer__field input.shuttle-explorer__range-input::-webkit-slider-runnable-track{height:var(--shuttle-slider-track-height);border:0;border-radius:999px;background:var(--shuttle-slider-input-track-color,var(--shuttle-slider-track-color));}",
       ".shuttle-explorer__field input.shuttle-explorer__range-input::-webkit-slider-thumb{width:var(--shuttle-slider-thumb-size);height:var(--shuttle-slider-thumb-size);margin-top:calc((var(--shuttle-slider-track-height) - var(--shuttle-slider-thumb-size)) / 2);border:0;border-radius:50%;background:var(--shuttle-slider-thumb-color);cursor:pointer;appearance:none;-webkit-appearance:none;}",
       ".shuttle-explorer__field input.shuttle-explorer__range-input::-moz-range-track{height:var(--shuttle-slider-track-height);border:0;border-radius:999px;background:var(--shuttle-slider-input-track-color,var(--shuttle-slider-track-color));}",
       ".shuttle-explorer__field input.shuttle-explorer__range-input::-moz-range-progress{height:var(--shuttle-slider-track-height);border:0;border-radius:999px;background:var(--shuttle-slider-input-track-color,var(--shuttle-slider-track-color));}",
       ".shuttle-explorer__field input.shuttle-explorer__range-input::-moz-range-thumb{width:var(--shuttle-slider-thumb-size);height:var(--shuttle-slider-thumb-size);border:0;border-radius:50%;background:var(--shuttle-slider-thumb-color);cursor:pointer;}",
-      ".shuttle-explorer__hub-filters{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 10px;}",
-      ".shuttle-explorer__hub-chip{display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border:1px solid #d5dbe3;border-radius:999px;background:#f8fafc;font-size:.88em;}",
-      ".shuttle-explorer__row{display:flex;justify-content:space-between;align-items:center;gap:10px;margin:0 0 10px;}",
+		      ".shuttle-explorer__row{display:flex;justify-content:space-between;align-items:center;gap:10px;margin:0 0 10px;}",
       ".shuttle-explorer__selection-actions{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 10px;}",
       ".shuttle-explorer__bulk{margin:0 0 10px;border:1px solid #d5dbe3;border-radius:8px;background:#fbfdff;}",
       ".shuttle-explorer__bulk-summary{margin:0;padding:10px;cursor:pointer;font-weight:600;font-size:.88em;color:#23364a;}",
@@ -5711,13 +5816,17 @@
       ".shuttle-explorer__attribution ul{margin:8px 0 0 18px;padding:0;}",
       ".shuttle-explorer__attribution li + li{margin-top:6px;}",
       ".shuttle-explorer__attribution-row{display:flex;justify-content:space-between;align-items:center;gap:10px;margin:8px 0 0;}",
-      ".shuttle-explorer__tiny{font-size:.82em;color:#556779;}",
-      ".shuttle-explorer__map-actions{display:flex;flex-direction:column;align-items:flex-end;gap:8px;}",
-      ".shuttle-explorer__map-export-btn{font-size:.71em;}",
-      ".shuttle-explorer__map-legend{display:flex;flex-wrap:wrap;gap:8px 14px;margin:0;max-width:680px;}",
-      ".shuttle-explorer__map-legend-item{display:inline-flex;align-items:center;gap:6px;line-height:1.3;}",
-      ".shuttle-explorer__map-legend-swatch{display:inline-block;width:10px;height:10px;border-radius:999px;flex:0 0 auto;}",
-      "@media (max-width: 860px){.shuttle-explorer__controls{grid-template-columns:1fr;}.shuttle-explorer__row{flex-direction:column;align-items:flex-start;}.shuttle-explorer__bulk-identity-grid{grid-template-columns:1fr;}.shuttle-explorer__map-header{flex-direction:column;align-items:flex-start;}.shuttle-explorer__map-actions{align-items:flex-start;}}"
+	      ".shuttle-explorer__tiny{font-size:.82em;color:#556779;}",
+		      ".shuttle-explorer__map-actions{display:flex;flex-direction:column;align-items:flex-end;gap:8px;}",
+		      ".shuttle-explorer__map-reset-actions{display:flex;align-items:center;justify-content:flex-end;gap:8px;flex-wrap:nowrap;width:max-content;max-width:100%;}",
+	      ".shuttle-explorer__map-export-btn{font-size:.71em;}",
+	      ".shuttle-explorer__map-shell{position:relative;}",
+	      ".shuttle-explorer__map-control-panel{position:absolute;left:10px;bottom:10px;z-index:700;display:flex;flex-direction:column;gap:6px;max-width:min(280px,calc(100% - 20px));padding:8px 9px;border:1px solid rgba(183,193,206,.85);border-radius:8px;background:rgba(255,255,255,.94);box-shadow:0 4px 14px rgba(35,54,74,.14);}",
+	      ".shuttle-explorer__map-toggle{display:inline-flex;align-items:center;gap:6px;font-size:.82em;color:#33475b;line-height:1.25;}",
+	      ".shuttle-explorer__map-legend{display:flex;flex-direction:column;gap:5px;margin:0;max-width:260px;}",
+	      ".shuttle-explorer__map-legend-item{display:inline-flex;align-items:center;gap:6px;line-height:1.3;}",
+	      ".shuttle-explorer__map-legend-swatch{display:inline-block;width:10px;height:10px;border-radius:999px;flex:0 0 auto;}",
+		      "@media (max-width: 860px){.shuttle-explorer__controls{grid-template-columns:1fr;}.shuttle-explorer__years-row{grid-template-columns:1fr;}.shuttle-explorer__row{flex-direction:column;align-items:flex-start;}.shuttle-explorer__bulk-identity-grid{grid-template-columns:1fr;}.shuttle-explorer__map-header{flex-direction:column;align-items:flex-start;}.shuttle-explorer__map-actions{align-items:flex-start;}.shuttle-explorer__map-reset-actions{justify-content:flex-start;}}"
     ].join("");
     document.head.appendChild(style);
   }
@@ -5736,67 +5845,94 @@
       "    <label for=\"shuttle-search\">Search (site ID or site name)</label>",
       "    <input id=\"shuttle-search\" type=\"search\" placeholder=\"e.g., US-Ton or Tonzi\" data-role=\"search\" />",
       "  </div>",
-      "  <div class=\"shuttle-explorer__field\">",
-      "    <label for=\"shuttle-availability\">Availability</label>",
-      "    <select id=\"shuttle-availability\" data-role=\"availability-filter\"><option value=\"\">All sites</option></select>",
-      "  </div>",
-      "  <div class=\"shuttle-explorer__field\">",
-      "    <label for=\"shuttle-source\">Source</label>",
-      "    <select id=\"shuttle-source\" data-role=\"source-filter\"><option value=\"\">All sources</option></select>",
-      "  </div>",
-      "  <div class=\"shuttle-explorer__field\">",
-      "    <label for=\"shuttle-network\">Network</label>",
-      "    <select id=\"shuttle-network\" data-role=\"network-filter\"><option value=\"\">All networks</option></select>",
-      "  </div>",
-      "  <div class=\"shuttle-explorer__field\">",
-      "    <label for=\"shuttle-country\">Country</label>",
-      "    <select id=\"shuttle-country\" data-role=\"country-filter\"><option value=\"\">All countries</option></select>",
-      "  </div>",
-      "  <div class=\"shuttle-explorer__field\">",
-      "    <div class=\"shuttle-explorer__label-row\">",
-      "      <label for=\"shuttle-vegetation\">Veg. type</label>",
-      "      <span class=\"shuttle-explorer__tooltip-wrap\" data-role=\"vegetation-info-wrap\">",
-      "        <button type=\"button\" class=\"shuttle-explorer__tooltip-toggle\" data-role=\"vegetation-info-toggle\" aria-label=\"About IGBP vegetation codes\" aria-describedby=\"shuttle-vegetation-tooltip\" aria-expanded=\"false\">i</button>",
-      "        <span class=\"shuttle-explorer__tooltip\" id=\"shuttle-vegetation-tooltip\" role=\"tooltip\">Vegetation codes follow IGBP classifications as outlined <a href=\"https://fluxnet.org/data/badm-data-templates/igbp-classification/\" target=\"_blank\" rel=\"noopener noreferrer\">here</a></span>",
-      "      </span>",
+      "  " + buildMultiSelectFilterHtml({
+        id: "shuttle-availability",
+        role: "availability-filter",
+        filterKey: "selectedAvailabilities",
+        label: "Availability",
+        allLabel: "All sites",
+        pluralLabel: "availability filters",
+        trackLabel: "availability"
+      }),
+      "  " + buildMultiSelectFilterHtml({
+        id: "shuttle-source",
+        role: "source-filter",
+        filterKey: "selectedSources",
+        label: "Source",
+        allLabel: "All sources",
+        pluralLabel: "sources",
+        trackLabel: "source"
+      }),
+      "  " + buildMultiSelectFilterHtml({
+        id: "shuttle-network",
+        role: "network-filter",
+        filterKey: "selectedNetworks",
+        label: "Network",
+        allLabel: "All networks",
+        pluralLabel: "networks",
+        trackLabel: "network"
+      }),
+      "  " + buildMultiSelectFilterHtml({
+        id: "shuttle-country",
+        role: "country-filter",
+        filterKey: "selectedCountries",
+        label: "Country",
+        allLabel: "All countries",
+        pluralLabel: "countries",
+        trackLabel: "country"
+      }),
+      "  " + buildMultiSelectFilterHtml({
+        id: "shuttle-vegetation",
+        role: "vegetation-filter",
+        filterKey: "selectedVegetations",
+        labelHtml: [
+          "<div class=\"shuttle-explorer__label-row\">",
+          "  <label id=\"shuttle-vegetation-label\">Veg. type</label>",
+          "  <span class=\"shuttle-explorer__tooltip-wrap\" data-role=\"vegetation-info-wrap\">",
+          "    <button type=\"button\" class=\"shuttle-explorer__tooltip-toggle\" data-role=\"vegetation-info-toggle\" aria-label=\"About IGBP vegetation codes\" aria-describedby=\"shuttle-vegetation-tooltip\" aria-expanded=\"false\">i</button>",
+          "    <span class=\"shuttle-explorer__tooltip\" id=\"shuttle-vegetation-tooltip\" role=\"tooltip\">Vegetation codes follow IGBP classifications as outlined <a href=\"https://fluxnet.org/data/badm-data-templates/igbp-classification/\" target=\"_blank\" rel=\"noopener noreferrer\">here</a></span>",
+          "  </span>",
+          "</div>"
+        ].join(""),
+        allLabel: "All Veg types",
+        pluralLabel: "vegetation types",
+        trackLabel: "vegetation_type"
+      }),
+      "  <div class=\"shuttle-explorer__field shuttle-explorer__field--full shuttle-explorer__years-row\">",
+      "    <div class=\"shuttle-explorer__years-control shuttle-explorer__years-control--minimum\">",
+      "      <label for=\"shuttle-minimum-years\">Min length: <span class=\"shuttle-explorer__range-value\" data-role=\"minimum-years-value\">1</span>+</label>",
+      "      <input id=\"shuttle-minimum-years\" class=\"shuttle-explorer__range-input\" type=\"range\" min=\"1\" max=\"1\" step=\"1\" value=\"1\" data-role=\"minimum-years-filter\" />",
       "    </div>",
-      "    <select id=\"shuttle-vegetation\" data-role=\"vegetation-filter\"><option value=\"\">All vegetation types</option></select>",
-      "  </div>",
-      "  <div class=\"shuttle-explorer__field shuttle-explorer__field--full shuttle-explorer__years-filter\">",
-      "    <label for=\"shuttle-minimum-years\">Minimum years available: <span class=\"shuttle-explorer__range-value\" data-role=\"minimum-years-value\">1</span></label>",
-      "    <input id=\"shuttle-minimum-years\" class=\"shuttle-explorer__range-input\" type=\"range\" min=\"1\" max=\"1\" step=\"1\" value=\"1\" data-role=\"minimum-years-filter\" />",
-      "  </div>",
-      "  <div class=\"shuttle-explorer__field shuttle-explorer__field--full shuttle-explorer__years-filter\">",
-      "    <label for=\"shuttle-year-range-start\">Year range: <span class=\"shuttle-explorer__range-value\" data-role=\"year-range-value\">All years</span></label>",
-      "    <div class=\"shuttle-explorer__dual-range\" data-role=\"year-range-control\">",
-      "      <input id=\"shuttle-year-range-start\" class=\"shuttle-explorer__range-input\" type=\"range\" min=\"1900\" max=\"1900\" step=\"1\" value=\"1900\" data-role=\"year-range-start-filter\" aria-label=\"Start year\" />",
-      "      <input id=\"shuttle-year-range-end\" class=\"shuttle-explorer__range-input\" type=\"range\" min=\"1900\" max=\"1900\" step=\"1\" value=\"1900\" data-role=\"year-range-end-filter\" aria-label=\"End year\" />",
+      "    <div class=\"shuttle-explorer__years-control shuttle-explorer__years-control--range\">",
+      "      <label for=\"shuttle-year-range-start\">Years: <span class=\"shuttle-explorer__range-value\" data-role=\"year-range-value\">All years</span></label>",
+      "      <div class=\"shuttle-explorer__dual-range\" data-role=\"year-range-control\">",
+      "        <input id=\"shuttle-year-range-start\" class=\"shuttle-explorer__range-input\" type=\"range\" min=\"1900\" max=\"1900\" step=\"1\" value=\"1900\" data-role=\"year-range-start-filter\" aria-label=\"Start year\" />",
+      "        <input id=\"shuttle-year-range-end\" class=\"shuttle-explorer__range-input\" type=\"range\" min=\"1900\" max=\"1900\" step=\"1\" value=\"1900\" data-role=\"year-range-end-filter\" aria-label=\"End year\" />",
+      "      </div>",
       "    </div>",
       "  </div>",
-      "</div>",
-      "<div class=\"shuttle-explorer__hub-filters shuttle-explorer__hidden\" data-role=\"hub-filters\" aria-label=\"Hub filters\"></div>",
-      "<div class=\"shuttle-explorer__row shuttle-explorer__hidden\" data-role=\"summary-row\">",
-      "  <div class=\"shuttle-explorer__summary\" data-role=\"summary\"></div>",
-      "  <button type=\"button\" class=\"shuttle-explorer__btn shuttle-explorer__btn--small\" data-role=\"reset\">Reset filters</button>",
       "</div>",
       "<section class=\"shuttle-explorer__map-panel shuttle-explorer__hidden\" data-role=\"map-panel\" aria-labelledby=\"shuttle-map-heading\">",
       "  <div class=\"shuttle-explorer__map-header\">",
       "    <div>",
       "      <h3 id=\"shuttle-map-heading\">Flux sites map</h3>",
       "      <p class=\"shuttle-explorer__tiny shuttle-explorer__map-summary\" data-role=\"map-summary\">Select one or more accessible-data sites to highlight them on the map.</p>",
-      "      <div class=\"shuttle-explorer__map-controls\">",
-      "        <label class=\"shuttle-explorer__map-toggle\"><input type=\"checkbox\" data-role=\"known-sites-toggle\" checked /> Show all known sites</label>",
-      "        " + buildKnownSitesLegendHtml(),
-      "      </div>",
       "    </div>",
       "    <div class=\"shuttle-explorer__map-actions\">",
-      "      <button type=\"button\" class=\"shuttle-explorer__btn shuttle-explorer__btn--small shuttle-explorer__hidden\" data-role=\"reset-map-view\">Reset map view</button>",
+      "      <div class=\"shuttle-explorer__map-reset-actions\">",
+      "        <button type=\"button\" class=\"shuttle-explorer__btn shuttle-explorer__btn--small\" data-role=\"reset\">Reset filters</button>",
+      "        <button type=\"button\" class=\"shuttle-explorer__btn shuttle-explorer__btn--small shuttle-explorer__hidden\" data-role=\"reset-map-view\">Reset map view</button>",
+      "      </div>",
       "      <button type=\"button\" class=\"shuttle-explorer__btn shuttle-explorer__btn--small shuttle-explorer__map-export-btn shuttle-explorer__hidden\" data-role=\"download-known-sites-csv\">Download site CSV</button>",
       "    </div>",
       "  </div>",
       "  <div class=\"shuttle-explorer__map-shell\">",
       "    <div class=\"shuttle-explorer__map-canvas\" data-role=\"map-canvas\" aria-label=\"Map of known and selected FLUXNET sites\"></div>",
       "    <div class=\"shuttle-explorer__map-empty\" data-role=\"map-empty\" aria-live=\"polite\">Select one or more accessible-data sites to highlight them on the map.</div>",
+      "    <div class=\"shuttle-explorer__map-control-panel\" data-role=\"map-control-panel\">",
+      "      <label class=\"shuttle-explorer__map-toggle\"><input type=\"checkbox\" data-role=\"known-sites-toggle\" checked /> Show all known sites</label>",
+      "      " + buildKnownSitesLegendHtml(),
+      "    </div>",
       "  </div>",
       "</section>",
       "<div class=\"shuttle-explorer__selection-actions shuttle-explorer__hidden\" data-role=\"selection-actions\">",
@@ -6000,12 +6136,16 @@
       selectedAvailability: "",
       selectedCountry: "",
       selectedVegetation: "",
+      selectedNetworks: [],
+      selectedSources: [],
+      selectedAvailabilities: [],
+      selectedCountries: [],
+      selectedVegetations: [],
       minimumYears: DEFAULT_MINIMUM_YEARS_FILTER,
       maxAvailableYears: DEFAULT_MINIMUM_YEARS_FILTER,
       yearRangeStart: null,
       yearRangeEnd: null,
       yearRangeBounds: availableYearRangeBounds([]),
-      selectedHubs: {},
       selectedKeys: {},
       cliPanelVisible: false,
       sortKey: "data_hub",
@@ -6061,10 +6201,8 @@
       yearRangeValue: bySelector(this.root, "[data-role='year-range-value']"),
       vegetationInfoWrap: bySelector(this.root, "[data-role='vegetation-info-wrap']"),
       vegetationInfoToggle: bySelector(this.root, "[data-role='vegetation-info-toggle']"),
-      hubFilters: bySelector(this.root, "[data-role='hub-filters']"),
       widgetRefreshedInline: bySelector(this.root, "[data-role='widget-refreshed-inline']"),
       widgetLastUpdatedInline: bySelector(this.root, "[data-role='widget-last-updated-inline']"),
-      summaryRow: bySelector(this.root, "[data-role='summary-row']"),
       summary: bySelector(this.root, "[data-role='summary']"),
       reset: bySelector(this.root, "[data-role='reset']"),
       selectionActions: bySelector(this.root, "[data-role='selection-actions']"),
@@ -6100,6 +6238,7 @@
       mapSummary: bySelector(this.root, "[data-role='map-summary']"),
       knownSitesToggle: bySelector(this.root, "[data-role='known-sites-toggle']"),
       knownSitesLegend: bySelector(this.root, "[data-role='known-sites-legend']"),
+      mapControlPanel: bySelector(this.root, "[data-role='map-control-panel']"),
       mapCanvas: bySelector(this.root, "[data-role='map-canvas']"),
       mapEmpty: bySelector(this.root, "[data-role='map-empty']"),
       resetMapView: bySelector(this.root, "[data-role='reset-map-view']"),
@@ -6120,15 +6259,196 @@
     };
   };
 
-  Explorer.prototype.setVegetationTooltipOpen = function (isOpen) {
-    if (!this.bindings.vegetationInfoWrap || !this.bindings.vegetationInfoToggle) {
-      return;
-    }
-    this.bindings.vegetationInfoWrap.classList.toggle("is-open", !!isOpen);
-    this.bindings.vegetationInfoToggle.setAttribute("aria-expanded", isOpen ? "true" : "false");
+	  Explorer.prototype.setVegetationTooltipOpen = function (isOpen) {
+	    if (!this.bindings.vegetationInfoWrap || !this.bindings.vegetationInfoToggle) {
+	      return;
+	    }
+	    this.bindings.vegetationInfoWrap.classList.toggle("is-open", !!isOpen);
+	    this.bindings.vegetationInfoToggle.setAttribute("aria-expanded", isOpen ? "true" : "false");
+	  };
+
+  Explorer.prototype.getMultiFilterContainers = function () {
+    return [
+      this.bindings.availabilityFilter,
+      this.bindings.sourceFilter,
+      this.bindings.networkFilter,
+      this.bindings.countryFilter,
+      this.bindings.vegetationFilter
+    ].filter(Boolean);
   };
 
-  Explorer.prototype.findLinkedTableRow = function (target) {
+  Explorer.prototype.syncLegacySingleFilterState = function (filterKey) {
+    var selected = normalizeFilterSelection(this.state[filterKey]);
+    var singleValue = selected.length === 1 ? selected[0] : "";
+    if (filterKey === "selectedNetworks") {
+      this.state.selectedNetwork = singleValue;
+    } else if (filterKey === "selectedSources") {
+      this.state.selectedSource = singleValue;
+    } else if (filterKey === "selectedAvailabilities") {
+      this.state.selectedAvailability = singleValue;
+    } else if (filterKey === "selectedCountries") {
+      this.state.selectedCountry = singleValue;
+    } else if (filterKey === "selectedVegetations") {
+      this.state.selectedVegetation = singleValue;
+    }
+  };
+
+  Explorer.prototype.setMultiFilterSelection = function (filterKey, values) {
+    if (!filterKey) {
+      return [];
+    }
+    this.state[filterKey] = normalizeFilterSelection(values);
+    this.syncLegacySingleFilterState(filterKey);
+    return this.state[filterKey];
+  };
+
+  Explorer.prototype.setMultiSelectOpen = function (container, isOpen) {
+    var toggle = bySelector(container, "[data-role='multi-toggle']");
+    var menu = bySelector(container, "[data-role='multi-menu']");
+    if (!container || !toggle || !menu) {
+      return;
+    }
+    container.classList.toggle("is-open", !!isOpen);
+    menu.classList.toggle("shuttle-explorer__hidden", !isOpen);
+    if (isOpen) {
+      menu.scrollLeft = 0;
+    }
+    toggle.setAttribute("aria-expanded", isOpen ? "true" : "false");
+  };
+
+  Explorer.prototype.closeMultiSelects = function (except) {
+    this.getMultiFilterContainers().forEach(function (container) {
+      if (container !== except) {
+        this.setMultiSelectOpen(container, false);
+      }
+    }, this);
+  };
+
+  Explorer.prototype.optionValuesFromMultiSelect = function (container) {
+    return qsa(container, "input[data-role='multi-option']:checked").map(function (input) {
+      return String(input.value || "");
+    }).filter(Boolean);
+  };
+
+  Explorer.prototype.applyMultiSelectFilter = function (container, shouldTrack) {
+    var filterKey = container ? String(container.getAttribute("data-filter-key") || "") : "";
+    var trackLabel = container ? String(container.getAttribute("data-track-label") || filterKey) : filterKey;
+    var selected;
+    if (!filterKey) {
+      return;
+    }
+    selected = this.setMultiFilterSelection(filterKey, this.optionValuesFromMultiSelect(container));
+    this.state.page = 1;
+    this.updateDerivedState();
+    this.render();
+    if (shouldTrack) {
+      this.trackFilterChange(trackLabel, selected.join("|"));
+    }
+  };
+
+  Explorer.prototype.bindMultiSelectFilter = function (container) {
+    var self = this;
+    if (!container) {
+      return;
+    }
+    container.addEventListener("click", function (event) {
+      var toggle = event.target && event.target.closest ? event.target.closest("[data-role='multi-toggle']") : null;
+      if (!toggle || !container.contains(toggle)) {
+        return;
+      }
+      event.preventDefault();
+      self.closeMultiSelects(container);
+      self.setMultiSelectOpen(container, !container.classList.contains("is-open"));
+    });
+    container.addEventListener("keydown", function (event) {
+      if (event.key === "Escape" || event.key === "Esc") {
+        self.setMultiSelectOpen(container, false);
+        var toggle = bySelector(container, "[data-role='multi-toggle']");
+        if (toggle) {
+          toggle.focus();
+        }
+      }
+    });
+    container.addEventListener("change", function (event) {
+      var target = event.target;
+      if (!target || target.tagName !== "INPUT") {
+        return;
+      }
+      if (target.getAttribute("data-role") === "multi-all") {
+        qsa(container, "input[data-role='multi-option']").forEach(function (input) {
+          input.checked = false;
+        });
+        self.applyMultiSelectFilter(container, true);
+        return;
+      }
+      if (target.getAttribute("data-role") === "multi-option") {
+        self.applyMultiSelectFilter(container, true);
+      }
+    });
+  };
+
+  Explorer.prototype.populateMultiSelectFilter = function (container, options) {
+    var filterKey = container ? String(container.getAttribute("data-filter-key") || "") : "";
+    var allLabel = container ? String(container.getAttribute("data-all-label") || "All") : "All";
+    var pluralLabel = container ? String(container.getAttribute("data-plural-label") || "items") : "items";
+    var optionList = (options || []).map(function (option) {
+      if (option && typeof option === "object") {
+        return {
+          value: String(option.value || ""),
+          label: String(option.label || option.value || "")
+        };
+      }
+      return {
+        value: String(option || ""),
+        label: String(option || "")
+      };
+    }).filter(function (option) {
+      return !!option.value;
+    });
+    var optionValues = optionList.map(function (option) {
+      return option.value;
+    });
+    var selected;
+    var allInput;
+    var optionsWrap;
+    var summary;
+    if (!container || !filterKey) {
+      return;
+    }
+    selected = pruneFilterSelection(this.state[filterKey], optionValues);
+    this.setMultiFilterSelection(filterKey, selected);
+    allInput = bySelector(container, "[data-role='multi-all']");
+    optionsWrap = bySelector(container, "[data-role='multi-options']");
+    summary = bySelector(container, "[data-role='multi-summary']");
+    if (allInput) {
+      allInput.checked = selected.length === 0;
+    }
+    if (summary) {
+      summary.textContent = filterSelectionLabel(selected, optionList, allLabel, pluralLabel);
+    }
+    if (!optionsWrap) {
+      return;
+    }
+    optionsWrap.innerHTML = "";
+    optionList.forEach(function (option) {
+      var label = document.createElement("label");
+      var input = document.createElement("input");
+      var text = document.createElement("span");
+      label.className = "shuttle-explorer__multi-option";
+      text.className = "shuttle-explorer__multi-option-label";
+      input.type = "checkbox";
+      input.value = option.value;
+      input.checked = selected.indexOf(option.value) !== -1;
+      input.setAttribute("data-role", "multi-option");
+      text.textContent = option.label;
+      text.title = option.label;
+      label.appendChild(input);
+      label.appendChild(text);
+      optionsWrap.appendChild(label);
+    });
+  };
+
+	  Explorer.prototype.findLinkedTableRow = function (target) {
     var tbody = this.bindings.tbody;
     while (target && target !== tbody) {
       if (target.tagName === "TR" && target.getAttribute("data-site-key")) {
@@ -6306,53 +6626,18 @@
       });
     }
 
-    if (b.networkFilter) {
-      b.networkFilter.addEventListener("change", function () {
-        self.state.selectedNetwork = String(b.networkFilter.value || "");
-        self.state.page = 1;
-        self.updateDerivedState();
-        self.render();
-        self.trackFilterChange("network", self.state.selectedNetwork);
-      });
-    }
-
-    if (b.sourceFilter) {
-      b.sourceFilter.addEventListener("change", function () {
-        self.state.selectedSource = String(b.sourceFilter.value || "");
-        self.state.page = 1;
-        self.updateDerivedState();
-        self.render();
-        self.trackFilterChange("source", self.state.selectedSource);
-      });
-    }
-
-    if (b.availabilityFilter) {
-      b.availabilityFilter.addEventListener("change", function () {
-        self.state.selectedAvailability = String(b.availabilityFilter.value || "");
-        self.state.page = 1;
-        self.updateDerivedState();
-        self.render();
-        self.trackFilterChange("availability", self.state.selectedAvailability);
-      });
-    }
-
-    if (b.countryFilter) {
-      b.countryFilter.addEventListener("change", function () {
-        self.state.selectedCountry = String(b.countryFilter.value || "");
-        self.state.page = 1;
-        self.updateDerivedState();
-        self.render();
-        self.trackFilterChange("country", self.state.selectedCountry);
-      });
-    }
-
-    if (b.vegetationFilter) {
-      b.vegetationFilter.addEventListener("change", function () {
-        self.state.selectedVegetation = String(b.vegetationFilter.value || "");
-        self.state.page = 1;
-        self.updateDerivedState();
-        self.render();
-        self.trackFilterChange("vegetation_type", self.state.selectedVegetation);
+    this.getMultiFilterContainers().forEach(function (container) {
+      self.bindMultiSelectFilter(container);
+    });
+    if (typeof document !== "undefined") {
+      document.addEventListener("click", function (event) {
+        var target = event.target;
+        if (self.getMultiFilterContainers().some(function (container) {
+          return container && container.contains(target);
+        })) {
+          return;
+        }
+        self.closeMultiSelects();
       });
     }
 
@@ -6441,24 +6726,6 @@
         if (!b.vegetationInfoWrap.contains(event.target)) {
           self.setVegetationTooltipOpen(false);
         }
-      });
-    }
-
-    if (b.hubFilters) {
-      b.hubFilters.addEventListener("change", function (event) {
-        var target = event.target;
-        if (!target || target.tagName !== "INPUT" || target.type !== "checkbox") {
-          return;
-        }
-        var hub = String(target.getAttribute("data-hub") || "");
-        if (!hub) {
-          return;
-        }
-        self.state.selectedHubs[hub] = !!target.checked;
-        self.state.page = 1;
-        self.updateDerivedState();
-        self.render();
-        self.trackFilterChange("hub", hub + ":" + (target.checked ? "on" : "off"));
       });
     }
 
@@ -6938,7 +7205,6 @@
   };
 
   Explorer.prototype.resetFilters = function () {
-    var self = this;
     if (this._searchDebounceTimer) {
       window.clearTimeout(this._searchDebounceTimer);
       this._searchDebounceTimer = null;
@@ -6949,12 +7215,14 @@
     this.state.selectedAvailability = "";
     this.state.selectedCountry = "";
     this.state.selectedVegetation = "";
+    this.state.selectedNetworks = [];
+    this.state.selectedSources = [];
+    this.state.selectedAvailabilities = [];
+    this.state.selectedCountries = [];
+    this.state.selectedVegetations = [];
     this.state.minimumYears = DEFAULT_MINIMUM_YEARS_FILTER;
     this.state.yearRangeStart = null;
     this.state.yearRangeEnd = null;
-    Object.keys(this.state.selectedHubs).forEach(function (hub) {
-      self.state.selectedHubs[hub] = true;
-    });
     this.state.sortKey = "data_hub";
     this.state.sortDir = "asc";
     this.state.page = 1;
@@ -6962,26 +7230,9 @@
     if (this.bindings.search) {
       this.bindings.search.value = "";
     }
-    if (this.bindings.networkFilter) {
-      this.bindings.networkFilter.value = "";
-    }
-    if (this.bindings.sourceFilter) {
-      this.bindings.sourceFilter.value = "";
-    }
-    if (this.bindings.availabilityFilter) {
-      this.bindings.availabilityFilter.value = "";
-    }
-    if (this.bindings.countryFilter) {
-      this.bindings.countryFilter.value = "";
-    }
-    if (this.bindings.vegetationFilter) {
-      this.bindings.vegetationFilter.value = "";
-    }
+    this.closeMultiSelects();
     this.syncMinimumYearsFilterControl();
     this.syncYearRangeFilterControl(false);
-    qsa(this.bindings.hubFilters, "input[type='checkbox']").forEach(function (input) {
-      input.checked = true;
-    });
 
     this.updateDerivedState();
     this.render();
@@ -7084,11 +7335,19 @@
     }).addTo(this.map);
     this.mapKnownSiteLayer = L.featureGroup().addTo(this.map);
     this.mapMarkerLayer = L.featureGroup().addTo(this.map);
-    if (this.map.attributionControl && this.map.attributionControl.setPrefix) {
-      this.map.attributionControl.setPrefix("");
+	    if (this.map.attributionControl && this.map.attributionControl.setPrefix) {
+	      this.map.attributionControl.setPrefix("");
+	    }
+    if (this.bindings.mapControlPanel && L.DomEvent) {
+      if (L.DomEvent.disableClickPropagation) {
+        L.DomEvent.disableClickPropagation(this.bindings.mapControlPanel);
+      }
+      if (L.DomEvent.disableScrollPropagation) {
+        L.DomEvent.disableScrollPropagation(this.bindings.mapControlPanel);
+      }
     }
-    if (!this._mapResizeHandler) {
-      var self = this;
+	    if (!this._mapResizeHandler) {
+	      var self = this;
       this._mapResizeHandler = function () {
         self.invalidateMapSize(false);
       };
@@ -8529,16 +8788,10 @@
   Explorer.prototype.populateFilters = function () {
     var rows = this.state.rows;
     var b = this.bindings;
-    var hubs = [];
-    var hubMap = {};
     var networkMap = {};
     var countryMap = {};
 
     rows.forEach(function (row) {
-      if (!hubMap[row.data_hub]) {
-        hubMap[row.data_hub] = true;
-        hubs.push(row.data_hub);
-      }
       row.network_tokens.forEach(function (token) {
         if (token) {
           networkMap[token] = true;
@@ -8549,106 +8802,11 @@
       }
     });
 
-    hubs.sort();
-    Object.keys(hubMap).forEach(function (hub) {
-      if (typeof this.state.selectedHubs[hub] === "undefined") {
-        this.state.selectedHubs[hub] = true;
-      }
-    }, this);
-
-    if (b.hubFilters) {
-      b.hubFilters.innerHTML = "";
-      var hubPrefix = document.createElement("span");
-      hubPrefix.className = "shuttle-explorer__hub-prefix";
-      hubPrefix.textContent = "Hubs:";
-      b.hubFilters.appendChild(hubPrefix);
-      hubs.forEach(function (hub) {
-        var label = document.createElement("label");
-        label.className = "shuttle-explorer__hub-chip";
-        var input = document.createElement("input");
-        input.type = "checkbox";
-        input.checked = !!this.state.selectedHubs[hub];
-        input.setAttribute("data-hub", hub);
-        label.appendChild(input);
-        label.appendChild(document.createTextNode(" " + hub));
-        b.hubFilters.appendChild(label);
-      }, this);
-    }
-
-    if (b.networkFilter) {
-      var currentNetwork = this.state.selectedNetwork;
-      b.networkFilter.innerHTML = "<option value=\"\">All networks</option>";
-      Object.keys(networkMap).sort().forEach(function (network) {
-        var option = document.createElement("option");
-        option.value = network;
-        option.textContent = network;
-        b.networkFilter.appendChild(option);
-      });
-      b.networkFilter.value = currentNetwork;
-      if (b.networkFilter.value !== currentNetwork) {
-        this.state.selectedNetwork = "";
-      }
-    }
-
-    if (b.sourceFilter) {
-      var currentSource = this.state.selectedSource;
-      b.sourceFilter.innerHTML = "<option value=\"\">All sources</option>";
-      uniqueSourceFilterValues(rows).forEach(function (sourceValue) {
-        var option = document.createElement("option");
-        option.value = sourceValue;
-        option.textContent = sourceValue;
-        b.sourceFilter.appendChild(option);
-      });
-      b.sourceFilter.value = currentSource;
-      if (b.sourceFilter.value !== currentSource) {
-        this.state.selectedSource = "";
-      }
-    }
-
-    if (b.availabilityFilter) {
-      var currentAvailability = this.state.selectedAvailability;
-      b.availabilityFilter.innerHTML = "<option value=\"\">All sites</option>";
-      uniqueAvailabilityFilterValues(rows).forEach(function (availabilityValue) {
-        var option = document.createElement("option");
-        option.value = availabilityValue;
-        option.textContent = availabilityValue;
-        b.availabilityFilter.appendChild(option);
-      });
-      b.availabilityFilter.value = currentAvailability;
-      if (b.availabilityFilter.value !== currentAvailability) {
-        this.state.selectedAvailability = "";
-      }
-    }
-
-    if (b.countryFilter) {
-      var currentCountry = this.state.selectedCountry;
-      b.countryFilter.innerHTML = "<option value=\"\">All countries</option>";
-      Object.keys(countryMap).sort().forEach(function (country) {
-        var option = document.createElement("option");
-        option.value = country;
-        option.textContent = country;
-        b.countryFilter.appendChild(option);
-      });
-      b.countryFilter.value = currentCountry;
-      if (b.countryFilter.value !== currentCountry) {
-        this.state.selectedCountry = "";
-      }
-    }
-
-    if (b.vegetationFilter) {
-      var currentVegetation = this.state.selectedVegetation;
-      b.vegetationFilter.innerHTML = "<option value=\"\">All vegetation types</option>";
-      buildVegetationFilterOptions(rows).forEach(function (vegetationOption) {
-        var option = document.createElement("option");
-        option.value = vegetationOption.value;
-        option.textContent = vegetationOption.label;
-        b.vegetationFilter.appendChild(option);
-      });
-      b.vegetationFilter.value = currentVegetation;
-      if (b.vegetationFilter.value !== currentVegetation) {
-        this.state.selectedVegetation = "";
-      }
-    }
+    this.populateMultiSelectFilter(b.availabilityFilter, uniqueAvailabilityFilterValues(rows));
+    this.populateMultiSelectFilter(b.sourceFilter, uniqueSourceFilterValues(rows));
+    this.populateMultiSelectFilter(b.networkFilter, Object.keys(networkMap).sort());
+    this.populateMultiSelectFilter(b.countryFilter, Object.keys(countryMap).sort());
+    this.populateMultiSelectFilter(b.vegetationFilter, buildVegetationFilterOptions(rows));
 
     this.syncMinimumYearsFilterControl();
     this.syncYearRangeFilterControl(true);
@@ -8657,12 +8815,19 @@
 
   Explorer.prototype.isDefaultMapAccessibleUniverse = function () {
     var normalizedYearRange;
-    var hubs;
     if (String(this.state.search || "").trim()) {
       return false;
     }
-    if (this.state.selectedNetwork || this.state.selectedSource || this.state.selectedAvailability ||
-        this.state.selectedCountry || this.state.selectedVegetation) {
+    if (filterSelectionHasValues(this.state.selectedNetworks) ||
+        filterSelectionHasValues(this.state.selectedNetwork) ||
+        filterSelectionHasValues(this.state.selectedSources) ||
+        filterSelectionHasValues(this.state.selectedSource) ||
+        filterSelectionHasValues(this.state.selectedAvailabilities) ||
+        filterSelectionHasValues(this.state.selectedAvailability) ||
+        filterSelectionHasValues(this.state.selectedCountries) ||
+        filterSelectionHasValues(this.state.selectedCountry) ||
+        filterSelectionHasValues(this.state.selectedVegetations) ||
+        filterSelectionHasValues(this.state.selectedVegetation)) {
       return false;
     }
     if ((parseIntOrNull(this.state.minimumYears) || DEFAULT_MINIMUM_YEARS_FILTER) !== DEFAULT_MINIMUM_YEARS_FILTER) {
@@ -8675,40 +8840,45 @@
     if (!normalizedYearRange.isDefault) {
       return false;
     }
-    hubs = this.state.selectedHubs || {};
-    return Object.keys(hubs).every(function (hub) {
-      return !!hubs[hub];
-    });
+    return true;
   };
 
   Explorer.prototype.updateDerivedState = function () {
     var self = this;
     var search = String(this.state.search || "").trim().toLowerCase();
-    var selectedNetwork = this.state.selectedNetwork;
-    var selectedSource = this.state.selectedSource;
-    var selectedAvailability = this.state.selectedAvailability;
-    var selectedCountry = this.state.selectedCountry;
-    var selectedVegetation = this.state.selectedVegetation;
+    var selectedNetworks = normalizeFilterSelection(this.state.selectedNetworks).length
+      ? normalizeFilterSelection(this.state.selectedNetworks)
+      : normalizeFilterSelection(this.state.selectedNetwork);
+    var selectedSources = normalizeFilterSelection(this.state.selectedSources).length
+      ? normalizeFilterSelection(this.state.selectedSources)
+      : normalizeFilterSelection(this.state.selectedSource);
+    var selectedAvailabilities = normalizeFilterSelection(this.state.selectedAvailabilities).length
+      ? normalizeFilterSelection(this.state.selectedAvailabilities)
+      : normalizeFilterSelection(this.state.selectedAvailability);
+    var selectedCountries = normalizeFilterSelection(this.state.selectedCountries).length
+      ? normalizeFilterSelection(this.state.selectedCountries)
+      : normalizeFilterSelection(this.state.selectedCountry);
+    var selectedVegetations = normalizeFilterSelection(this.state.selectedVegetations).length
+      ? normalizeFilterSelection(this.state.selectedVegetations)
+      : normalizeFilterSelection(this.state.selectedVegetation);
     var minimumYears = this.state.minimumYears;
     var yearRange = {
       start: this.state.yearRangeStart,
       end: this.state.yearRangeEnd
     };
     var yearRangeBounds = this.state.yearRangeBounds;
-    var selectedHubs = this.state.selectedHubs;
 
     this.state.filteredRows = this.state.rows.filter(function (row) {
       return rowMatchesExplorerFilters(row, {
         search: search,
-        selectedNetwork: selectedNetwork,
-        selectedSource: selectedSource,
-        selectedAvailability: selectedAvailability,
-        selectedCountry: selectedCountry,
-        selectedVegetation: selectedVegetation,
+        selectedNetworks: selectedNetworks,
+        selectedSources: selectedSources,
+        selectedAvailabilities: selectedAvailabilities,
+        selectedCountries: selectedCountries,
+        selectedVegetations: selectedVegetations,
         minimumYears: minimumYears,
         yearRange: yearRange,
-        yearRangeBounds: yearRangeBounds,
-        selectedHubs: selectedHubs
+        yearRangeBounds: yearRangeBounds
       });
     }).slice().sort(function (a, b) {
       return compareRows(a, b, self.state.sortKey, self.state.sortDir);
@@ -8841,10 +9011,8 @@
   };
 
   Explorer.prototype.renderSummary = function () {
-    var total = this.state.rows.length;
-    var filtered = this.state.filteredRows.length;
     if (this.bindings.summary) {
-      this.bindings.summary.textContent = "Showing " + filtered + " of " + total + " sites.";
+      this.bindings.summary.textContent = "";
     }
   };
 
@@ -8877,7 +9045,7 @@
 
     if (!this.state.filteredRows.length) {
       empty.classList.remove("shuttle-explorer__hidden");
-      empty.innerHTML = "No matching sites. <button type=\"button\" class=\"shuttle-explorer__btn shuttle-explorer__btn--small\" data-role=\"empty-reset\">Reset filters</button>";
+      empty.textContent = "No matching sites.";
       return;
     }
 
@@ -8912,12 +9080,6 @@
     if (b.controls) {
       b.controls.classList.toggle("shuttle-explorer__hidden", !hasData);
     }
-    if (b.hubFilters) {
-      b.hubFilters.classList.toggle("shuttle-explorer__hidden", !hasData);
-    }
-    if (b.summaryRow) {
-      b.summaryRow.classList.toggle("shuttle-explorer__hidden", !hasData);
-    }
     if (b.selectionActions) {
       b.selectionActions.classList.toggle("shuttle-explorer__hidden", !hasData);
     }
@@ -8945,11 +9107,6 @@
       this.renderMap();
     }
 
-    var emptyReset = bySelector(this.bindings.empty, "[data-role='empty-reset']");
-    if (emptyReset && !emptyReset._boundReset) {
-      emptyReset._boundReset = true;
-      emptyReset.addEventListener("click", this.resetFilters.bind(this));
-    }
   };
 
   Explorer.prototype.applyLoadedSnapshotState = function (snapshot) {
@@ -9374,9 +9531,11 @@
     partitionRowsByBulkSource: partitionRowsByBulkSource,
     summarizeBulkSelection: summarizeBulkSelection,
     computeSourceFilterTags: computeSourceFilterTags,
-    uniqueSourceFilterValues: uniqueSourceFilterValues,
-    uniqueAvailabilityFilterValues: uniqueAvailabilityFilterValues,
-    rowMatchesExplorerFilters: rowMatchesExplorerFilters,
+	    uniqueSourceFilterValues: uniqueSourceFilterValues,
+	    uniqueAvailabilityFilterValues: uniqueAvailabilityFilterValues,
+    normalizeFilterSelection: normalizeFilterSelection,
+    filterSelectionLabel: filterSelectionLabel,
+	    rowMatchesExplorerFilters: rowMatchesExplorerFilters,
     uniqueVegetationFilterValues: uniqueVegetationFilterValues,
     buildVegetationFilterOptions: buildVegetationFilterOptions,
     summarizeApiOnlyRowCoordinateCoverage: summarizeApiOnlyRowCoordinateCoverage,

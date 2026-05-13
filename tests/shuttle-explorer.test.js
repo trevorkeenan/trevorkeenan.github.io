@@ -2636,33 +2636,97 @@ test('FLUXNET2015 supplemental rows infer regional networks from country while r
   assert.equal(hooks.rowMatchesExplorerFilters(bySite['XX-Leg'], { selectedSource: 'FLUXNET-2015' }), true);
 });
 
-test('Source, Availability, minimum-years, and year-range controls all exist in the explorer markup', () => {
+test('Filter controls use compact multiselects and a shared years row in the explorer markup', () => {
   const explorerJs = fs.readFileSync(path.join(__dirname, '..', 'assets', 'shuttle-explorer.js'), 'utf8');
-  const sourceIndex = explorerJs.indexOf('label for=\\"shuttle-source\\">Source</label>');
-  const availabilityIndex = explorerJs.indexOf('label for=\\"shuttle-availability\\">Availability</label>');
-  const vegetationIndex = explorerJs.indexOf('label for=\\"shuttle-vegetation\\">Veg. type</label>');
-  const minimumYearsIndex = explorerJs.indexOf('label for=\\"shuttle-minimum-years\\">Minimum years available:');
-  const yearRangeIndex = explorerJs.indexOf('label for=\\"shuttle-year-range-start\\">Year range:');
+  const explorerCss = fs.readFileSync(path.join(__dirname, '..', 'assets', 'shuttle-explorer.css'), 'utf8');
+  const sourceIndex = explorerJs.indexOf('role: "source-filter"');
+  const availabilityIndex = explorerJs.indexOf('role: "availability-filter"');
+  const vegetationIndex = explorerJs.indexOf('role: "vegetation-filter"');
+  const yearsRowIndex = explorerJs.indexOf('shuttle-explorer__years-row');
+  const yearRangeIndex = explorerJs.indexOf('label for=\\"shuttle-year-range-start\\">Years:');
+  const minimumYearsIndex = explorerJs.indexOf('label for=\\"shuttle-minimum-years\\">Min length:');
 
-  assert.equal(explorerJs.includes('label for=\\"shuttle-source\\">Source</label>'), true);
-  assert.equal(explorerJs.includes('data-role=\\"source-filter\\"><option value=\\"\\">All sources</option>'), true);
-  assert.equal(explorerJs.includes('label for=\\"shuttle-availability\\">Availability</label>'), true);
-  assert.equal(explorerJs.includes('data-role=\\"availability-filter\\"><option value=\\"\\">All sites</option>'), true);
-  assert.equal(explorerJs.includes('label for=\\"shuttle-minimum-years\\">Minimum years available:'), true);
+  assert.notEqual(sourceIndex, -1);
+  assert.equal(explorerJs.includes('filterKey: "selectedSources"'), true);
+  assert.notEqual(availabilityIndex, -1);
+  assert.equal(explorerJs.includes('filterKey: "selectedAvailabilities"'), true);
+  assert.equal(explorerJs.includes('data-role=\\"multi-toggle\\"'), true);
+  assert.equal(explorerJs.includes('data-role=\\"multi-all\\"'), true);
+  assert.equal(explorerJs.includes('data-role=\\"multi-options\\"'), true);
+  assert.equal(explorerJs.includes('shuttle-explorer__multi-option-label'), true);
+  assert.equal(explorerJs.includes('label.appendChild(document.createTextNode(" "))'), false);
+  assert.equal(explorerJs.includes('allLabel: "All Veg types"'), true);
+  assert.equal(explorerJs.includes('shuttle-explorer__years-row'), true);
+  assert.equal(explorerCss.includes('grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);'), true);
+  assert.equal(explorerCss.includes('align-items: center;'), true);
+  assert.equal(explorerCss.includes('overflow-x: hidden;'), true);
+  assert.equal(explorerCss.includes('.shuttle-explorer__field .shuttle-explorer__multi-option input[type="checkbox"]'), true);
+  assert.equal(explorerCss.includes('gap: 0.4rem;'), true);
+  assert.equal(explorerCss.includes('overflow-wrap: anywhere;'), true);
   assert.equal(explorerJs.includes('type=\\"range\\" min=\\"1\\" max=\\"1\\" step=\\"1\\" value=\\"1\\" data-role=\\"minimum-years-filter\\"'), true);
-  assert.equal(explorerJs.includes('label for=\\"shuttle-year-range-start\\">Year range:'), true);
+  assert.equal(explorerJs.includes('label for=\\"shuttle-year-range-start\\">Years:'), true);
   assert.equal(explorerJs.includes('data-role=\\"year-range-start-filter\\" aria-label=\\"Start year\\"'), true);
   assert.equal(explorerJs.includes('data-role=\\"year-range-end-filter\\" aria-label=\\"End year\\"'), true);
   assert.equal(availabilityIndex < sourceIndex, true);
   assert.equal(minimumYearsIndex > vegetationIndex, true);
-  assert.equal(yearRangeIndex > minimumYearsIndex, true);
+  assert.equal(yearsRowIndex < minimumYearsIndex, true);
+  assert.equal(minimumYearsIndex < yearRangeIndex, true);
+  assert.equal(explorerJs.includes('data-role=\\"hub-filters\\"'), false);
 });
 
-test('Explorer summary copy refers to sites rather than records', () => {
+test('Known-sites toggle and legend render inside the map control panel', () => {
+  const explorerJs = fs.readFileSync(path.join(__dirname, '..', 'assets', 'shuttle-explorer.js'), 'utf8');
+  const explorerCss = fs.readFileSync(path.join(__dirname, '..', 'assets', 'shuttle-explorer.css'), 'utf8');
+  const mapShellIndex = explorerJs.indexOf('shuttle-explorer__map-shell');
+  const panelIndex = explorerJs.indexOf('shuttle-explorer__map-control-panel');
+  const toggleIndex = explorerJs.indexOf('data-role=\\"known-sites-toggle\\"', panelIndex);
+  const legendIndex = explorerJs.indexOf('buildKnownSitesLegendHtml()', panelIndex);
+
+  assert.notEqual(mapShellIndex, -1);
+  assert.notEqual(panelIndex, -1);
+  assert.equal(mapShellIndex < panelIndex, true);
+  assert.equal(panelIndex < toggleIndex, true);
+  assert.equal(toggleIndex < legendIndex, true);
+  assert.equal(explorerJs.includes('shuttle-explorer__map-controls'), false);
+  assert.equal(explorerCss.includes('.shuttle-explorer__map-control-panel {'), true);
+  assert.equal(explorerCss.includes('bottom: 10px;'), true);
+  assert.equal(explorerCss.includes('.shuttle-explorer__map-controls {'), false);
+});
+
+test('Reset filters button renders inside the map action group beside reset map view', () => {
+  const explorerJs = fs.readFileSync(path.join(__dirname, '..', 'assets', 'shuttle-explorer.js'), 'utf8');
+  const explorerCss = fs.readFileSync(path.join(__dirname, '..', 'assets', 'shuttle-explorer.css'), 'utf8');
+  const mapActionsIndex = explorerJs.indexOf('shuttle-explorer__map-actions');
+  const resetGroupIndex = explorerJs.indexOf('shuttle-explorer__map-reset-actions', mapActionsIndex);
+  const resetFiltersIndex = explorerJs.indexOf('data-role=\\"reset\\"', resetGroupIndex);
+  const resetMapIndex = explorerJs.indexOf('data-role=\\"reset-map-view\\"', resetGroupIndex);
+  const downloadCsvIndex = explorerJs.indexOf('data-role=\\"download-known-sites-csv\\"', resetGroupIndex);
+
+  assert.notEqual(mapActionsIndex, -1);
+  assert.notEqual(resetGroupIndex, -1);
+  assert.notEqual(resetFiltersIndex, -1);
+  assert.notEqual(resetMapIndex, -1);
+  assert.equal(mapActionsIndex < resetGroupIndex, true);
+  assert.equal(resetGroupIndex < resetFiltersIndex, true);
+  assert.equal(resetFiltersIndex < resetMapIndex, true);
+  assert.equal(resetMapIndex < downloadCsvIndex, true);
+  assert.equal((explorerJs.match(/data-role=\\"reset\\"/g) || []).length, 1);
+  assert.equal(explorerJs.includes('data-role=\\"empty-reset\\"'), false);
+  assert.equal(explorerJs.includes('No matching sites. <button'), false);
+  assert.equal(explorerJs.includes('data-role=\\"summary-row\\"'), false);
+  assert.equal(explorerJs.includes('shuttle-explorer__filter-actions'), false);
+  assert.equal(explorerCss.includes('.shuttle-explorer__map-reset-actions {'), true);
+  assert.equal(explorerCss.includes('flex-wrap: nowrap;'), true);
+  assert.equal(explorerCss.includes('width: max-content;'), true);
+  assert.equal(explorerCss.includes('.shuttle-explorer__filter-actions'), false);
+});
+
+test('Duplicated external Showing X of Y site summary copy is no longer rendered', () => {
   const explorerJs = fs.readFileSync(path.join(__dirname, '..', 'assets', 'shuttle-explorer.js'), 'utf8');
 
-  assert.equal(explorerJs.includes('Showing " + filtered + " of " + total + " sites.'), true);
+  assert.equal(explorerJs.includes('Showing " + filtered + " of " + total + " sites.'), false);
   assert.equal(explorerJs.includes('Showing " + filtered + " of " + total + " records.'), false);
+  assert.equal(explorerJs.includes('data-role=\\"summary\\"'), false);
 });
 
 test('FLUXNET processed includes both ONEFlux-only and hybrid rows, while other availability labels stay specific', () => {
@@ -2755,6 +2819,115 @@ test('Source and Availability filters compose for AmeriFlux provenance with FLUX
     .sort();
 
   assert.deepEqual(matchingSiteIds, ['US-Add', 'US-Pro']);
+});
+
+test('Categorical multiselect filters use OR within a category and AND across categories', () => {
+  const merged = hooks.mergeCatalogRows(
+    [],
+    [
+      makeCatalogRow({
+        site_id: 'BE-Ico',
+        site_name: 'ICOS Site',
+        country: 'BE',
+        data_hub: 'ICOS',
+        network: 'FLX',
+        source_network: 'FLX',
+        network_display: 'FLX',
+        network_tokens: ['FLX'],
+        vegetation_type: 'ENF',
+        first_year: 2001,
+        last_year: 2005,
+        years: '2001-2005',
+        download_link: 'https://example.org/be-ico.zip',
+        source_label: 'ICOS',
+        source_reason: '',
+        source_origin: 'icos_direct'
+      })
+    ],
+    [
+      makeCatalogRow({
+        site_id: 'US-Ami',
+        site_name: 'AmeriFlux Site',
+        country: 'US',
+        data_hub: 'AmeriFlux',
+        network: 'AMF',
+        source_network: 'AMF',
+        network_display: 'AmeriFlux',
+        network_tokens: ['AMF', 'AmeriFlux'],
+        vegetation_type: 'GRA',
+        first_year: 2010,
+        last_year: 2012,
+        years: '2010-2012',
+        download_link: 'https://example.org/us-ami.zip',
+        source_label: 'AmeriFlux',
+        source_reason: '',
+        source_origin: 'ameriflux'
+      })
+    ],
+    [],
+    [],
+    []
+  );
+  const rows = merged.rows;
+  const beCountry = rows.find((row) => row.site_id === 'BE-Ico').country;
+  const matchingSources = rows
+    .filter((row) => hooks.rowMatchesExplorerFilters(row, {
+      selectedSources: ['AmeriFlux', 'ICOS']
+    }))
+    .map((row) => row.site_id)
+    .sort();
+  const sourceAndCountry = rows
+    .filter((row) => hooks.rowMatchesExplorerFilters(row, {
+      selectedSources: ['AmeriFlux', 'ICOS'],
+      selectedCountries: [beCountry]
+    }))
+    .map((row) => row.site_id);
+  const sourceAndVegetation = rows
+    .filter((row) => hooks.rowMatchesExplorerFilters(row, {
+      selectedSources: ['AmeriFlux', 'ICOS'],
+      selectedVegetations: ['ENF', 'DBF']
+    }))
+    .map((row) => row.site_id);
+
+  assert.deepEqual(matchingSources, ['BE-Ico', 'US-Ami']);
+  assert.deepEqual(sourceAndCountry, ['BE-Ico']);
+  assert.deepEqual(sourceAndVegetation, ['BE-Ico']);
+  assert.equal(
+    hooks.rowMatchesExplorerFilters(rows[0], {
+      selectedSources: ['AmeriFlux'],
+      selectedCountries: ['BE', 'US']
+    }),
+    false
+  );
+});
+
+test('Hub checkbox state is ignored after the hub UI removal', () => {
+  const row = makeCatalogRow({
+    site_id: 'US-Hub',
+    data_hub: 'AmeriFlux',
+    source_label: 'AmeriFlux',
+    source_origin: 'ameriflux',
+    network_tokens: ['AMF'],
+    country: 'US',
+    vegetation_type: 'GRA',
+    first_year: 2010,
+    last_year: 2011,
+    years: '2010-2011'
+  });
+
+  assert.equal(hooks.rowMatchesExplorerFilters(row, { selectedHubs: { AmeriFlux: false } }), true);
+});
+
+test('Multiselect labels summarize all, short, and long selections compactly', () => {
+  const options = [
+    { value: 'AmeriFlux', label: 'AmeriFlux' },
+    { value: 'ICOS', label: 'ICOS' },
+    { value: 'JapanFlux', label: 'JapanFlux' }
+  ];
+
+  assert.equal(hooks.filterSelectionLabel([], options, 'All sources', 'sources'), 'All sources');
+  assert.equal(hooks.filterSelectionLabel(['AmeriFlux', 'ICOS'], options, 'All sources', 'sources'), 'AmeriFlux, ICOS');
+  assert.equal(hooks.filterSelectionLabel(['AmeriFlux', 'ICOS', 'JapanFlux'], options, 'All sources', 'sources'), '3 sources');
 });
 
 test('Minimum years filter composes with existing source and availability filters', () => {
@@ -4098,7 +4271,7 @@ test('Vegetation filter markup includes an IGBP info tooltip and external refere
   const explorerJs = fs.readFileSync(path.join(__dirname, '..', 'assets', 'shuttle-explorer.js'), 'utf8');
   const explorerCss = fs.readFileSync(path.join(__dirname, '..', 'assets', 'shuttle-explorer.css'), 'utf8');
 
-  assert.equal(explorerJs.includes('label for=\\"shuttle-vegetation\\">Veg. type</label>'), true);
+  assert.equal(explorerJs.includes('label id=\\"shuttle-vegetation-label\\">Veg. type</label>'), true);
   assert.equal(explorerJs.includes('data-role=\\"vegetation-info-wrap\\"'), true);
   assert.equal(explorerJs.includes('data-role=\\"vegetation-info-toggle\\"'), true);
   assert.equal(explorerJs.includes('aria-label=\\"About IGBP vegetation codes\\"'), true);
