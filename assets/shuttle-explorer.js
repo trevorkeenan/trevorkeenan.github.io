@@ -5183,7 +5183,6 @@
   function buildKnownSitesLegendHtml() {
     return [
       "<div class=\"shuttle-explorer__tiny shuttle-explorer__map-legend\" data-role=\"known-sites-legend\" aria-label=\"Map legend\">",
-      "  <span class=\"shuttle-explorer__map-legend-item\"><span class=\"shuttle-explorer__map-legend-swatch shuttle-explorer__map-legend-swatch--selected\" aria-hidden=\"true\"></span><span>selected sites</span></span>",
       "  <span class=\"shuttle-explorer__map-legend-item\"><span class=\"shuttle-explorer__map-legend-swatch shuttle-explorer__map-legend-swatch--accessible\" aria-hidden=\"true\"></span><span>sites with accessible data</span></span>",
       "  <span class=\"shuttle-explorer__map-legend-item\"><span class=\"shuttle-explorer__map-legend-swatch shuttle-explorer__map-legend-swatch--unshared\" aria-hidden=\"true\"></span><span>sites without shared data</span></span>",
       "</div>"
@@ -5515,7 +5514,6 @@
       ".shuttle-explorer__map-legend{display:flex;flex-wrap:wrap;gap:8px 14px;margin:0;max-width:680px;}",
       ".shuttle-explorer__map-legend-item{display:inline-flex;align-items:center;gap:6px;line-height:1.3;}",
       ".shuttle-explorer__map-legend-swatch{display:inline-block;width:10px;height:10px;border-radius:999px;flex:0 0 auto;}",
-      ".shuttle-explorer__map-legend-swatch--selected{border:1.5px solid #2f5374;background:#5f8bb3;}",
       ".shuttle-explorer__map-legend-swatch--accessible{border:1.4px solid #9b6a08;background:#f3d58a;}",
       ".shuttle-explorer__map-legend-swatch--unshared{border:1.4px solid #6d8fb2;background:#d8e6f4;}",
       "@media (max-width: 860px){.shuttle-explorer__controls{grid-template-columns:1fr;}.shuttle-explorer__row{flex-direction:column;align-items:flex-start;}.shuttle-explorer__bulk-identity-grid{grid-template-columns:1fr;}.shuttle-explorer__map-header{flex-direction:column;align-items:flex-start;}.shuttle-explorer__map-actions{align-items:flex-start;}}"
@@ -6663,9 +6661,8 @@
       row.latitude = latitude;
       row.longitude = longitude;
       row.has_coordinates = true;
-      row.is_map_selected = !!selected[row._selection_key];
       mappableRows.push(row);
-      signatureParts.push(String(row._selection_key || "") + ":" + latitude + ":" + longitude + ":" + (row.is_map_selected ? "1" : "0"));
+      signatureParts.push(String(row._selection_key || "") + ":" + latitude + ":" + longitude);
     });
 
     signatureParts.sort();
@@ -6678,7 +6675,6 @@
       signature: [
         String(rows.length),
         String(missingCoordinates),
-        String(selectedRows.length),
         signatureParts.join("|")
       ].join("::")
     };
@@ -6840,13 +6836,12 @@
     L = window.L;
     this.mapMarkerLayer.clearLayers();
     (rows || []).forEach(function (row) {
-      var isSelected = !!(row && row.is_map_selected);
       var marker = L.circleMarker([row.latitude, row.longitude], {
-        radius: isSelected ? 6 : 4.5,
-        weight: isSelected ? 1.5 : 1.1,
+        radius: 4.5,
+        weight: 1.1,
         color: "#2f5374",
         fillColor: "#5f8bb3",
-        fillOpacity: isSelected ? 0.9 : 0.45
+        fillOpacity: 0.45
       });
       marker.bindPopup(self.buildMapPopupHtml(row, { showCategory: false }), {
         autoPan: true

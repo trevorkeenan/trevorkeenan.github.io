@@ -445,12 +445,12 @@ test('Known-sites map copy uses the simplified popup text and visual legend labe
   assert.equal(explorerJs.includes('sites without shared data'), true);
   assert.equal(explorerJs.includes('additional sites with accessible data'), false);
   assert.equal(explorerJs.includes('additional sites without shared data'), false);
-  assert.equal(explorerJs.includes('selected sites'), true);
+  assert.equal(explorerJs.includes('shuttle-explorer__map-legend-swatch--selected'), false);
   assert.equal(explorerJs.includes('without shared data.'), true);
   assert.equal(explorerJs.includes('Is your site missing? Email'), true);
   assert.equal(explorerJs.includes('href=\\"mailto:trevorkeenan@berkeley.edu\\"'), true);
   assert.equal(explorerCss.includes('.shuttle-explorer__map-actions {'), true);
-  assert.equal(explorerCss.includes('.shuttle-explorer__map-legend-swatch--selected {'), true);
+  assert.equal(explorerCss.includes('.shuttle-explorer__map-legend-swatch--selected {'), false);
   assert.equal(explorerCss.includes('.shuttle-explorer__map-legend-swatch--accessible {'), true);
   assert.equal(explorerCss.includes('.shuttle-explorer__map-legend-swatch--unshared {'), true);
 });
@@ -537,9 +537,9 @@ test('Map display state is driven by filtered rows, not by selected rows', () =>
   assert.equal(selectedState.filteredRows.length, 2);
   assert.equal(selectedState.mappableRows.length, 2);
   assert.deepEqual(selectedState.selectedRows.map((row) => row.site_id), ['US-MapB']);
-  assert.equal(selectedState.mappableRows.find((row) => row.site_id === 'US-MapB').is_map_selected, true);
-  assert.equal(selectedState.mappableRows.find((row) => row.site_id === 'US-MapA').is_map_selected, false);
-  assert.notEqual(selectedState.signature, unselectedState.signature);
+  assert.equal(selectedState.mappableRows.find((row) => row.site_id === 'US-MapB').is_map_selected, undefined);
+  assert.equal(selectedState.mappableRows.find((row) => row.site_id === 'US-MapA').is_map_selected, undefined);
+  assert.equal(selectedState.signature, unselectedState.signature);
 });
 
 test('Map display state follows filtered-result changes before selection buttons are used', () => {
@@ -567,6 +567,24 @@ test('Map display state follows filtered-result changes before selection buttons
   assert.deepEqual(filteredRows.map((row) => row.site_id), ['US-MapB']);
   assert.deepEqual(mapState.mappableRows.map((row) => row.site_id), ['US-MapB']);
   assert.equal(mapState.selectedRows.length, 0);
+});
+
+test('Selection state is kept separate from marker category styling', () => {
+  const filteredRows = [
+    makeCatalogRow({
+      site_id: 'US-StyleA',
+      latitude: '38.1',
+      longitude: '-120.2',
+      _selection_key: 'US-StyleA::ICOS'
+    })
+  ];
+  const selectedState = hooks.buildMapDisplayState(filteredRows, {
+    'US-StyleA::ICOS': true
+  });
+
+  assert.deepEqual(selectedState.selectedRows.map((row) => row.site_id), ['US-StyleA']);
+  assert.equal(Object.prototype.hasOwnProperty.call(selectedState.mappableRows[0], 'is_map_selected'), false);
+  assert.equal(selectedState.signature, hooks.buildMapDisplayState(filteredRows, {}).signature);
 });
 
 test('Merge precedence is Shuttle > ICOS > AmeriFlux > FLUXNET2015 with no duplicates', () => {
