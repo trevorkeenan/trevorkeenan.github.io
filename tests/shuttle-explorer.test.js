@@ -2750,6 +2750,38 @@ test('Reset filters button renders inside the map action group beside reset map 
   assert.equal(explorerCss.includes('.shuttle-explorer__filter-actions'), false);
 });
 
+test('Reset filters synchronizes visible multiselect state without resetting the map view', () => {
+  const explorerJs = fs.readFileSync(path.join(__dirname, '..', 'assets', 'shuttle-explorer.js'), 'utf8');
+  const syncStart = explorerJs.indexOf('Explorer.prototype.syncMultiSelectFilterControl');
+  const applyStart = explorerJs.indexOf('Explorer.prototype.applyMultiSelectFilter');
+  const applyEnd = explorerJs.indexOf('Explorer.prototype.bindMultiSelectFilter', applyStart);
+  const resetStart = explorerJs.indexOf('Explorer.prototype.resetFilters');
+  const resetEnd = explorerJs.indexOf('Explorer.prototype.getSelectedRows', resetStart);
+  const mapResetStart = explorerJs.indexOf('Explorer.prototype.resetMapView');
+  const mapResetEnd = explorerJs.indexOf('Explorer.prototype.buildMapPopupHtml', mapResetStart);
+  const syncSegment = explorerJs.slice(syncStart, applyStart);
+  const applySegment = explorerJs.slice(applyStart, applyEnd);
+  const resetSegment = explorerJs.slice(resetStart, resetEnd);
+  const mapResetSegment = explorerJs.slice(mapResetStart, mapResetEnd);
+
+  assert.notEqual(syncStart, -1);
+  assert.notEqual(applyStart, -1);
+  assert.notEqual(resetStart, -1);
+  assert.notEqual(mapResetStart, -1);
+  assert.equal(syncSegment.includes('input.checked = !!selectedLookup[String(input.value || "")];'), true);
+  assert.equal(syncSegment.includes('allInput.checked = selected.length === 0;'), true);
+  assert.equal(syncSegment.includes('summary.textContent = filterSelectionLabel(selected, optionList, allLabel, pluralLabel);'), true);
+  assert.equal(syncSegment.includes('summary.title = summary.textContent;'), true);
+  assert.equal(applySegment.includes('this.syncMultiSelectFilterControl(container);'), true);
+  assert.equal(resetSegment.includes('this.state.selectedSources = [];'), true);
+  assert.equal(resetSegment.includes('this.state.selectedVegetations = [];'), true);
+  assert.equal(resetSegment.includes('this.syncMultiSelectFilterControls();'), true);
+  assert.equal(resetSegment.includes('this.syncMinimumYearsFilterControl();'), true);
+  assert.equal(resetSegment.includes('this.syncYearRangeFilterControl(false);'), true);
+  assert.equal(mapResetSegment.includes('this.resetFilters()'), false);
+  assert.equal(mapResetSegment.includes('syncMultiSelectFilterControls'), false);
+});
+
 test('Duplicated external Showing X of Y site summary copy is no longer rendered', () => {
   const explorerJs = fs.readFileSync(path.join(__dirname, '..', 'assets', 'shuttle-explorer.js'), 'utf8');
 

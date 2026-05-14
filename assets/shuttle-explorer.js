@@ -6330,6 +6330,61 @@
     }).filter(Boolean);
   };
 
+  Explorer.prototype.syncMultiSelectFilterControl = function (container) {
+    var filterKey = container ? String(container.getAttribute("data-filter-key") || "") : "";
+    var allLabel = container ? String(container.getAttribute("data-all-label") || "All") : "All";
+    var pluralLabel = container ? String(container.getAttribute("data-plural-label") || "items") : "items";
+    var inputs;
+    var optionList;
+    var selected;
+    var selectedLookup = {};
+    var allInput;
+    var summary;
+    if (!container || !filterKey) {
+      return;
+    }
+    inputs = qsa(container, "input[data-role='multi-option']");
+    optionList = inputs.map(function (input) {
+      var label = input.parentNode && input.parentNode.querySelector
+        ? input.parentNode.querySelector(".shuttle-explorer__multi-option-label")
+        : null;
+      return {
+        value: String(input.value || ""),
+        label: label ? String(label.textContent || input.value || "") : String(input.value || "")
+      };
+    }).filter(function (option) {
+      return !!option.value;
+    });
+    selected = normalizeFilterSelection(this.state[filterKey]);
+    if (optionList.length) {
+      selected = pruneFilterSelection(selected, optionList.map(function (option) {
+        return option.value;
+      }));
+      this.setMultiFilterSelection(filterKey, selected);
+    }
+    selected.forEach(function (value) {
+      selectedLookup[value] = true;
+    });
+    inputs.forEach(function (input) {
+      input.checked = !!selectedLookup[String(input.value || "")];
+    });
+    allInput = bySelector(container, "[data-role='multi-all']");
+    if (allInput) {
+      allInput.checked = selected.length === 0;
+    }
+    summary = bySelector(container, "[data-role='multi-summary']");
+    if (summary) {
+      summary.textContent = filterSelectionLabel(selected, optionList, allLabel, pluralLabel);
+      summary.title = summary.textContent;
+    }
+  };
+
+  Explorer.prototype.syncMultiSelectFilterControls = function () {
+    this.getMultiFilterContainers().forEach(function (container) {
+      this.syncMultiSelectFilterControl(container);
+    }, this);
+  };
+
   Explorer.prototype.applyMultiSelectFilter = function (container, shouldTrack) {
     var filterKey = container ? String(container.getAttribute("data-filter-key") || "") : "";
     var trackLabel = container ? String(container.getAttribute("data-track-label") || filterKey) : filterKey;
@@ -6338,6 +6393,7 @@
       return;
     }
     selected = this.setMultiFilterSelection(filterKey, this.optionValuesFromMultiSelect(container));
+    this.syncMultiSelectFilterControl(container);
     this.state.page = 1;
     this.updateDerivedState();
     this.render();
@@ -6389,8 +6445,6 @@
 
   Explorer.prototype.populateMultiSelectFilter = function (container, options) {
     var filterKey = container ? String(container.getAttribute("data-filter-key") || "") : "";
-    var allLabel = container ? String(container.getAttribute("data-all-label") || "All") : "All";
-    var pluralLabel = container ? String(container.getAttribute("data-plural-label") || "items") : "items";
     var optionList = (options || []).map(function (option) {
       if (option && typeof option === "object") {
         return {
@@ -6409,43 +6463,33 @@
       return option.value;
     });
     var selected;
-    var allInput;
     var optionsWrap;
-    var summary;
     if (!container || !filterKey) {
       return;
     }
     selected = pruneFilterSelection(this.state[filterKey], optionValues);
     this.setMultiFilterSelection(filterKey, selected);
-    allInput = bySelector(container, "[data-role='multi-all']");
     optionsWrap = bySelector(container, "[data-role='multi-options']");
-    summary = bySelector(container, "[data-role='multi-summary']");
-    if (allInput) {
-      allInput.checked = selected.length === 0;
+    if (optionsWrap) {
+      optionsWrap.innerHTML = "";
+      optionList.forEach(function (option) {
+        var label = document.createElement("label");
+        var input = document.createElement("input");
+        var text = document.createElement("span");
+        label.className = "shuttle-explorer__multi-option";
+        text.className = "shuttle-explorer__multi-option-label";
+        input.type = "checkbox";
+        input.value = option.value;
+        input.checked = selected.indexOf(option.value) !== -1;
+        input.setAttribute("data-role", "multi-option");
+        text.textContent = option.label;
+        text.title = option.label;
+        label.appendChild(input);
+        label.appendChild(text);
+        optionsWrap.appendChild(label);
+      });
     }
-    if (summary) {
-      summary.textContent = filterSelectionLabel(selected, optionList, allLabel, pluralLabel);
-    }
-    if (!optionsWrap) {
-      return;
-    }
-    optionsWrap.innerHTML = "";
-    optionList.forEach(function (option) {
-      var label = document.createElement("label");
-      var input = document.createElement("input");
-      var text = document.createElement("span");
-      label.className = "shuttle-explorer__multi-option";
-      text.className = "shuttle-explorer__multi-option-label";
-      input.type = "checkbox";
-      input.value = option.value;
-      input.checked = selected.indexOf(option.value) !== -1;
-      input.setAttribute("data-role", "multi-option");
-      text.textContent = option.label;
-      text.title = option.label;
-      label.appendChild(input);
-      label.appendChild(text);
-      optionsWrap.appendChild(label);
-    });
+    this.syncMultiSelectFilterControl(container);
   };
 
 	  Explorer.prototype.findLinkedTableRow = function (target) {
@@ -7231,6 +7275,7 @@
       this.bindings.search.value = "";
     }
     this.closeMultiSelects();
+    this.syncMultiSelectFilterControls();
     this.syncMinimumYearsFilterControl();
     this.syncYearRangeFilterControl(false);
 
