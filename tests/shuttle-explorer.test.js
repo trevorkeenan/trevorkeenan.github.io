@@ -449,7 +449,7 @@ test('Known-sites map copy uses the simplified popup text and visual legend labe
   assert.equal(explorerJs.includes('filtered accessible-data sites'), true);
   assert.equal(explorerJs.includes('data-site-key'), true);
   assert.equal(explorerJs.includes('handleMapMarkerLinkClick'), true);
-  assert.equal(explorerJs.includes('without shared data.'), true);
+  assert.equal(explorerJs.includes('without shared data.'), false);
   assert.equal(explorerJs.includes('Is your site missing? Email'), true);
   assert.equal(explorerJs.includes('href=\\"mailto:trevorkeenan@berkeley.edu\\"'), true);
   assert.equal(explorerCss.includes('.shuttle-explorer__map-actions {'), true);
@@ -841,8 +841,9 @@ test('Map summary is stable across selection changes and always includes the mis
   const selectedHtml = hooks.buildMapSummaryHtml(selected, knownState, true);
 
   assert.equal(unselectedHtml, selectedHtml);
-  assert.equal(unselectedHtml.includes('Showing 1 accessible-data site on the map.'), true);
-  assert.equal(unselectedHtml.includes('Background layer: 2 known flux sites, including 1 site with accessible data and 1 other known site without shared data.'), true);
+  assert.equal(unselectedHtml.includes('Showing 1 site with accessible data on the map.'), true);
+  assert.equal(unselectedHtml.includes('Background layer: 2 known flux sites, including 1 site with accessible data.'), true);
+  assert.equal(unselectedHtml.includes('other known site without shared data'), false);
   assert.equal(unselectedHtml.includes('Is your site missing? Email'), true);
 });
 
@@ -862,9 +863,37 @@ test('Map summary labels narrowed foreground counts separately from stable backg
   ], {});
   const html = hooks.buildMapSummaryHtml(narrowed, knownState, true);
 
-  assert.equal(html.includes('Showing 1 filtered accessible-data site on the map.'), true);
-  assert.equal(html.includes('Background layer: 4 known flux sites, including 3 sites with accessible data and 1 other known site without shared data.'), true);
+  assert.equal(html.includes('Showing 1 filtered site with accessible data on the map.'), true);
+  assert.equal(html.includes('Background layer: 4 known flux sites, including 3 sites with accessible data.'), true);
+  assert.equal(html.includes('other known site without shared data'), false);
   assert.equal(html.includes('Is your site missing? Email'), true);
+});
+
+test('Map summary uses accessible-data wording without inferred known-only counts', () => {
+  const knownState = {
+    totalCount: 5,
+    accessibleCount: 3,
+    knownSiteOnlyCount: 2
+  };
+  const unfilteredHtml = hooks.buildMapSummaryHtml({
+    filteredRows: [{}, {}, {}],
+    mappableRows: [{}, {}, {}],
+    missingCoordinates: 0
+  }, knownState, true);
+  const filteredHtml = hooks.buildMapSummaryHtml({
+    filteredRows: [{}, {}],
+    mappableRows: [{}, {}],
+    missingCoordinates: 0
+  }, knownState, true);
+
+  assert.equal(unfilteredHtml.includes('Showing 3 sites with accessible data on the map.'), true);
+  assert.equal(filteredHtml.includes('Showing 2 filtered sites with accessible data on the map.'), true);
+  assert.equal(unfilteredHtml.includes('Background layer: 5 known flux sites, including 3 sites with accessible data.'), true);
+  assert.equal(filteredHtml.includes('Background layer: 5 known flux sites, including 3 sites with accessible data.'), true);
+  assert.equal(unfilteredHtml.includes('other known sites without shared data'), false);
+  assert.equal(filteredHtml.includes('other known sites without shared data'), false);
+  assert.equal(unfilteredHtml.includes('Is your site missing? Email'), true);
+  assert.equal(filteredHtml.includes('Is your site missing? Email'), true);
 });
 
 test('Merge precedence is Shuttle > ICOS > AmeriFlux > FLUXNET2015 with no duplicates', () => {

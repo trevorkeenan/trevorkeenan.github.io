@@ -7544,26 +7544,29 @@
     var mappableCount = displayState && displayState.mappableRows ? displayState.mappableRows.length : 0;
     var missingCount = displayState && displayState.missingCoordinates ? displayState.missingCoordinates : 0;
     var known = knownState || {};
-    var foregroundLabel = knownOverlayEnabled && known.accessibleCount && filteredCount === known.accessibleCount
-      ? "accessible-data"
-      : "filtered accessible-data";
+    var foregroundIsFiltered = !(knownOverlayEnabled && known.accessibleCount && filteredCount === known.accessibleCount);
+    var foregroundLabel = (foregroundIsFiltered ? "filtered " : "") +
+      (filteredCount === 1 ? "site" : "sites") + " with accessible data";
     var foregroundLine;
     var backgroundLine = "";
     if (!filteredCount) {
-      foregroundLine = "No filtered accessible-data sites to show on the map.";
+      foregroundLine = "No filtered sites with accessible data to show on the map.";
     } else if (!mappableCount) {
-      foregroundLine = filteredCount + " " + foregroundLabel + " " + (filteredCount === 1 ? "site is" : "sites are") + " missing map coordinates.";
+      foregroundLine = filteredCount + " " + foregroundLabel + " " + (filteredCount === 1 ? "is" : "are") + " missing map coordinates.";
     } else {
-      foregroundLine = "Showing " + mappableCount + " " + foregroundLabel + " " + (mappableCount === 1 ? "site" : "sites") + " on the map.";
+      foregroundLabel = (foregroundIsFiltered ? "filtered " : "") +
+        (mappableCount === 1 ? "site" : "sites") + " with accessible data";
+      foregroundLine = "Showing " + mappableCount + " " + foregroundLabel + " on the map.";
       if (missingCount) {
-        foregroundLine += " " + missingCount + " " + foregroundLabel + " " + (missingCount === 1 ? "site was" : "sites were") + " omitted because coordinates are unavailable.";
+        foregroundLabel = (foregroundIsFiltered ? "filtered " : "") +
+          (missingCount === 1 ? "site" : "sites") + " with accessible data";
+        foregroundLine += " " + missingCount + " " + foregroundLabel + " " + (missingCount === 1 ? "was" : "were") + " omitted because coordinates are unavailable.";
       }
     }
     if (knownOverlayEnabled && known.totalCount) {
       backgroundLine = "Background layer: " + known.totalCount + " known flux " + (known.totalCount === 1 ? "site" : "sites") +
         ", including " + known.accessibleCount + " " + (known.accessibleCount === 1 ? "site" : "sites") +
-        " with accessible data and " + known.knownSiteOnlyCount + " other known " + (known.knownSiteOnlyCount === 1 ? "site" : "sites") +
-        " without shared data.";
+        " with accessible data.";
     }
     return [
       escapeHtml(foregroundLine),
@@ -7635,7 +7638,7 @@
     if (!displayState.filteredRows.length && !knownDisplayState.totalCount) {
       message = this.state.knownSiteOverlayEnabled
         ? (this.state.knownSiteMapWarning || "Known-sites map layer is unavailable.")
-        : "No filtered accessible-data sites to show on the map.";
+        : "No filtered sites with accessible data to show on the map.";
     } else if (!displayState.mappableRows.length) {
       if (displayState.filteredRows.length) {
         message = "The filtered sites do not include map coordinates in the current metadata snapshot.";
