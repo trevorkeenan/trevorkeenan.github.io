@@ -2,8 +2,11 @@ name: Update FLUXNET Explorer Snapshots
 
 "on":
   workflow_dispatch:
-  schedule:
-    - cron: "17 5 * * *"
+
+# The canonical scheduled snapshot refresh now lives in
+# trevorkeenan/fluxnet-data-explorer. Keep this website workflow manual-only for
+# emergency website recovery, and back-port any emergency changes to the
+# canonical repository before the next release.
 
 permissions:
   contents: write

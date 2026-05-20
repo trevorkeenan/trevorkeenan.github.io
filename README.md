@@ -1,8 +1,14 @@
 # trevorkeenan.github.io
 
+## FLUXNET Data Explorer deployment note
+
+The canonical source, release, Zenodo DOI, refresh, and GitHub Pages hosting repository for the FLUXNET Data Explorer is https://github.com/trevorkeenan/fluxnet-data-explorer. The preferred live Explorer URL is https://www.keenangroup.info/fluxnet-data-explorer/.
+
+This website repository should keep only the legacy compatibility page at `fluxnet-explorer.html`, pointing users to the standalone Explorer. Do not edit or maintain Explorer app code, manifests, snapshots, release metadata, or citation metadata here.
+
 ## FLUXNET explorer snapshot automation
 
-This repo includes a GitHub Actions workflow at `.github/workflows/update-shuttle-snapshot.yml` that refreshes committed FLUXNET explorer metadata artifacts daily (UTC) and on manual dispatch.
+This repo includes a legacy GitHub Actions workflow at `.github/workflows/update-shuttle-snapshot.yml` that can refresh committed FLUXNET explorer metadata artifacts on manual dispatch. The scheduled snapshot refresh now belongs in the canonical `trevorkeenan/fluxnet-data-explorer` repository so the website copy does not drift independently.
 
 - Output files:
   - `assets/shuttle_snapshot.csv`
@@ -20,9 +26,11 @@ This repo includes a GitHub Actions workflow at `.github/workflows/update-shuttl
 - JSON format: compact browser payload with normalized `snake_case` column names (`{"columns":[...],"rows":[...]}`), keeping key discovery/download fields including explicit `processing_lineage`
 - Safety behavior: the workflow only stages/commits the generated snapshot files. Shuttle refreshes now validate each source hub against the previously published snapshot and carry forward the last known good per-source rows when a hub refresh is empty, malformed, or suspiciously incomplete instead of publishing a degraded manifest
 
-This supports a no-backend GitHub Pages setup where the site reads stable snapshot paths directly.
+Routine no-backend GitHub Pages hosting for the Explorer now happens from `trevorkeenan/fluxnet-data-explorer`.
 
-## Source integration
+## Historical Explorer Source Integration Notes
+
+The notes below describe the former website-hosted Explorer implementation and are retained only for historical or emergency maintenance reference. Current Explorer source, tests, manifests, refreshes, releases, and citation metadata live in `trevorkeenan/fluxnet-data-explorer`.
 
 The explorer now merges seven effective source layers:
 

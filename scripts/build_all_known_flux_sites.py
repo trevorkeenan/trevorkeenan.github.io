@@ -29,7 +29,7 @@ except ImportError:  # pragma: no cover - Babel is available in the current envi
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_EXTERNAL_DIR = Path("/Users/trevorkeenan/Climate Dropbox/Trevor Keenan/24.explorerDocs")
+DEFAULT_EXTERNAL_DIR = REPO_ROOT / "external_site_lists"
 
 EMPTY_TOKENS = {"", "na", "n/a", "null", "-", ".", "--", "none"}
 STRICT_COORDINATE_TOLERANCE = 0.02
@@ -468,6 +468,7 @@ def build_country_lookups() -> tuple[dict[str, str], dict[str, str]]:
                 name_to_code[normalize_name_key(display)] = code
 
     aliases = {
+        "argentina": "AR",
         "usa": "US",
         "u s a": "US",
         "u s": "US",
@@ -492,6 +493,8 @@ def build_country_lookups() -> tuple[dict[str, str], dict[str, str]]:
         "palestine": "PS",
         "vatican city": "VA",
     }
+    code_to_name["AR"] = "Argentina"
+    code_to_name["TW"] = "Taiwan"
     code_to_name["UK"] = "United Kingdom"
     code_to_name["GB"] = "United Kingdom"
     name_to_code.update(aliases)
@@ -1862,7 +1865,7 @@ def main() -> None:
     repo_root = Path(args.repo_root).resolve()
     external_dir = Path(args.external_dir).resolve()
     if not external_dir.exists():
-        raise FileNotFoundError(f"External directory not found: {external_dir}")
+        print(f"External site-list directory not found; using repository sources only: {external_dir}")
 
     result = build_catalog(repo_root, external_dir)
 
