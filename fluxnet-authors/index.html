@@ -89,20 +89,31 @@
   <main aria-labelledby="page-title">
     <p class="brand">Keenan Group</p>
     <h1 id="page-title">FLUXNET authorship nomination</h1>
-    <p>You are being redirected to the FLUXNET authorship nomination form.</p>
-    <a class="button" id="continue-link" href="https://script.google.com/macros/s/AKfycbxgpY4eafo9qU0-V4Smei_TDI4c97a9R3Fw4YHB6f4jl5UQaQH0LDNvL_95bWKJqL7c/exec">Continue to nomination form</a>
+    <p id="page-lede">You are being redirected to the FLUXNET authorship nomination form.</p>
+    <a class="button" id="continue-link" href="https://script.google.com/macros/s/AKfycbwOaI4Ehfnex7ETJKGXLcrw6Sy3y-8OnvjCFOK00AWY22pjJVp_yPNqN38snKipAWui/exec">Continue to nomination form</a>
   </main>
 
   <script>
     (function () {
       // APPS_SCRIPT_BASE must be the deployed Apps Script web app /exec URL, not /dev, an editor URL, Drive, Forms, Sheets, Docs, or googleusercontent URL.
-      var APPS_SCRIPT_BASE = "https://script.google.com/macros/s/AKfycbxgpY4eafo9qU0-V4Smei_TDI4c97a9R3Fw4YHB6f4jl5UQaQH0LDNvL_95bWKJqL7c/exec";
+      // MIGRATION STEP: after the SPA deployment exists, replace this with its /exec URL and publish this page
+      // BEFORE any mail is sent from the new project. Both link types below route through here, so a future
+      // redeployment only requires changing this one value.
+      var APPS_SCRIPT_BASE = "https://script.google.com/macros/s/AKfycbwOaI4Ehfnex7ETJKGXLcrw6Sy3y-8OnvjCFOK00AWY22pjJVp_yPNqN38snKipAWui/exec";
       var params = new URLSearchParams(window.location.search);
-      var siteToken = params.get("site_token");
       var destination = new URL(APPS_SCRIPT_BASE);
+
+      // Only these two named tokens are ever forwarded. No arbitrary destination parameter is accepted.
+      var siteToken = params.get("site_token");
+      var authorToken = params.get("author_token");
 
       if (siteToken) {
         destination.searchParams.set("site_token", siteToken);
+      } else if (authorToken) {
+        destination.searchParams.set("author_token", authorToken);
+        document.getElementById("page-title").textContent = "FLUXNET author confirmation";
+        document.getElementById("page-lede").textContent = "You are being redirected to the FLUXNET author confirmation form.";
+        document.getElementById("continue-link").textContent = "Continue to confirmation form";
       }
 
       var destinationUrl = destination.toString();
