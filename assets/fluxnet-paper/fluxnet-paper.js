@@ -8,6 +8,8 @@
 
 	var DATA = combineData(window.FLUXNET_PAPER_SITES, window.FLUXNET_PAPER_PROGRESS);
 	var LAND_URL = "https://cdn.jsdelivr.net/npm/world-atlas@2.0.2/land-110m.json";
+	var PROGRESS_URL = "assets/fluxnet-paper/progress.js";
+	var REFRESH_GAP_MS = 5 * 60 * 1000;
 	var COORDINATION_EMAIL = "fluxnet_coordination@berkeley.edu";
 	var EXTRA_AUTHORS = "10–20";
 	var MAP_LATITUDES = [-58, 84]; // crops Antarctica and the high Arctic, where there are no sites
@@ -17,6 +19,7 @@
 	var networkByCode = {};
 	var selectedNetwork = null;
 	var mapState = null;
+	var lastRefresh = 0;
 	var landPromise = null;
 	var colors = {};
 
@@ -221,7 +224,9 @@
 			host.appendChild(button);
 		});
 
-		document.getElementById("fxp-network-table").appendChild(dataTable(
+		var tableHost = document.getElementById("fxp-network-table");
+		tableHost.textContent = "";
+		tableHost.appendChild(dataTable(
 			["Network", "Sites", "Author places", "Invited", "Nominated"],
 			DATA.networks.map(function (n) { return [n.name, n.sites, n.places, n.invited, n.nominated]; })
 		));
@@ -591,6 +596,52 @@
 		update();
 	}
 
+	/* Fresh counts. The site serves files with a four-hour cache lifetime, so the progress.js loaded by
+	   the page's script tag can be an old copy. It renders at once; this then asks the server whether a
+	   newer file exists (usually a small "not modified" reply) and redraws the counts if so. */
+
+	function refreshProgress() {
+		if (!window.fetch || Date.now() - lastRefresh < REFRESH_GAP_MS) return;
+		lastRefresh = Date.now();
+		fetch(PROGRESS_URL, { cache: "no-cache" })
+			.then(function (response) {
+				if (!response.ok) throw new Error("HTTP " + response.status);
+				return response.text();
+			})
+			.then(function (text) {
+				var progress = parseProgress(text);
+				if (progress && progress.updated_at !== (DATA.hasProgress ? DATA.snapshot_at : null)) {
+					window.FLUXNET_PAPER_PROGRESS = progress;
+					DATA = combineData(window.FLUXNET_PAPER_SITES, progress);
+					renderProgressViews();
+				}
+			})
+			.catch(function (error) {
+				console.warn("FLUXNET page: could not check for newer counts (" + error.message + ")");
+			});
+	}
+
+	function parseProgress(text) {
+		var match = /window\.FLUXNET_PAPER_PROGRESS\s*=\s*([\s\S]*?);\s*$/.exec(String(text));
+		if (!match) return null;
+		try {
+			var progress = JSON.parse(match[1]);
+			return progress && progress.totals && progress.networks && progress.updated_at ? progress : null;
+		} catch (error) {
+			return null;
+		}
+	}
+
+	/* Everything that depends on the counts; the map, rubric and site list do not. */
+	function renderProgressViews() {
+		hideTooltip();
+		renderTotals();
+		renderNetworks();
+		renderNotes();
+		if (window.d3) renderTimeline();
+		selectNetwork(selectedNetwork);
+	}
+
 	/* Boot */
 
 	function renderCharts() {
@@ -630,6 +681,12 @@
 				hideTooltip();
 				renderCharts();
 			}, 150);
+		});
+
+		refreshProgress();
+		// A tab left open for hours picks up new counts when the reader comes back to it.
+		document.addEventListener("visibilitychange", function () {
+			if (document.visibilityState === "visible") refreshProgress();
 		});
 	}
 
