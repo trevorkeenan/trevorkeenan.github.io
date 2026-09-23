@@ -169,7 +169,7 @@
 		status.appendChild(document.createTextNode("."));
 
 		document.getElementById("fxp-about-places").textContent = "The " + fmt(t.places) +
-			" author places add up each site's allocation from the table above. The paper will also include " +
+			" co-author slots add up each site's allocation from the table above. The paper will also include " +
 			EXTRA_AUTHORS + " authors from the data-processing and writing teams.";
 
 		var territories = DATA.territories || [];
@@ -205,7 +205,7 @@
 
 			var name = el("span", "fxp-net-name");
 			name.appendChild(el("strong", null, n.name));
-			name.appendChild(el("span", null, fmt(n.sites) + " sites · " + fmt(n.places) + " places"));
+			name.appendChild(el("span", null, fmt(n.sites) + " sites · " + fmt(n.places) + " co-author slots"));
 
 			var bar = el("span", "fxp-net-bar");
 			fillStages(bar, n.nominated, n.invited, n.sites);
@@ -227,7 +227,7 @@
 		var tableHost = document.getElementById("fxp-network-table");
 		tableHost.textContent = "";
 		tableHost.appendChild(dataTable(
-			["Network", "Sites", "Author places", "Invited", "Nominated"],
+			["Network", "Sites", "Co-author slots", "Invited", "Nominated"],
 			DATA.networks.map(function (n) { return [n.name, n.sites, n.places, n.invited, n.nominated]; })
 		));
 	}
@@ -520,7 +520,7 @@
 		var r = DATA.rubric;
 		var table = document.getElementById("fxp-rubric");
 		table.textContent = "";
-		table.appendChild(el("caption", "fxp-vh", "Author places per site, by years of data submitted and most recent year of data"));
+		table.appendChild(el("caption", "fxp-vh", "Author slots per site, by years of data submitted and most recent year of data"));
 		var head = table.createTHead();
 		var top = head.insertRow();
 		var corner = el("th", null, "Years of data");
